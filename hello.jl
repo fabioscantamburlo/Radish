@@ -1,41 +1,29 @@
-
 using Dates
+include("Radish.jl")
+using .Radish
 
-println("Hello world")
-
-mutable struct RadishElement
-    key::String
-    value::Any
-    ttl::Int128
-    tinit:: DateTime
-end
+println("---- New Run ----")
 
 radish_context = Dict{String, RadishElement}()
 
-function get_or_expire!(context::Dict{String, RadishElement}, key::String)
-    if haskey(context, key)
-        element = context[key]
+RadishElement("user1", 1, nothing, now())
+radd!(radish_context, "user1", sadd("user1", 1, nothing))
+radd!(radish_context, "user2", sadd("user2", 2, nothing))
+radd!(radish_context, "user3", sadd("user3", "ciao", nothing))
+radd!(radish_context, "user4", sadd("user4", "pippo", nothing))
+a = rget_or_expire!(radish_context, "user1", sget)
+b = rget_or_expire!(radish_context, "user2", sget)
+c = rget_or_expire!(radish_context, "user3", sget)
+println(a, b, c)
+mod1 = rmodify!(radish_context, "user3", slpad!, 10, "-")
+mod2 = rmodify!(radish_context, "user2", slpad!, 5, "-")
+mod2 = rmodify!(radish_context, "user4", srpad!, 20, "-")
+println(mod1)
+println(mod2)
 
-        if now() > element.tinit + Second(element.ttl)
-            println("Key '$key' has expired. Deleting.")
-            delete!(context, key)
-            return nothing
-        end
-        return element.value
-    end
-    return nothing
-end
-push!(radish_context, "user:101:credit" => RadishElement("user101:credit", 10, 10, now()))
-push!(radish_context, "user:102:credit" => RadishElement("user102:credit", 100, 20, now()))
-push!(radish_context, "user:103:credit" => RadishElement("user103:credit", 200, 30, now()))
-push!(radish_context, "user:104:credit" => RadishElement("user104:credit", 300, 40, now()))
-push!(radish_context, "user:105:credit" => RadishElement("user105:credit", 400, 1200, now()))
-
-
-# println(radish_context)
-
-a = get_or_expire!(radish_context, "user:101:credit")
-println(a)
-sleep(15)
-b = get_or_expire!(radish_context, "user:101:credit")
+c = rget_or_expire!(radish_context, "user3", sget)
+b = rget_or_expire!(radish_context, "user2", sget)
+f = rget_or_expire!(radish_context, "user4", sget)
+println(c)
 println(b)
+println(f)
