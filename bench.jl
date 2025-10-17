@@ -7,7 +7,7 @@ println("---- New Run ----")
 radish_context = Dict{String, RadishElement}()
 
 
-const NUM_ELEMENTS = 7_000_000
+const NUM_ELEMENTS = 1_000_000
 info_num = NUM_ELEMENTS/10
 
 radish_context = Dict{String, RadishElement}()
@@ -20,7 +20,7 @@ println("--- Starting Benchmark: Adding $NUM_ELEMENTS elements ---")
     for i in 1:NUM_ELEMENTS
         key = "user$i"
         # For this test, the value is just the number 'i'. No expiration is set.
-        radd!(radish_context, key, sadd(key, i, 1))
+        radd!(radish_context, key, sadd(key, string(i), 4))
 
         # Print progress without slowing down the loop too much
         if i % info_num == 0
@@ -46,6 +46,24 @@ println("--- Starting Benchmark: Retrieving $NUM_ELEMENTS elements ---")
 end
 
 println("\n--- Finished Retrieving. ---")
+
+
+println("--- Starting Benchmark: Rpad $NUM_ELEMENTS elements ---")
+
+# Use @time to measure the execution time and memory allocation of this block.
+@time begin
+    for i in 1:NUM_ELEMENTS
+        key = "user$i"
+        # For this test, the value is just the number 'i'. No expiration is set.
+        # radd!(radish_context, key, sadd(key, i, 1))
+        rmodify!(radish_context, key, srpad!, 10, "_")
+        # Print progress without slowing down the loop too much
+        if i % info_num == 0
+            println("... RightPadding $i elements ...")
+        end
+    end
+end
+
 
 # Example of retrieving a few specific values, just like in your example
 println("\n--- Final check of specific users ---")
