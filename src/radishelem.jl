@@ -23,6 +23,10 @@ function rget_or_expire!(context::Dict{String, RadishElement}, key::String, comm
     return nothing
 end
 
+# TODO evaluate if radd! should accept a function to create radishelement and not the radish element itself
+# in that case we could do something like
+# radd!(radish_context, "user1", sadd("user1", 1, nothing)) -> radd!(radish_context, "user1", sadd, "user1", 1, nothing)
+# that maybe easier to bind with RadishCli
 function radd!(context::Dict{String, RadishElement}, key::String, elem::RadishElement)
     if haskey(context, key)
         println("Element at key '$key' already present")
