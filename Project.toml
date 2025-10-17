@@ -1,0 +1,7 @@
+name = "Radish"
+uuid = "12345678-1234-1234-1234-123456789abc"
+authors = ["Fabio Scantamburlo"]
+version = "0.1.0"
+
+[deps]
+Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
