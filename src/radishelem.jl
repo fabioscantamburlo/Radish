@@ -1,6 +1,7 @@
 using Dates
 
 # Base struct of the RadishElement
+# TODO optimise ttl and tinit in a single tuple ttl{(int, datetime), Nothin}
 mutable struct RadishElement
     key::String
     value::Any
