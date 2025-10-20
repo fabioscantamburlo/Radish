@@ -1,0 +1,101 @@
+# String implementation for the Radish in-memory datatype
+using .Radish
+using Dates
+
+function show_help()
+    println("""
+    
+    --- Radish Program Help (Julia) ---
+    Available commands:
+    PING            - Check if the program is responsive.
+    HELP            - Show this help message.
+    EXIT            - Close the application.
+    KLIST           - Show keys stored in the application.
+
+    
+    """)
+end
+
+function do_radish_work!(radish_context, command, args...)
+    key = args[1]
+    other_args = args[1:end]
+    # Support only strings at the moment
+    if haskey(S_PALETTE, command)
+        println("Executing command: '$command', Key: '$key', Args: '$other_args'")
+        type_command, hypercommand = S_PALETTE[command]
+        ret = hypercommand(radish_context, key, type_command, other_args...)
+        return ret
+    else
+        println("Unknown command: '$command'")
+        return false
+    end
+
+end
+
+"""
+Starts the main application loop.
+"""
+function main_loop()
+    println("🌱 Welcome to the Radish Program (Julia)!")
+    println("Type 'help' for commands or 'exit'")
+    println("Initializing Radish In-memory database...")
+    radish_context = Dict{String, RadishElement}()
+    try
+        # This is the main REPL loop
+        while true
+            print("RADISH-CLI> ") # Print the prompt
+            
+            # Read a line of input from the user
+            line = readline()
+            
+            # Sanitize the input
+            line = strip(line)
+            if isempty(line)
+                continue # User just hit Enter, loop again
+            end
+            
+            # Split the line into a command and arguments
+            parts = split(line, ' ')
+            command = parts[1]
+            args = parts[2:end]
+
+            if command == "PING"
+                println("🏓 Pong!")
+                
+            elseif command == "HELP"
+                show_help()
+                
+            elseif command == "EXIT"
+                println("\nRadish has been harvested. Goodbye! 👋")
+                break # Exit the 'while true' loop
+            elseif command == "KLIST"
+                println(rlistkeys(radish_context, args...))
+                
+
+            elseif haskey(S_PALETTE, command)
+                @async begin
+                    try
+                        ret_value = do_radish_work!(radish_context, command, args...)
+                        println("\n✅ Command '$command' succeeded.")
+                        println("   Result: '$ret_value'")
+
+                    catch e
+                        println("\n❌ Command '$command' failed.")
+                        println("   Error: $e")
+                    end
+                    print("RADISH-CLI> ")
+                end
+
+            else
+                println("Unknown command: '$command'. Type 'help' for a list.")
+            end
+        end
+    catch e
+        # Handle the user pressing Ctrl+C
+        if isa(e, InterruptException)
+            println("\nCaught interrupt. Exiting gracefully. Goodbye! 👋")
+        else
+            println("\nAn unexpected error occurred: '$e")
+        end
+    end
+end
