@@ -66,7 +66,7 @@ function srpad!(elem::RadishElement, len::AbstractString, pad_value::AbstractStr
     if isa(value_len, Nothing)
         value_len = len
     end
-    if isa(elem.value, String)
+    if isa(elem.value, AbstractString)
         elem.value = rpad(elem.value, value_len, pad_value)
         return true
     end
@@ -79,7 +79,6 @@ function slpad!(elem::RadishElement, len::AbstractString, pad_value::AbstractStr
     if isa(value_len, Nothing)
         value_len = len
     end
-    println(elem.value)
     if isa(elem.value, AbstractString)
         elem.value = lpad(elem.value, value_len, pad_value)
         return true
