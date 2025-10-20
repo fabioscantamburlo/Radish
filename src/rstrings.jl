@@ -24,7 +24,6 @@ function sadd(key::AbstractString, value::AbstractString, ttl::Nothing)
         value_n = value
     end
     return RadishElement(key, value_n, ttl, now())
-    return RadishElement(key, value, ttl, now())
 end
 
 function sadd(key::AbstractString, value::AbstractString)
