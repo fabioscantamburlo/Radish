@@ -2,9 +2,18 @@ module Radish
 
 include(joinpath(@__DIR__, "src", "radishelem.jl"))
 include(joinpath(@__DIR__, "src", "rstrings.jl"))
+include(joinpath(@__DIR__, "src", "main_loop.jl"))
 
 
-export RadishElement, rmodify!, rget_or_expire!, rdelete!, radd!
+# Main loop
+export do_radish_work, show_help, main_loop
+# Functions of the Radish
+export RadishElement, rmodify!, rget_or_expire!, rdelete!, radd!, rlistkeys
+
+
+# Functions for the stringtype
 export sincr!, sincr_by!, sget, sadd, slpad!, srpad!
+# Const for stringtype
+export  S_PALETTE
 
 end # module Radish

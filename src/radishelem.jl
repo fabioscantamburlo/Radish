@@ -9,7 +9,7 @@ mutable struct RadishElement
 end
 
 # Base function to get RadishElement from the context
-function rget_or_expire!(context::Dict{String, RadishElement}, key::String, command::Function)
+function rget_or_expire!(context::Dict{String, RadishElement}, key::AbstractString, command::Function, args...)
     if haskey(context, key)
         element = context[key]
         # Check if ttl exist and it is expired
@@ -23,21 +23,19 @@ function rget_or_expire!(context::Dict{String, RadishElement}, key::String, comm
     return nothing
 end
 
-# TODO evaluate if radd! should accept a function to create radishelement and not the radish element itself
-# in that case we could do something like
+
 # radd!(radish_context, "user1", sadd("user1", 1, nothing)) -> radd!(radish_context, "user1", sadd, "user1", 1, nothing)
-# that maybe easier to bind with RadishCli
-function radd!(context::Dict{String, RadishElement}, key::String, elem::RadishElement)
+function radd!(context::Dict{String, RadishElement}, key::AbstractString, command::Function, args...)
     if haskey(context, key)
         println("Element at key '$key' already present")
         return false
     end
-    context[key] = elem
+    context[key] = command(args...)
     return true
 end
 
 # Base function to delete RadishElement from the context
-function rdelete!(context::Dict{String, RadishElement}, key::String)
+function rdelete!(context::Dict{String, RadishElement}, key::AbstractString)
     if haskey(context, key)
         delete!(context, key)
         return true
@@ -46,14 +44,31 @@ function rdelete!(context::Dict{String, RadishElement}, key::String)
 end
 
 # Base function to modify RadishElement from the context
-function rmodify!(context::Dict, key, command::Function, args...)
+function rmodify!(context::Dict, key::AbstractString, command::Function, args...)
+    # GET rid of key
+    args = args[2:end]
     if haskey(context, key)
         # Apply the command to the existing element to get the new one
         existing_element = context[key]
+        println("Modifying existing element '$existing_element' at key '$key")
+        println("PASSING ARGS '$args...'")
         ret_value = command(existing_element, args...)
         return ret_value
     end
     return false
 end
 
-# radish_context = Dict{String, RadishElement}()
+function rlistkeys(context::Dict, args...)
+    limit = args[1]
+    limit_s = tryparse(Int, limit)
+    if isa(limit_s, Nothing)
+        return rlistkeys(context)
+    end
+    key_iterator = collect(keys(context))
+    return first(key_iterator, limit_s)
+end
+function rlistkeys(context::Dict)
+
+    key_iterator = collect(keys(context))
+    return key_iterator
+end
