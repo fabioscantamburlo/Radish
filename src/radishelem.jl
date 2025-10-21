@@ -13,13 +13,15 @@ end
 function rget_or_expire!(context::Dict{String, RadishElement}, key::AbstractString, command::Function, args...)
     if haskey(context, key)
         element = context[key]
+        new_args = args[2:end]
         # Check if ttl exist and it is expired
         if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
             # println("Key '$key' has expired. Deleting.")
             delete!(context, key)
             return nothing
         end
-        return command(element)
+        println("Executing command '$command' with args '$new_args...'")
+        return command(element, new_args...)
     end
     return nothing
 end
@@ -54,6 +56,22 @@ function rmodify!(context::Dict, key::AbstractString, command::Function, args...
         println("Modifying existing element '$existing_element' at key '$key")
         println("PASSING ARGS '$args...'")
         ret_value = command(existing_element, args...)
+        return ret_value
+    end
+    return false
+end
+
+# Base function to compare Radish elements of the same type !!!!
+function rcompare(context::Dict, dummy::AbstractString, command::Function, args...)
+    keyright = args[1]
+    keyleft = args[2]
+    other_args = args[3:end]
+    println("Comparing existing elements keyleft='$keyleft' and keyright='$keyright")
+    println("PASSING ARGS '$args...'")
+    if haskey(context, keyleft) && haskey(context, keyright)
+        eleft = context[keyleft]
+        eright = context[keyright]
+        ret_value = command(eleft, eright, other_args...)
         return ret_value
     end
     return false

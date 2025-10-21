@@ -85,6 +85,41 @@ function slpad!(elem::RadishElement, len::AbstractString, pad_value::AbstractStr
     return false
 end
 
+#APPEND
+function sappend!(elem::RadishElement, value::AbstractString)
+    elem.value = elem.value * value
+    return true
+end
+
+#GETRANGE
+function sgetrange(elem::RadishElement, start_s::AbstractString, end_s::AbstractString)
+    start_s = tryparse(Int, start_s)
+    end_s = tryparse(Int, end_s)
+    
+    if isa(start_s, Nothing) or isa(end_s, Nothing)
+        return false
+    end
+    max_len = min(length(elem.value), end_s)
+    return sget(elem)[start_s:max_len]
+end
+
+#LENGHT
+function slen(elem::RadishElement)
+    return length(sget(elem))
+end
+
+# LCS Longest common subsequence
+function slcs(elemleft::RadishElement, elemright::RadishElement, args...)
+    return true
+
+end
+
+function sclen(elemleft::RadishElement, elemright::RadishElement, args...)
+    if length(elemleft.value) == length(elemright.value)
+        return true
+    end
+    return false
+end
 
 const S_PALETTE = Dict{String, Tuple}(
     "S_GET" => (sget, rget_or_expire!),
@@ -93,4 +128,9 @@ const S_PALETTE = Dict{String, Tuple}(
     "S_INCRBY" => (sincr_by!, rmodify!),
     "S_RPAD" => (srpad!, rmodify!),
     "S_LPAD" => (slpad!, rmodify!),
+    "S_APPEND" => (sappend!, rmodify!),
+    "S_GETRANGE" => (sgetrange, rget_or_expire!),
+    "S_LEN" => (slen, rget_or_expire!),
+    # "S_LCS" => (slcs, rcompare)
+    "S_COMPLEN" => (sclen, rcompare)
 )

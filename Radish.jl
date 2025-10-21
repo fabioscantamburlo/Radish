@@ -8,11 +8,11 @@ include(joinpath(@__DIR__, "src", "main_loop.jl"))
 # Main loop
 export do_radish_work, show_help, main_loop
 # Functions of the Radish
-export RadishElement, rmodify!, rget_or_expire!, rdelete!, radd!, rlistkeys
+export RadishElement, rmodify!, rget_or_expire!, rdelete!, radd!, rcompare, rlistkeys 
 
 
 # Functions for the stringtype
-export sincr!, sincr_by!, sget, sadd, slpad!, srpad!
+export sincr!, sincr_by!, sget, sadd, slpad!, srpad!, sappend!, sgetrange, slcs, sclen
 # Const for stringtype
 export  S_PALETTE
 

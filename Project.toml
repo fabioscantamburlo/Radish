@@ -1,7 +1,11 @@
 name = "Radish"
 uuid = "12345678-1234-1234-1234-123456789abc"
-authors = ["Fabio Scantamburlo"]
 version = "0.1.0"
+authors = ["Fabio Scantamburlo"]
 
 [deps]
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
+JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
+
+[compat]
+JuliaFormatter = "2.1.6"
