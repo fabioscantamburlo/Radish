@@ -23,20 +23,26 @@ mod2 = rmodify!(radish_context, "user4", srpad!, "user4",  "10", "-")
 println(mod1)
 println(mod2)
 
-c = rget_or_expire!(radish_context, "user3", sget)
-b = rget_or_expire!(radish_context, "user2", sget)
-f = rget_or_expire!(radish_context, "user4", sget)
-println(c)
-println(b)
-println(f)
 
-println(rlistkeys(radish_context, "50"))
-sleep(2)
+mod2 = rget_or_expire!(radish_context, "user4", sgetrange, "user4",  "1", "2")
 
-z = rget_or_expire!(radish_context, "user5", sget)
-println(z)
-println(rlistkeys(radish_context, "50"))
-println(radish_context)
+mod4 = rcompare(radish_context, "user4", slcs, "user4", "user3")
+println(mod4)
+
+# c = rget_or_expire!(radish_context, "user3", sget)
+# b = rget_or_expire!(radish_context, "user2", sget)
+# f = rget_or_expire!(radish_context, "user4", sget)
+# println(c)
+# println(b)
+# println(f)
+
+# println(rlistkeys(radish_context, "50"))
+# sleep(2)
+
+# z = rget_or_expire!(radish_context, "user5", sget)
+# println(z)
+# println(rlistkeys(radish_context, "50"))
+# println(radish_context)
 
 
 # 1. Create a Channel to communicate the result
