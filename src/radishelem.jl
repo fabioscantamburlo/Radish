@@ -66,7 +66,7 @@ function rcompare(context::Dict, dummy::AbstractString, command::Function, args.
     keyright = args[1]
     keyleft = args[2]
     other_args = args[3:end]
-    println("Comparing existing elements keyleft='$keyleft' and keyright='$keyright")
+    println("Comparing existing elements keyleft='$keyleft' and keyright='$keyright'")
     println("PASSING ARGS '$args...'")
     if haskey(context, keyleft) && haskey(context, keyright)
         eleft = context[keyleft]
