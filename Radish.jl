@@ -17,3 +17,5 @@ export sincr!, sincr_by!, sget, sadd, slpad!, srpad!, sappend!, sgetrange, slcs,
 export  S_PALETTE
 
 end # module Radish
+
+##TODO Explore command pattern! 
