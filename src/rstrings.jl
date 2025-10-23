@@ -108,28 +108,51 @@ function slen(elem::RadishElement)
     return length(sget(elem))
 end
 
+## HELPER function to find lcs 
+function find_lcs(string1::AbstractString, string2::AbstractString)
+    l1, l2 = length(string1), length(string2)
+    dp = zeros(Int, l1 + 1, l2 + 1)
+    # Populating DP matrix
+    for (i1, v1) in enumerate(string1)
+        for(i2, v2) in enumerate(string2)
+            
+            if v1 == v2
+                dp[i1 + 1, i2 + 1] = 1 + dp[i1, i2]
+            else
+                dp[i1 + 1, i2 + 1] = max(dp[i1, i2 + 1], dp[i1 + 1, i2])
+            end
+        end
+    end
+    lcs_length = dp[l1 + 1, l2 + 1]
+    lcs_string = Char[]
+    
+    i, j = l1 + 1, l2 + 1 
+    
+    while i > 1 && j > 1
+        if string1[i - 1] == string2[j - 1]
+            push!(lcs_string, string1[i - 1])
+            i -= 1
+            j -= 1
+        
+        elseif dp[i - 1, j] >= dp[i, j - 1]
+            i -= 1
+        else
+            j -= 1
+        end
+    end
+
+    return string(join(reverse(lcs_string), "")), lcs_length
+end
+
 # LCS Longest common subsequence
 function slcs(elemleft::RadishElement, elemright::RadishElement, args...)
     
     # IMPLEMENT LCS ALGORITHM IN JULIA USING DYNAMIC PROGRAMMING
     string1, string2 = elemleft.value, elemright.value
-    l1, l2 = length(string1), length(string2)
-
-    dp_allocation = zeros(Int8, l1, l2)
-    
-    # # Populating DP matrix
-    # for (i1, v1) in enumerate(l1)
-    #     for(i2, v2) in enumerate(l2)
-    #         if v1 == v2
-    #             if i==1 or j==1
-    #                 dp_allocation[i1][i2] = 1
-    #             else 
-    #                 dp_allocation[i1][i2] = 1 + dp_allocation[i1-1][i2-1]
-    #         end
-    #     end
-    # end
-
-    println(dp_allocation)
+    # println(string1)
+    # println(string2)
+    s_lcs, len_lcs = find_lcs(string1, string2)
+    return s_lcs, len_lcs
 
 
 end
@@ -151,6 +174,6 @@ const S_PALETTE = Dict{String, Tuple}(
     "S_APPEND" => (sappend!, rmodify!),
     "S_GETRANGE" => (sgetrange, rget_or_expire!),
     "S_LEN" => (slen, rget_or_expire!),
-    # "S_LCS" => (slcs, rcompare)
+    "S_LCS" => (slcs, rcompare),
     "S_COMPLEN" => (sclen, rcompare)
 )
