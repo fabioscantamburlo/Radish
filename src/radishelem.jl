@@ -23,6 +23,7 @@ function rget_or_expire!(context::Dict{String, RadishElement}, key::AbstractStri
         println("Executing command '$command' with args '$new_args...'")
         return command(element, new_args...)
     end
+    println("Element at key '$key' not found")
     return nothing
 end
 
@@ -41,6 +42,7 @@ end
 function rdelete!(context::Dict{String, RadishElement}, key::AbstractString)
     if haskey(context, key)
         delete!(context, key)
+        println("Element at key '$key' deleted")
         return true
     end
     return false
@@ -58,6 +60,7 @@ function rmodify!(context::Dict, key::AbstractString, command::Function, args...
         ret_value = command(existing_element, args...)
         return ret_value
     end
+    println("Element at key '$key' not found")
     return false
 end
 
@@ -68,11 +71,17 @@ function rcompare(context::Dict, dummy::AbstractString, command::Function, args.
     other_args = args[3:end]
     println("Comparing existing elements keyleft='$keyleft' and keyright='$keyright'")
     println("PASSING ARGS '$args...'")
-    if haskey(context, keyleft) && haskey(context, keyright)
-        eleft = context[keyleft]
-        eright = context[keyright]
-        ret_value = command(eleft, eright, other_args...)
-        return ret_value
+    if haskey(context, keyleft)
+        if haskey(context, keyright)
+            eleft = context[keyleft]
+            eright = context[keyright]
+            ret_value = command(eleft, eright, other_args...)
+            return ret_value
+        else
+            println("Element at key '$keyright' not found")
+        end
+    else 
+        println("Element at '$keyleft' not found")
     end
     return false
 end
@@ -87,7 +96,6 @@ function rlistkeys(context::Dict, args...)
     return first(key_iterator, limit_s)
 end
 function rlistkeys(context::Dict)
-
     key_iterator = collect(keys(context))
     return key_iterator
 end
