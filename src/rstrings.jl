@@ -14,8 +14,11 @@ function sadd(key::AbstractString, value::AbstractString, ttl::AbstractString)
     if isa(value_n, Nothing)
         value_n = value
     end
-    ttl = tryparse(Int, ttl)
-    return RadishElement(key, value_n, ttl, now())
+    ttl_p = tryparse(Int, ttl)
+    if isa(ttl_p, Nothing)
+        println("ttl not a valid integer - got '$ttl' tt forced to nothing")
+    end
+    return RadishElement(key, value_n, ttl_p, now())
 end
 
 function sadd(key::AbstractString, value::AbstractString, ttl::Nothing)
@@ -108,7 +111,7 @@ function slen(elem::RadishElement)
     return length(sget(elem))
 end
 
-## HELPER function to find lcs 
+## HELPER function to find LCS
 function find_lcs(string1::AbstractString, string2::AbstractString)
     l1, l2 = length(string1), length(string2)
     dp = zeros(Int, l1 + 1, l2 + 1)
