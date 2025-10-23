@@ -110,7 +110,27 @@ end
 
 # LCS Longest common subsequence
 function slcs(elemleft::RadishElement, elemright::RadishElement, args...)
-    return true
+    
+    # IMPLEMENT LCS ALGORITHM IN JULIA USING DYNAMIC PROGRAMMING
+    string1, string2 = elemleft.value, elemright.value
+    l1, l2 = length(string1), length(string2)
+
+    dp_allocation = zeros(Int8, l1, l2)
+    
+    # # Populating DP matrix
+    # for (i1, v1) in enumerate(l1)
+    #     for(i2, v2) in enumerate(l2)
+    #         if v1 == v2
+    #             if i==1 or j==1
+    #                 dp_allocation[i1][i2] = 1
+    #             else 
+    #                 dp_allocation[i1][i2] = 1 + dp_allocation[i1-1][i2-1]
+    #         end
+    #     end
+    # end
+
+    println(dp_allocation)
+
 
 end
 
