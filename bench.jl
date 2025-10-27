@@ -2,6 +2,7 @@ using Dates
 include("Radish.jl")
 using .Radish
 
+
 println("---- New Run ----")
 
 radish_context = Dict{String, RadishElement}()
@@ -20,7 +21,7 @@ println("--- Starting Benchmark: Adding $NUM_ELEMENTS elements ---")
     for i in 1:NUM_ELEMENTS
         key = "user$i"
         # For this test, the value is just the number 'i'. No expiration is set.
-        radd!(radish_context, key, sadd, key, string(i), string(4))
+        radd!(radish_context, key, sadd, string(i), string(4))
 
         # Print progress without slowing down the loop too much
         if i % info_num == 0

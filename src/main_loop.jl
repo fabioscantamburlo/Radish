@@ -1,6 +1,7 @@
 # String implementation for the Radish in-memory datatype
 using .Radish
 using Dates
+using Logging 
 
 function show_help()
     println("""
@@ -41,17 +42,17 @@ end
 
 function do_radish_work!(radish_context, db_lock, command, args...)
     key = args[1]
-    other_args = args[1:end]
+    other_args = args[2:end]
     # Support only strings at the moment
     lock(db_lock)
     try
         if haskey(S_PALETTE, command)
-            println("Executing command: '$command', Key: '$key', Args: '$other_args'")
+            @debug "Executing command: '$command', Key: '$key', Args: '$other_args'"
             type_command, hypercommand = S_PALETTE[command]
             ret = hypercommand(radish_context, key, type_command, other_args...)
             return ret
         else
-            println("Unknown command: '$command'")
+            @info "Unknown command: '$command'"
             return false
         end
     finally
@@ -64,16 +65,16 @@ end
 Starts the main application loop.
 """
 function main_loop()
-    println("🌱 Welcome to the Radish Program (Julia)!")
-    println("Type 'help' for commands or 'exit'")
-    println("Initializing Radish In-memory database...")
+    @info "🌱 Welcome to the Radish Program (Julia)!"
+    @info "Type 'help' for commands or 'exit'"
+    @info "Initializing Radish In-memory database..."
     radish_context = Dict{String, RadishElement}()
     db_lock = ReentrantLock()
 
-    println("Initializing some data to better test ..... '")
-    radd!(radish_context, "user1", sadd, "user1", "ciao", nothing)
-    radd!(radish_context, "user2", sadd, "user1", "ciao2", nothing)
-    radd!(radish_context, "user3", sadd, "user1", "cioa3", nothing)
+    @info "Initializing some data to better test ..... '"
+    radd!(radish_context, "user1", sadd,  "ciao", nothing)
+    radd!(radish_context, "user2", sadd,  "ciao2", nothing)
+    radd!(radish_context, "user3", sadd,  "cioa3", nothing)
 
     # --- Launch the cleaner ONCE, before the loop ---
     println("Starting background cleaner task...")
@@ -118,18 +119,18 @@ function main_loop()
                 @async begin
                     try
                         ret_value = do_radish_work!(radish_context, db_lock, command, args...)
-                        println("\n✅ Command '$command' succeeded.")
+                        @info "\n✅ Command '$command' succeeded."
                         println("   Result: '$ret_value'")
 
                     catch e
-                        println("\n❌ Command '$command' failed.")
-                        println("   Error: $e")
+                        @info "\n❌ Command '$command' failed."
+                        @info "   Error: $e"
                     end
                     print("RADISH-CLI> ")
                 end
 
             else
-                println("Unknown command: '$command'. Type 'help' for a list.")
+                @info "Unknown command: '$command'. Type 'help' for a list."
             end
         end
     catch e
