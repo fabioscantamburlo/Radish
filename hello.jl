@@ -4,15 +4,15 @@ using .Radish
 
 # println("---- New Run ----")
 
-# radish_context = Dict{String, RadishElement}()
+radish_context = Dict{String, RadishElement}()
 
-# RadishElement("user1", 1, nothing, now())
-# radd!(radish_context, "user1", sadd, "user1", "10", nothing)
-# radd!(radish_context, "user2", sadd, "user2", "10", nothing)
-# radd!(radish_context, "user3", sadd, "user3", "ciao", nothing)
-# radd!(radish_context, "user4", sadd, "user4", "pippo", nothing)
-# radd!(radish_context, "user5", sadd, "user5", "pippo", "1")
+RadishElement(1, nothing, now())
+radd!(radish_context, "user1", sadd, "10")
+radd!(radish_context, "user2", sadd, "10")
+radd!(radish_context, "user3", sadd, "ciao")
+radd!(radish_context, "user4", sadd, "pippo")
+radd!(radish_context, "user5", sadd, "pippo")
+println(radish_context)
 
-
-d = DoubleLinkedList()
-RadishElement()
+d = DLinkedListElement(1, nothing, nothing)
+println(d)

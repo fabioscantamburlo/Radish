@@ -7,17 +7,18 @@ using Dates
 # The idea is to have a double linked list in which the first element has prev nothing
 # The last element has next nothing so it's gonna be easy to going up-down the the list.
 
-mutable struct DLinkedStartEnd{T}
-    head::Union{DLinkedListElement{T}, Nothing}
-    tail::Union{DLinkedListElement{T}, Nothing}
-    len::{Int}
-    DoublyLinkedList{T}() where T = new{T}(nothing, nothing, 0)
-end
 mutable struct DLinkedListElement{T}
     data::T
     next::Union{DLinkedListElement{T}, Nothing}
     prev::Union{DLinkedListElement{T}, Nothing}
 end
+mutable struct DLinkedStartEnd{T}
+    head::Union{DLinkedListElement{T}, Nothing}
+    tail::Union{DLinkedListElement{T}, Nothing}
+    len::Int
+    DLinkedStartEnd{T}() where T = new{T}(nothing, nothing, 0)
+end
+
 
 
 # LPUSH adds a new element to the head of a list; RPUSH adds to the tail.

@@ -18,7 +18,7 @@ export sincr!, sincr_by!, sget, sadd, slpad!, srpad!, sappend!, sgetrange, slcs,
 export  S_PALETTE
 
 # Functions for the DoubleLinkedList type
-export DoubleLinkedList, DLinkedStartEnd
+export DLinkedStartEnd, DLinkedListElement
 
 end # module Radish
 
