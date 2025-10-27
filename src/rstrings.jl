@@ -178,7 +178,8 @@ end
 function slcs(elemleft::RadishElement, elemright::RadishElement, args...)
     
     # IMPLEMENT LCS ALGORITHM IN JULIA USING DYNAMIC PROGRAMMING
-    string1, string2 = elemleft.value, elemright.value
+    # LCS works only on string, implicit casting
+    string1, string2 = string(elemleft.value), string(elemright.value)
     # println(string1)
     # println(string2)
     s_lcs, len_lcs = find_lcs(string1, string2)

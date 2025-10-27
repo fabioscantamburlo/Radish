@@ -21,7 +21,7 @@ println("--- Starting Benchmark: Adding $NUM_ELEMENTS elements ---")
     for i in 1:NUM_ELEMENTS
         key = "user$i"
         # For this test, the value is just the number 'i'. No expiration is set.
-        radd!(radish_context, key, sadd, string(i), string(4))
+        radd!(radish_context, key, sadd, string(i), string(50))
 
         # Print progress without slowing down the loop too much
         if i % info_num == 0
@@ -49,21 +49,38 @@ end
 println("\n--- Finished Retrieving. ---")
 
 
-# println("--- Starting Benchmark: Rpad $NUM_ELEMENTS elements ---")
-# TODO FIX THIS BENCH!
-# # Use @time to measure the execution time and memory allocation of this block.
-# @time begin
-#     for i in 1:NUM_ELEMENTS
-#         key = "user$i"
-#         # For this test, the value is just the number 'i'. No expiration is set.
-#         # radd!(radish_context, key, sadd(key, i, 1))
-#         rmodify!(radish_context, key, srpad!, "10", "_")
-#         # Print progress without slowing down the loop too much
-#         if i % info_num == 0
-#             println("... RightPadding $i elements ...")
-#         end
-#     end
-# end
+println("--- Starting Benchmark: Rpad $NUM_ELEMENTS elements ---")
+# Use @time to measure the execution time and memory allocation of this block.
+@time begin
+    for i in 1:NUM_ELEMENTS
+        key = "user$i"
+        # For this test, the value is just the number 'i'. No expiration is set.
+        # radd!(radish_context, key, sadd(key, i, 1))
+        rmodify!(radish_context, key, srpad!, "10", "_")
+        # Print progress without slowing down the loop too much
+        if i % info_num == 0
+            println("... RightPadding $i elements ...")
+        end
+    end
+end
+
+@time begin
+    for i in 1:NUM_ELEMENTS - 1
+        key = "user$i"
+        j = i + 1
+        key_succ = "user$j"
+        # For this test, the value is just the number 'i'. No expiration is set.
+        # radd!(radish_context, key, sadd(key, i, 1))
+        res = rcompare(radish_context, string(key), slcs, string(key_succ))
+        # Print progress without slowing down the loop too much
+        if i % info_num == 0
+            println("... Testing lcs '$i-th' element ...")
+            e1, e2 = rget_or_expire!(radish_context, key, sget), rget_or_expire!(radish_context, key_succ, sget)
+            println("... Result lcs for '$e1', $e2', = '$res")
+        end
+    end
+end
+
 
 
 # Example of retrieving a few specific values, just like in your example

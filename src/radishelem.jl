@@ -81,7 +81,7 @@ With this pattern of delegation and strict "data contracts", I hope it's going t
 using Dates
 using Logging
 # Base struct of the RadishElement
-# TODO optimise ttl and tinit in a single tuple ttl{(int, datetime), Nothin}
+# TODO optimise ttl and tinit in a single tuple ttl{(int, datetime), Nothing}
 mutable struct RadishElement
     value::Any
     ttl::Union{Int128, Nothing}
