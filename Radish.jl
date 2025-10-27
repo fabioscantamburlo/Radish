@@ -3,6 +3,7 @@ module Radish
 include(joinpath(@__DIR__, "src", "radishelem.jl"))
 include(joinpath(@__DIR__, "src", "rstrings.jl"))
 include(joinpath(@__DIR__, "src", "main_loop.jl"))
+include(joinpath(@__DIR__, "src", "rlinkedlists.jl"))
 
 
 # Main loop
@@ -15,6 +16,9 @@ export RadishElement, rmodify!, rget_or_expire!, rget_on_modify_or_expire!, rdel
 export sincr!, sincr_by!, sget, sadd, slpad!, srpad!, sappend!, sgetrange, slcs, sclen
 # Const for stringtype
 export  S_PALETTE
+
+# Functions for the DoubleLinkedList type
+export DoubleLinkedList, DLinkedStartEnd
 
 end # module Radish
 

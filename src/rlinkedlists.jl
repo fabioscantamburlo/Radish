@@ -8,8 +8,10 @@ using Dates
 # The last element has next nothing so it's gonna be easy to going up-down the the list.
 
 mutable struct DLinkedStartEnd{T}
-    top::Union{DLinkedListElement{T}, Nothing}
-    bot::Union{DLinkedListElement{T}, Nothing}
+    head::Union{DLinkedListElement{T}, Nothing}
+    tail::Union{DLinkedListElement{T}, Nothing}
+    len::{Int}
+    DoublyLinkedList{T}() where T = new{T}(nothing, nothing, 0)
 end
 mutable struct DLinkedListElement{T}
     data::T
@@ -28,15 +30,10 @@ end
 
 
 const LL_PALETTE = Dict{String, Tuple}(
-    "S_GET" => (sget, rget_or_expire!),
-    "S_SET" => (sadd, radd!),
-    "S_INCR" => (sincr!, rmodify!),
-    "S_INCRBY" => (sincr_by!, rmodify!),
-    "S_RPAD" => (srpad!, rmodify!),
-    "S_LPAD" => (slpad!, rmodify!),
-    "S_APPEND" => (sappend!, rmodify!),
-    "S_GETRANGE" => (sgetrange, rget_or_expire!),
-    "S_LEN" => (slen, rget_or_expire!),
-    "S_LCS" => (slcs, rcompare),
-    "S_COMPLEN" => (sclen, rcompare)
+    "LPUSH" => (sget, rget_or_expire!),
+    "LPOP" => (sadd, radd!),
+    "LLEN" => (sincr!, rmodify!),
+    "LMOVE" => (sincr_by!, rmodify!),
+    "LRANGE" => (srpad!, rmodify!),
+    "LTRIM" => (slpad!, rmodify!),
 )
