@@ -9,7 +9,7 @@ function sget(elem::RadishElement, args...)
 end
 
 # SET
-function sadd(key::AbstractString, value::AbstractString, ttl::AbstractString)
+function sadd(value::AbstractString, ttl::AbstractString)
     value_n = tryparse(Int, value)
     if isa(value_n, Nothing)
         value_n = value
@@ -18,26 +18,26 @@ function sadd(key::AbstractString, value::AbstractString, ttl::AbstractString)
     if isa(ttl_p, Nothing)
         println("ttl not a valid integer - got '$ttl' tt forced to nothing")
     end
-    return RadishElement(key, value_n, ttl_p, now())
+    return RadishElement(value_n, ttl_p, now())
 end
 
-function sadd(key::AbstractString, value::AbstractString, ttl::Nothing)
+function sadd( value::AbstractString, ttl::Nothing)
     value_n = tryparse(Int, value)
     if isa(value_n, Nothing)
         value_n = value
     end
-    return RadishElement(key, value_n, ttl, now())
+    return RadishElement(value_n, ttl, now())
 end
 
-function sadd(key::AbstractString, value::AbstractString)
+function sadd(value::AbstractString)
     value_n = tryparse(Int, value)
     if isa(value_n, Nothing)
         value_n = value
     end
-    return RadishElement(key, value, nothing, now())
+    return RadishElement(value, nothing, now())
 end
 
-# INCR
+# INCREMENT
 function sincr!(elem::RadishElement)
     elem_n = tryparse(Int, elem.value)
     if isa(elem_n, Int)
@@ -46,6 +46,33 @@ function sincr!(elem::RadishElement)
         return true
     end
     return false
+end
+
+# GET INCREMENT: GET AND THEN INCREMENT
+function sgincr!(elem::RadishElement)
+    elem_n = tryparse(Int, elem.value)
+    orig_elem = elem_n
+    if isa(elem_n, Int)
+        elem_n += 1
+        elem.value = string(elem_n)
+        return orig_elem
+    end
+    return nothing
+end
+
+# INCRBY
+function sgincr_by!(elem::RadishElement, incr::AbstractString)
+    elem_n = tryparse(Int, elem.value)
+    original_elem = elem_n
+    incr_n = tryparse(Int, incr)
+    if isa(elem_n, Int)
+        if isa(incr_n, Int)
+            elem_n += incr_n
+            elem.value = string(elem_n)
+        end
+        return original_elem
+    end
+    return nothing
 end
 
 # INCRBY
@@ -171,7 +198,9 @@ const S_PALETTE = Dict{String, Tuple}(
     "S_GET" => (sget, rget_or_expire!),
     "S_SET" => (sadd, radd!),
     "S_INCR" => (sincr!, rmodify!),
+    "S_GINCR" => (sgincr!, rget_on_modify_or_expire!),
     "S_INCRBY" => (sincr_by!, rmodify!),
+    "S_GINCRBY" => (sgincr_by!, rget_on_modify_or_expire!),
     "S_RPAD" => (srpad!, rmodify!),
     "S_LPAD" => (slpad!, rmodify!),
     "S_APPEND" => (sappend!, rmodify!),

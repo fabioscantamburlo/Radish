@@ -8,7 +8,7 @@ include(joinpath(@__DIR__, "src", "main_loop.jl"))
 # Main loop
 export do_radish_work, show_help, main_loop
 # Functions of the Radish
-export RadishElement, rmodify!, rget_or_expire!, rdelete!, radd!, rcompare, rlistkeys 
+export RadishElement, rmodify!, rget_or_expire!, rget_on_modify_or_expire!, rdelete!, radd!, rcompare, rlistkeys 
 
 
 # Functions for the stringtype
