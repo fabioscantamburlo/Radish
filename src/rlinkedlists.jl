@@ -118,12 +118,14 @@ end
 
 # compose lis t
 function compose_linked_list_forward(list::DLinkedStartEnd, limit::Int)
-    # println("Traversing forward:")
+
+    iterator = 1
     return_list = []
     j = list.head
-    while j !== nothing
+    while j !== nothing && iterator <= limit
         push!(return_list, j.data)
         j = j.next
+        iterator += 1
     end
     return return_list
 end

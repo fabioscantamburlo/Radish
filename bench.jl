@@ -14,6 +14,7 @@ info_num = NUM_ELEMENTS/10
 radish_context = Dict{String, RadishElement}()
 # sizehint!(radish_context, NUM_ELEMENTS)
 
+println("--- STARTING BENCHMARK ON STRING DATATYPE ---")
 println("--- Starting Benchmark: Adding $NUM_ELEMENTS elements ---")
 
 # Use @time to measure the execution time and memory allocation of this block.
@@ -94,3 +95,22 @@ println("Value of user1: ", a)
 println("Value of user80: ", b)
 println("Value of user99: ", c)
 println("Value of user499999: ", d)
+
+
+println("--- STARTING BENCHMARK ON LINKED LISTS DATATYPE ---")
+
+my_list = DLinkedStartEnd("ciao")
+
+
+@time begin
+    for i in 1:NUM_ELEMENTS - 1
+        append!(my_list, string(i))
+        if i % info_num == 0
+            println("... Testing append on '$i-th' element ...")
+        end
+    end
+end
+
+println(lget(my_list))
+println(length(lget(my_list)))
+println(llen(my_list))
