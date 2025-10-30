@@ -21,7 +21,7 @@ function sadd(value::AbstractString, ttl::AbstractString)
     return RadishElement(value_n, ttl_p, now())
 end
 
-function sadd( value::AbstractString, ttl::Nothing)
+function sadd(value::AbstractString, ttl::Nothing)
     value_n = tryparse(Int, value)
     if isa(value_n, Nothing)
         value_n = value

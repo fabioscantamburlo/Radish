@@ -1,6 +1,7 @@
 # String implementation for the Radish in-memory datatype
 using .Radish
 using Dates
+using Logging
 
 
 # DoubleLinkedList element for RadishDb
@@ -76,7 +77,7 @@ function trimr!(list::DLinkedStartEnd, value::Int)
     while iterator < value
         j = j.next
         iterator = iterator + 1
-        println("iterator '$iterator'")
+        @info "iterator '$iterator'"
     end
     
     j.next = nothing
@@ -116,7 +117,7 @@ function traverse_linked_list_backward(list::DLinkedStartEnd)
     end
 end
 
-# compose lis t
+# compose list
 function compose_linked_list_forward(list::DLinkedStartEnd, limit::Int)
 
     iterator = 1
@@ -130,10 +131,24 @@ function compose_linked_list_forward(list::DLinkedStartEnd, limit::Int)
     return return_list
 end
 
+function compose_linked_list_forward(list::DLinkedStartEnd, start_s::Int, end_s::Int)
+    iterator = 1
+    return_list = []
+    j = list.head
+    while j !== nothing && iterator <= end_s
+        if iterator >= start_s
+            push!(return_list, j.data)
+        end
+        j = j.next
+        iterator += 1
+    end
+    return return_list
+end
+
 
 # Traversal function forward
 function traverse_linked_list_forward(list::DLinkedStartEnd)
-    println("Traversing forward:")
+    @info "Traversing forward:"
     j = list.head
     while j !== nothing
         println(j.data)
@@ -150,6 +165,17 @@ function llen(list::DLinkedStartEnd)
     return list.len
 end
 
+function lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::AbstractString)
+    start_s = tryparse(Int, start_s)
+    end_s = tryparse(Int, end_s)
+    if isa(start_s, Nothing) || isa(start_s, Nothing)
+        @warn "start or end or both are not parsable integers"
+        return nothing
+    end
+    return_value = compose_linked_list_forward(list, start_s, end_s)
+    return return_value
+
+end
 
 # LPUSH adds a new element to the head of a list; RPUSH adds to the tail.
 # LPOP removes and returns an element from the head of a list; RPOP does the same but from the tails of a list.
