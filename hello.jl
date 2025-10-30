@@ -43,7 +43,10 @@ push!(my_list, "day")
 println(lget(my_list))
 println(llen(my_list))
 
-trimr!(my_list, 4)
+# trimr!(my_list, 4)
 
 println(lget(my_list))
 println(llen(my_list))
+
+println(lrange(my_list, "4", "20"))
+println(lrange(my_list, "4", "3"))

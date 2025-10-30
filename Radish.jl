@@ -19,7 +19,7 @@ export  S_PALETTE
 
 # Functions for the DoubleLinkedList type
 (export DLinkedStartEnd, DLinkedListElement, traverse_linked_list_backward, traverse_linked_list_forward, 
-        compose_linked_list_forward, lget, llen, trimr!, triml!)
+        compose_linked_list_forward, lget, llen, trimr!, triml!, lrange)
 
 end # module Radish
 
