@@ -177,6 +177,64 @@ function lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::AbstractS
 
 end
 
+# Consuming listr and listl is a completely new object
+# O(1) time
+function lmove!(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
+    
+    # listr empty
+    if listr.len == 0
+        return listl
+    end
+    
+    # listl empty
+    if listl.len == 0
+        listl.head = listr.head
+        listl.tail = listr.tail
+        listl.len = listr.len
+        
+        # Safely empty listr
+        listr.head = nothing
+        listr.tail = nothing
+        listr.len = 0
+        return listl
+    end
+
+    # move the two lists
+    listl.tail.next = listr.head
+    listr.head.prev = listl.tail
+    listl.tail = listr.tail
+    listl.len += listr.len
+    
+    # Empty listlr
+    listr.head = nothing
+    listr.tail = nothing
+    listr.len = 0
+
+    return listl
+end
+
+
+
+# Non MUTATING function
+# it keeps Listl and Listr
+function lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
+    new_list = DLinkedStartEnd{T}()
+    
+    current = listl.head
+    while current !== nothing
+        append!(new_list, current.data)
+        current = current.next
+    end
+    
+    current = listr.head
+    while current !== nothing
+        append!(new_list, current.data)
+        current = current.next
+    end
+    
+    return new_list
+end
+
 # LPUSH adds a new element to the head of a list; RPUSH adds to the tail.
 # LPOP removes and returns an element from the head of a list; RPOP does the same but from the tails of a list.
 # LLEN returns the length of a list.
