@@ -31,6 +31,7 @@ function DLinkedStartEnd(value::T) where T
     return DLinkedStartEnd{T}(new_element, new_element, 1)
 end
 
+# TODO FIX
 function Base.push!(list::DLinkedStartEnd{T}, value::T) where T
     new_element = DLinkedListElement(value, nothing, nothing)
 
@@ -64,7 +65,7 @@ function Base.append!(list::DLinkedStartEnd{T}, value::T) where T
 end
 
 # Trim left
-function trimr!(list::DLinkedStartEnd, value::Int)
+function ltrimr!(list::DLinkedStartEnd, value::Int)
     
     iterator = 1
     j = list.head
@@ -86,7 +87,7 @@ function trimr!(list::DLinkedStartEnd, value::Int)
 end
 
 # Trim right
-function triml!(list::DLinkedStartEnd, value::Int)
+function ltriml!(list::DLinkedStartEnd, value::Int)
     
     iterator = 1
     j = list.tail
@@ -157,6 +158,7 @@ function traverse_linked_list_forward(list::DLinkedStartEnd)
 end
 
 function lget(list::DLinkedStartEnd)
+    @info "Truncating to 50 elements..."
     return_value = compose_linked_list_forward(list, 50)
     return return_value
 end
@@ -213,8 +215,6 @@ function lmove!(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     return listl
 end
 
-
-
 # Non MUTATING function
 # it keeps Listl and Listr
 function lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
@@ -246,12 +246,14 @@ end
 
 
 const LL_PALETTE = Dict{String, Tuple}(
-    "LLEN" => (llen, rget_or_expire!),
-    "LGET" => (lget, rget_or_expire!),
-    "LPUSH" => (sget, rget_or_expire!),
-    "LPOP" => (sadd, radd!),
-    "LLEN" => (sincr!, rmodify!),
-    "LMOVE" => (sincr_by!, rmodify!),
-    "LRANGE" => (srpad!, rmodify!),
-    "LTRIM" => (slpad!, rmodify!),
+    "L_LEN" => (llen, rget_or_expire!),
+    "L_PUSH" => (push!, radd_or_modify!),
+    "L_APPEND" => (append!, radd_or_modify!),
+    "L_TRIMR" => (ltrimr!, rmodify!),
+    "L_TRIML" => (ltriml!, rmodify!),
+    "L_GET" => (lget, rget_or_expire!),
+    "L_RANGE" => (lrange, rget_or_expire!),
+    "L_MOVE" => (lmove!, rmodify!),
+    "L_MOVE" => (sincr_by!, rmodify!),
+    "L_CONCAT" => (lconcat, radd!),
 )

@@ -144,6 +144,25 @@ function rdelete!(context::Dict{String, RadishElement}, key::AbstractString)
     return false
 end
 
+# Base function to add_or_modify an element. If not present add otherwise modify
+# This is useful to define two behaviors for commands that should modify in place a key or create a new key if is not
+# present, this hypercommand allows the existance of functions like lpush -> push el to list otherwise create a list with that element
+function radd_or_modify!(context::Dict, key::AbstractString, command::Function, args...)
+    res_add = radd!(context, key, command, args...)
+    if res_add != false
+        return res_add
+    else
+        res_rmodify = rmodify!(context, key, command, args...)
+        if res_rmodify != false
+            return res_rmodify
+        end
+    end
+
+    @info "radd_or_modify did not work ! "
+    return false
+
+end
+
 # Base function to modify RadishElement from the context
 function rmodify!(context::Dict, key::AbstractString, command::Function, args...)
     # GET rid of key

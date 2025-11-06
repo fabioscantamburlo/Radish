@@ -9,7 +9,9 @@ include(joinpath(@__DIR__, "src", "rlinkedlists.jl"))
 # Main loop
 export do_radish_work, show_help, main_loop
 # Functions of the Radish
-export RadishElement, rmodify!, rget_or_expire!, rget_on_modify_or_expire!, rdelete!, radd!, rcompare, rlistkeys 
+(export RadishElement, rmodify!, rget_or_expire!,
+        rget_on_modify_or_expire!, rdelete!, radd!,radd_or_modify!,
+        rcompare, rlistkeys )
 
 
 # Functions for the stringtype
@@ -19,7 +21,9 @@ export  S_PALETTE
 
 # Functions for the DoubleLinkedList type
 (export DLinkedStartEnd, DLinkedListElement, traverse_linked_list_backward, traverse_linked_list_forward, 
-        compose_linked_list_forward, lget, llen, trimr!, triml!, lrange, lmove!, lconcat)
+        compose_linked_list_forward, lget, llen, ltrimr!, ltriml!, lrange, lmove!, lconcat)
+# Const for linkedlist type
+export LL_PALETTE
 
 end # module Radish
 
