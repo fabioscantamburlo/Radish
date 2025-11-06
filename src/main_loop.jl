@@ -81,6 +81,7 @@ function main_loop()
     radd!(radish_context, "user2", sadd,  "ciao2", nothing)
     radd!(radish_context, "user3", sadd,  "cioa3", nothing)
 
+
     # --- Launch the cleaner ONCE, before the loop ---
     println("Starting background cleaner task...")
     @async async_cleaner(radish_context, db_lock)

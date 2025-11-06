@@ -31,7 +31,18 @@ function DLinkedStartEnd(value::T) where T
     return DLinkedStartEnd{T}(new_element, new_element, 1)
 end
 
-# TODO FIX
+# function lpush!(value::T)
+
+# end 
+
+function ladd!(value:: AbstractString)
+    new_element =  DLinkedListElement(value, nothing, nothing)
+    return RadishElement(new_element, nothing, now())
+end 
+
+# TODO WE NEED TO WRAP ALL THE BASE FUNCTIONS WORKING WITH DLinkedStartEnd WITH 
+#TODO # AN ADDITIONAL LAYER FOR RADISHELEMENT
+
 function Base.push!(list::DLinkedStartEnd{T}, value::T) where T
     new_element = DLinkedListElement(value, nothing, nothing)
 
@@ -246,6 +257,7 @@ end
 
 
 const LL_PALETTE = Dict{String, Tuple}(
+    "L_ADD" => (ladd!, radd!),
     "L_LEN" => (llen, rget_or_expire!),
     "L_PUSH" => (push!, radd_or_modify!),
     "L_APPEND" => (append!, radd_or_modify!),
