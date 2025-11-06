@@ -51,6 +51,11 @@ function do_radish_work!(radish_context, db_lock, command, args...)
             type_command, hypercommand = S_PALETTE[command]
             ret = hypercommand(radish_context, key, type_command, other_args...)
             return ret
+        elseif haskey(LL_PALETTE, command)
+            @debug "Executing command: '$command', Key: '$key', Args: '$other_args'"
+            type_command, hypercommand = LL_PALETTE[command]
+            ret = hypercommand(radish_context, key, type_command, other_args...)
+            return ret
         else
             @info "Unknown command: '$command'"
             return false
@@ -119,7 +124,21 @@ function main_loop()
                 @async begin
                     try
                         ret_value = do_radish_work!(radish_context, db_lock, command, args...)
-                        @info "\n✅ Command '$command' succeeded."
+                        @info "\n✅ Command on STRINGS '$command' succeeded."
+                        println("   Result: '$ret_value'")
+
+                    catch e
+                        @info "\n❌ Command '$command' failed."
+                        @info "   Error: $e"
+                    end
+                    print("RADISH-CLI> ")
+                end
+
+            elseif haskey(LL_PALETTE, command)
+                @async begin
+                    try
+                        ret_value = do_radish_work!(radish_context, db_lock, command, args...)
+                        @info "\n✅ Command on LLISTS '$command' succeeded."
                         println("   Result: '$ret_value'")
 
                     catch e

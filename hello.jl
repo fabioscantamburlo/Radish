@@ -44,7 +44,7 @@ push!(my_list, "day")
 # println(lget(my_list))
 # println(llen(my_list))
 
-# trimr!(my_list, 4)
+ltrimr!(my_list, 4)
 
 append!(my_list2, "gianluca")
 append!(my_list2, "stefano")
