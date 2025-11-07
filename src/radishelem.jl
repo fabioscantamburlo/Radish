@@ -134,6 +134,18 @@ function radd!(context::Dict{String, RadishElement}, key::AbstractString, comman
     return true
 end
 
+# Radd with option of not logging if element already present
+function radd!(context::Dict{String, RadishElement}, key::AbstractString, command::Function, log::Bool, args...)
+    if haskey(context, key)
+        if log
+            println("Element at key '$key' already present")
+        end
+        return false
+    end
+    context[key] = command(args...)
+    return true
+end
+
 # Base function to delete RadishElement from the context
 function rdelete!(context::Dict{String, RadishElement}, key::AbstractString)
     if haskey(context, key)
@@ -148,7 +160,7 @@ end
 # This is useful to define two behaviors for commands that should modify in place a key or create a new key if is not
 # present, this hypercommand allows the existance of functions like lpush -> push el to list otherwise create a list with that element
 function radd_or_modify!(context::Dict, key::AbstractString, command::Function, args...)
-    res_add = radd!(context, key, command, args...)
+    res_add = radd!(context, key, command, false, args...)
     if res_add != false
         return res_add
     else
@@ -169,7 +181,7 @@ function rmodify!(context::Dict, key::AbstractString, command::Function, args...
     if haskey(context, key)
         # Apply the command to the existing element to get the new one
         existing_element = context[key]
-        @debug "Modifying existing element '$existing_element' at key '$key"
+        @debug "Modifying existing element '$existing_element' at key '$key' "
         @debug "PASSING ARGS '$args...'"
         ret_value = command(existing_element, args...)
         return ret_value
