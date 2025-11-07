@@ -35,10 +35,31 @@ end
 
 # end 
 
-function ladd!(value:: AbstractString)
-    new_element =  DLinkedListElement(value, nothing, nothing)
+# Add a list of 1 element
+function ladd!(value::AbstractString)
+    new_element =  DLinkedStartEnd(value)
     return RadishElement(new_element, nothing, now())
+end
+
+function ladd!(value::AbstractString, ttl::DateTime)
+    new_element =  DLinkedStartEnd(value)
+    return RadishElement(new_element, ttl, now())
 end 
+
+function lpush!(elem::RadishElement, value::AbstractString)
+    @debug "Executing lpush! with elements '$elem' , '$value' "
+    push!(elem.value, value)
+    return true
+end
+
+function lpush!(value::AbstractString, args...)
+    @debug "Executing lpush! with elements '$value' , '$value' "
+    return ladd!(value, args...)
+end
+
+function lget(elem::RadishElement)
+    return _lget(elem.value)
+end
 
 # TODO WE NEED TO WRAP ALL THE BASE FUNCTIONS WORKING WITH DLinkedStartEnd WITH 
 #TODO # AN ADDITIONAL LAYER FOR RADISHELEMENT
@@ -76,7 +97,7 @@ function Base.append!(list::DLinkedStartEnd{T}, value::T) where T
 end
 
 # Trim left
-function ltrimr!(list::DLinkedStartEnd, value::Int)
+function _ltrimr!(list::DLinkedStartEnd, value::Int)
     
     iterator = 1
     j = list.head
@@ -98,7 +119,7 @@ function ltrimr!(list::DLinkedStartEnd, value::Int)
 end
 
 # Trim right
-function ltriml!(list::DLinkedStartEnd, value::Int)
+function _ltriml!(list::DLinkedStartEnd, value::Int)
     
     iterator = 1
     j = list.tail
@@ -120,7 +141,7 @@ function ltriml!(list::DLinkedStartEnd, value::Int)
 end
 
 # Traversal function backward
-function traverse_linked_list_backward(list::DLinkedStartEnd)
+function _traverse_linked_list_backward(list::DLinkedStartEnd)
     println("Traversing backward:")
     j = list.tail
     while j !== nothing
@@ -130,7 +151,7 @@ function traverse_linked_list_backward(list::DLinkedStartEnd)
 end
 
 # compose list
-function compose_linked_list_forward(list::DLinkedStartEnd, limit::Int)
+function _compose_linked_list_forward(list::DLinkedStartEnd, limit::Int)
 
     iterator = 1
     return_list = []
@@ -143,7 +164,7 @@ function compose_linked_list_forward(list::DLinkedStartEnd, limit::Int)
     return return_list
 end
 
-function compose_linked_list_forward(list::DLinkedStartEnd, start_s::Int, end_s::Int)
+function _compose_linked_list_forward(list::DLinkedStartEnd, start_s::Int, end_s::Int)
     iterator = 1
     return_list = []
     j = list.head
@@ -159,7 +180,7 @@ end
 
 
 # Traversal function forward
-function traverse_linked_list_forward(list::DLinkedStartEnd)
+function _traverse_linked_list_forward(list::DLinkedStartEnd)
     @info "Traversing forward:"
     j = list.head
     while j !== nothing
@@ -168,31 +189,31 @@ function traverse_linked_list_forward(list::DLinkedStartEnd)
     end
 end
 
-function lget(list::DLinkedStartEnd)
+function _lget(list::DLinkedStartEnd)
     @info "Truncating to 50 elements..."
-    return_value = compose_linked_list_forward(list, 50)
+    return_value = _compose_linked_list_forward(list, 50)
     return return_value
 end
 
-function llen(list::DLinkedStartEnd)
+function _llen(list::DLinkedStartEnd)
     return list.len
 end
 
-function lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::AbstractString)
+function _lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::AbstractString)
     start_s = tryparse(Int, start_s)
     end_s = tryparse(Int, end_s)
     if isa(start_s, Nothing) || isa(start_s, Nothing)
         @warn "start or end or both are not parsable integers"
         return nothing
     end
-    return_value = compose_linked_list_forward(list, start_s, end_s)
+    return_value = _compose_linked_list_forward(list, start_s, end_s)
     return return_value
 
 end
 
 # Consuming listr and listl is a completely new object
 # O(1) time
-function lmove!(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
+function _lmove!(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     
     # listr empty
     if listr.len == 0
@@ -228,7 +249,7 @@ end
 
 # Non MUTATING function
 # it keeps Listl and Listr
-function lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
+function _lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     new_list = DLinkedStartEnd{T}()
     
     current = listl.head
@@ -258,14 +279,14 @@ end
 
 const LL_PALETTE = Dict{String, Tuple}(
     "L_ADD" => (ladd!, radd!),
-    "L_LEN" => (llen, rget_or_expire!),
-    "L_PUSH" => (push!, radd_or_modify!),
-    "L_APPEND" => (append!, radd_or_modify!),
-    "L_TRIMR" => (ltrimr!, rmodify!),
-    "L_TRIML" => (ltriml!, rmodify!),
+    # "L_LEN" => (llen, rget_or_expire!),
+    "L_PUSH" => (lpush!, radd_or_modify!),
+    # "L_APPEND" => (append!, radd_or_modify!),
+    # "L_TRIMR" => (ltrimr!, rmodify!),
+    # "L_TRIML" => (ltriml!, rmodify!),
     "L_GET" => (lget, rget_or_expire!),
-    "L_RANGE" => (lrange, rget_or_expire!),
-    "L_MOVE" => (lmove!, rmodify!),
-    "L_MOVE" => (sincr_by!, rmodify!),
-    "L_CONCAT" => (lconcat, radd!),
+    # "L_RANGE" => (lrange, rget_or_expire!),
+    # "L_MOVE" => (lmove!, rmodify!),
+    # "L_MOVE" => (sincr_by!, rmodify!),
+    # "L_CONCAT" => (lconcat, radd!),
 )
