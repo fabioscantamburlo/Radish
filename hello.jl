@@ -44,28 +44,28 @@ push!(my_list, "day")
 # println(lget(my_list))
 # println(llen(my_list))
 
-ltrimr!(my_list, 4)
+# ltrimr!(my_list, 4)
 
 append!(my_list2, "gianluca")
 append!(my_list2, "stefano")
 
-println(lget(my_list))
-println(lget(my_list2))
+println(_lget(my_list))
+println(_lget(my_list2))
 # println(llen(my_list))
 
 # println(lrange(my_list, "4", "20"))
 # println(lrange(my_list, "4", "3"))
-bbb = lconcat(my_list, my_list2)
-lmove!(my_list, my_list2)
+bbb = _lconcat(my_list, my_list2)
+_lmove!(my_list, my_list2)
 
 
 
 
-println(lget(bbb))
-println(lget(my_list))
+println(_lget(bbb))
+println(_lget(my_list))
 
 # consumed
-println(lget(my_list2))
+println(_lget(my_list2))
 
 
 

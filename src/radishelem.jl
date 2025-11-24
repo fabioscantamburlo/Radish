@@ -175,7 +175,7 @@ function radd_or_modify!(context::Dict, key::AbstractString, command::Function, 
 
 end
 
-# Base function to modify RadishElement from the context
+# Base function to modify RadishElement from the context using a Value
 function rmodify!(context::Dict, key::AbstractString, command::Function, args...)
     # GET rid of key
     if haskey(context, key)
@@ -188,6 +188,29 @@ function rmodify!(context::Dict, key::AbstractString, command::Function, args...
     end
     @warn "Element at key '$key' not found"
     return false
+end
+
+# Base function to modify RadishElement from the context using another RadishElement
+function rmodify_with_el!(context::Dict, key::AbstractString, command::Function, args...)
+    @debug "PASSING ARGS '$args...'"
+    keyright = args[1]
+    keyleft = key
+    other_args = args[2:end]
+    @debug "Modify existing elements keyleft='$keyleft' with keyright='$keyright'"
+    @debug "PASSING ARGS '$other_args...'"
+    if haskey(context, keyleft)
+        if haskey(context, keyright)
+            eleft = context[keyleft]
+            eright = context[keyright]
+            ret_value = command(eleft, eright, other_args...)
+            return ret_value
+        else
+            @warn "Element at key '$keyright' not found"
+        end
+    else 
+        @warn "Element at '$keyleft' not found"
+    end
+    return nothing
 end
 
 # Base function to compare Radish elements of the same type !!!!

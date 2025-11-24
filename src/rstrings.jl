@@ -11,6 +11,7 @@ end
 # SET
 function sadd(value::AbstractString, ttl::AbstractString)
     value_n = tryparse(Int, value)
+    # If possible try to force integer ~ otherwise keep it as string
     if isa(value_n, Nothing)
         value_n = value
     end
