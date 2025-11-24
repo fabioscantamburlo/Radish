@@ -31,9 +31,6 @@ function DLinkedStartEnd(value::T) where T
     return DLinkedStartEnd{T}(new_element, new_element, 1)
 end
 
-# function lpush!(value::T)
-
-# end 
 
 # Add a list of 1 element
 function ladd!(value::AbstractString)
@@ -96,21 +93,37 @@ function Base.append!(list::DLinkedStartEnd{T}, value::T) where T
     return list
 end
 
-# Trim left
+function lappend!(elem::RadishElement, value::AbstractString)
+    @debug "Executing lappend! with elements '$elem' , '$value' "
+    append!(elem.value, value)
+    return true
+end
+
+function lappend!(value::AbstractString)
+    @debug "Executing lappend! with elements '$value' "
+    return ladd!(value)
+end
+
+# Trim right
 function _ltrimr!(list::DLinkedStartEnd, value::Int)
     
+    if value == 0
+        @warn "While trimming a list, value must be > 0 - got '$value' "
+        return
+    end
     iterator = 1
     j = list.head
     len = list.len
     if len <= value
-        println("Trimming a list of len '$len' to '$value' - nothing changes")
+        @warn "Trimming a list of len '$len' to '$value' - nothing changes"
         return
     end
+
 
     while iterator < value
         j = j.next
         iterator = iterator + 1
-        @info "iterator '$iterator'"
+        # @info "iterator '$iterator'"
     end
     
     j.next = nothing
@@ -118,9 +131,27 @@ function _ltrimr!(list::DLinkedStartEnd, value::Int)
     list.len = value
 end
 
-# Trim right
+function ltrimr!(elem::RadishElement, value:: AbstractString)
+    @debug "Executing ltrimr! with elements '$elem' '$value' "
+    value_n = tryparse(Int, value)
+    if isa(value_n, Nothing)
+        @warn "Error not parsable int '$value'"
+        return false
+    end
+
+    _ltrimr!(elem.value, value_n)
+    return true
+
+end
+
+
+# Trim left
 function _ltriml!(list::DLinkedStartEnd, value::Int)
     
+    if value == 0
+        @warn "While trimming a list, value must be > 0 - got '$value' "
+        return
+    end
     iterator = 1
     j = list.tail
     len = list.len
@@ -138,6 +169,19 @@ function _ltriml!(list::DLinkedStartEnd, value::Int)
     j.prev = nothing
     list.head = j
     list.len = value
+end
+
+function ltriml!(elem::RadishElement, value:: AbstractString)
+    @debug "Executing ltriml! with elements '$elem' '$value' "
+    value_n = tryparse(Int, value)
+    if isa(value_n, Nothing)
+        @warn "Error not parsable int '$value'"
+        return false
+    end
+
+    _ltriml!(elem.value, value_n)
+    return true
+
 end
 
 # Traversal function backward
@@ -199,6 +243,11 @@ function _llen(list::DLinkedStartEnd)
     return list.len
 end
 
+function llen(elem::RadishElement)
+    return _llen(elem.value)
+end
+
+
 function _lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::AbstractString)
     start_s = tryparse(Int, start_s)
     end_s = tryparse(Int, end_s)
@@ -209,6 +258,11 @@ function _lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::Abstract
     return_value = _compose_linked_list_forward(list, start_s, end_s)
     return return_value
 
+end
+
+
+function lrange(elem::RadishElement, start_s::AbstractString, end_s::AbstractString)
+    return _lrange(elem.value, start_s, end_s)
 end
 
 # Consuming listr and listl is a completely new object
@@ -247,6 +301,11 @@ function _lmove!(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     return listl
 end
 
+function lmove!(listl::RadishElement, listr::RadishElement)
+    @debug "Calling _lmove! with args '$listl', '$listr' "
+    _lmove!(listl.value, listr.value)
+    return true
+end
 # Non MUTATING function
 # it keeps Listl and Listr
 function _lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
@@ -267,6 +326,13 @@ function _lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     return new_list
 end
 
+# TODO LCONCAT! 
+# THINK ABOUT DOING IT (ASSIGN NEW ELEMENT? )
+# SUBSTITUTE ELEMENT1 AND NOT CONSUME ELEMENT2?
+
+
+
+
 # LPUSH adds a new element to the head of a list; RPUSH adds to the tail.
 # LPOP removes and returns an element from the head of a list; RPOP does the same but from the tails of a list.
 # LLEN returns the length of a list.
@@ -279,14 +345,13 @@ end
 
 const LL_PALETTE = Dict{String, Tuple}(
     "L_ADD" => (ladd!, radd!),
-    # "L_LEN" => (llen, rget_or_expire!),
+    "L_LEN" => (llen, rget_or_expire!),
     "L_PUSH" => (lpush!, radd_or_modify!),
-    # "L_APPEND" => (append!, radd_or_modify!),
-    # "L_TRIMR" => (ltrimr!, rmodify!),
-    # "L_TRIML" => (ltriml!, rmodify!),
+    "L_APPEND" => (lappend!, radd_or_modify!),
+    "L_TRIMR" => (ltrimr!, rmodify!),
+    "L_TRIML" => (ltriml!, rmodify!),
     "L_GET" => (lget, rget_or_expire!),
-    # "L_RANGE" => (lrange, rget_or_expire!),
-    # "L_MOVE" => (lmove!, rmodify!),
-    # "L_MOVE" => (sincr_by!, rmodify!),
+    "L_RANGE" => (lrange, rget_or_expire!),
+    "L_MOVE" => (lmove!, rmodify_with_el!),
     # "L_CONCAT" => (lconcat, radd!),
 )
