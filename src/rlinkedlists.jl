@@ -331,6 +331,11 @@ end
 # SUBSTITUTE ELEMENT1 AND NOT CONSUME ELEMENT2?
 
 
+# TODO RENAME OPERATIONS FOLLOWING THIS:
+# Operation,Front (Head / Index 0),Back (Tail / End)
+# Add,Prepend / Unshift,Append / Push
+# Remove,Shift / Dequeue,Pop / Truncate
+
 
 
 # LPUSH adds a new element to the head of a list; RPUSH adds to the tail.
