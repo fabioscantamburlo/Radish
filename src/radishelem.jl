@@ -26,7 +26,7 @@ In particular there are few hypercommands that operates on the RadishContext and
     - radd! (adds a key to the RadishContext with its element type and value)
     - rdelete! (deletes a key from the RadishContext with its element type and value)
     - rmodify! (modifies an element given its key belonging to the RadishContext, for instance S_INCR uses rmodify!)
-    - rcompare (compares two RadishElements of the same type given the two keys, for instance S_LCS uses rcompare)
+    - relement_to_element (compares two RadishElements of the same type given the two keys, for instance S_LCS uses relement_to_element)
 
 and few hypercommands that operate on the RadishContext and its keys for instance:
     - rlistkeys (returns all the keys saved in the RadishContext)
@@ -72,7 +72,7 @@ Using the same hypercommands forces to have the same return values:
 - radd! returns true or false, corrisponding to addition succcessful or not.
 - rmodify! returns true or false, corrisponding to modification succcessful or not.
 - rdelete! returns true or false, corrisponding to key eliminated or not.
-- rcompare returns the result of the comparison or nothing if something went wrong.
+- relement_to_element returns the result of the comparison or nothing if something went wrong.
 - .... more to come.....
 
 With this pattern of delegation and strict "data contracts", I hope it's going to be easy to define new data types in the future.
@@ -190,19 +190,19 @@ function rmodify!(context::Dict, key::AbstractString, command::Function, args...
     return false
 end
 
-# Base function to modify RadishElement from the context using another RadishElement
-function rmodify_with_el!(context::Dict, key::AbstractString, command::Function, args...)
-    @debug "PASSING ARGS '$args...'"
+function relement_to_element_consume_key2!(context::Dict, key, command::Function, args...)
     keyright = args[1]
     keyleft = key
     other_args = args[2:end]
-    @debug "Modify existing elements keyleft='$keyleft' with keyright='$keyright'"
-    @debug "PASSING ARGS '$other_args...'"
+    @debug "Comparing existing elements keyleft='$keyleft' and keyright='$keyright'"
+    @debug "PASSING ARGS '$args...'"
     if haskey(context, keyleft)
         if haskey(context, keyright)
             eleft = context[keyleft]
             eright = context[keyright]
             ret_value = command(eleft, eright, other_args...)
+            @debug "Eliminating keyright = '$keyright'"
+            delete!(context, keyright)
             return ret_value
         else
             @warn "Element at key '$keyright' not found"
@@ -214,7 +214,7 @@ function rmodify_with_el!(context::Dict, key::AbstractString, command::Function,
 end
 
 # Base function to compare Radish elements of the same type !!!!
-function rcompare(context::Dict, key, command::Function, args...)
+function relement_to_element(context::Dict, key, command::Function, args...)
     keyright = args[1]
     keyleft = key
     other_args = args[2:end]

@@ -9,9 +9,10 @@ include(joinpath(@__DIR__, "src", "rlinkedlists.jl"))
 # Main loop
 export do_radish_work, show_help, main_loop
 # Functions of the Radish
-(export RadishElement, rmodify!, rmodify_with_el!, rget_or_expire!,
+(export RadishElement, rmodify!, relement_to_element, rget_or_expire!,
+        relement_to_element_consume_key2!,
         rget_on_modify_or_expire!, rdelete!, radd!,radd_or_modify!,
-        rcompare, rlistkeys )
+        relement_to_element, rlistkeys )
 
 
 # Functions for the stringtype
