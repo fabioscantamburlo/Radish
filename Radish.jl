@@ -21,9 +21,11 @@ export sincr!, sincr_by!, sget, sadd, slpad!, srpad!, sappend!, sgetrange, slcs,
 export  S_PALETTE
 
 # Functions for the DoubleLinkedList type
-(export DLinkedStartEnd, DLinkedListElement, traverse_linked_list_backward, traverse_linked_list_forward, 
-        compose_linked_list_forward,
+(export DLinkedStartEnd, DLinkedListElement, _traverse_linked_list_backward, _traverse_linked_list_forward, 
+        _compose_linked_list_forward,
+        lprepend!, 
         _lget, llen,
+        _dequeue!,
         ltrimr!, ltriml!, _ltriml, _ltrimr,
         lrange, _lmove!, _lconcat, ladd!)
 # Const for linkedlist type

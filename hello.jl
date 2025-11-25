@@ -37,9 +37,6 @@ push!(my_list, "disney")
 push!(my_list, "day")
 # println("\nList after 4rd element: ",  my_list.head)
 
-# Run the fixed traversal
-# traverse_linked_list_backward(my_list)
-# traverse_linked_list_forward(my_list)
 
 # println(lget(my_list))
 # println(llen(my_list))
@@ -63,9 +60,21 @@ _lmove!(my_list, my_list2)
 
 println(_lget(bbb))
 println(_lget(my_list))
-
 # consumed
 println(_lget(my_list2))
+
+println("Dequeuing .... ")
+println(_lget(my_list))
+_dequeue!(my_list)
+println(_lget(my_list))
+_traverse_linked_list_backward(my_list)
+println("Popping .... ")
+println(_lget(my_list))
+pop!(my_list)
+println(_lget(my_list))
+_traverse_linked_list_backward(my_list)
+
+
 
 
 
