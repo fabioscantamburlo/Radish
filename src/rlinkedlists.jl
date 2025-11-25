@@ -357,6 +357,6 @@ const LL_PALETTE = Dict{String, Tuple}(
     "L_TRIML" => (ltriml!, rmodify!),
     "L_GET" => (lget, rget_or_expire!),
     "L_RANGE" => (lrange, rget_or_expire!),
-    "L_MOVE" => (lmove!, rmodify_with_el!),
+    "L_MOVE" => (lmove!, relement_to_element_consume_key2!),
     # "L_CONCAT" => (lconcat, radd!),
 )

@@ -72,7 +72,7 @@ end
         key_succ = "user$j"
         # For this test, the value is just the number 'i'. No expiration is set.
         # radd!(radish_context, key, sadd(key, i, 1))
-        res = rcompare(radish_context, string(key), slcs, string(key_succ))
+        res = relement_to_element(radish_context, string(key), slcs, string(key_succ))
         # Print progress without slowing down the loop too much
         if i % info_num == 0
             println("... Testing lcs '$i-th' element ...")

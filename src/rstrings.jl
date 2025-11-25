@@ -208,6 +208,6 @@ const S_PALETTE = Dict{String, Tuple}(
     "S_APPEND" => (sappend!, rmodify!),
     "S_GETRANGE" => (sgetrange, rget_or_expire!),
     "S_LEN" => (slen, rget_or_expire!),
-    "S_LCS" => (slcs, rcompare),
-    "S_COMPLEN" => (sclen, rcompare)
+    "S_LCS" => (slcs, relement_to_element),
+    "S_COMPLEN" => (sclen, relement_to_element)
 )
