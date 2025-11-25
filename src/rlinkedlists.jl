@@ -43,23 +43,23 @@ function ladd!(value::AbstractString, ttl::DateTime)
     return RadishElement(new_element, ttl, now())
 end 
 
-function lpush!(elem::RadishElement, value::AbstractString)
-    @debug "Executing lpush! with elements '$elem' , '$value' "
+# Function to add on top of the list 
+# [1, 2, 3] 
+# prepend 3 => [3, 1, 2, 3]
+function lprepend!(elem::RadishElement, value::AbstractString)
+    @debug "Executing lprepend! with elements '$elem' , '$value' "
     push!(elem.value, value)
     return true
 end
 
-function lpush!(value::AbstractString, args...)
-    @debug "Executing lpush! with elements '$value' , '$value' "
+function lprepend!(value::AbstractString, args...)
+    @debug "Executing lprepend! with elements '$value' , '$value' "
     return ladd!(value, args...)
 end
 
 function lget(elem::RadishElement)
     return _lget(elem.value)
 end
-
-# TODO WE NEED TO WRAP ALL THE BASE FUNCTIONS WORKING WITH DLinkedStartEnd WITH 
-#TODO # AN ADDITIONAL LAYER FOR RADISHELEMENT
 
 function Base.push!(list::DLinkedStartEnd{T}, value::T) where T
     new_element = DLinkedListElement(value, nothing, nothing)
@@ -266,7 +266,6 @@ function lrange(elem::RadishElement, start_s::AbstractString, end_s::AbstractStr
 end
 
 # Consuming listr and listl is a completely new object
-# O(1) time
 function _lmove!(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     
     # listr empty
@@ -301,6 +300,8 @@ function _lmove!(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     return listl
 end
 
+# Move list 2 into list 1 and delete empty object.
+# lmove! [1, 2, 3] [2, 3] => [1, 2, 3, 2, 3] [/] (deleted)
 function lmove!(listl::RadishElement, listr::RadishElement)
     @debug "Calling _lmove! with args '$listl', '$listr' "
     _lmove!(listl.value, listr.value)
@@ -326,15 +327,50 @@ function _lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     return new_list
 end
 
+
+
+# mutable struct DLinkedListElement{T}
+#     data::T
+#     next::Union{DLinkedListElement{T}, Nothing}
+#     prev::Union{DLinkedListElement{T}, Nothing}
+# end
+
+# # Struct of the basic module
+# mutable struct DLinkedStartEnd{T}
+#     head::Union{DLinkedListElement{T}, Nothing}
+#     tail::Union{DLinkedListElement{T}, Nothing}
+#     len::Int
+    
+#     DLinkedStartEnd{T}() where T = new{T}(nothing, nothing, 0)
+#     DLinkedStartEnd{T}(h, t, l) where T = new{T}(h, t, l)
+# end
+
+
+# Eliminate an element from the head
+# rget_on_modify_or_expire!
+function _dequeue!(list::DLinkedStartEnd{T}) where T
+
+    # Eliminate the first element
+    list.head = list.head.next
+    list.head.prev = nothing
+    list.len =- 1
+end
+
+# Eliminate an element from the tail
+# rget_on_modify_or_expire!
+function Base.pop!(list::DLinkedStartEnd{T}) where T
+
+    # Eliminate last element
+    list.tail = list.tail.prev
+    list.tail.next = nothing
+    list.len -= 1
+end
+
+
+
 # TODO LCONCAT! 
 # THINK ABOUT DOING IT (ASSIGN NEW ELEMENT? )
 # SUBSTITUTE ELEMENT1 AND NOT CONSUME ELEMENT2?
-
-
-# TODO RENAME OPERATIONS FOLLOWING THIS:
-# Operation,Front (Head / Index 0),Back (Tail / End)
-# Add,Prepend / Unshift,Append / Push
-# Remove,Shift / Dequeue,Pop / Truncate
 
 
 
@@ -351,7 +387,7 @@ end
 const LL_PALETTE = Dict{String, Tuple}(
     "L_ADD" => (ladd!, radd!),
     "L_LEN" => (llen, rget_or_expire!),
-    "L_PUSH" => (lpush!, radd_or_modify!),
+    "L_PREPEND" => (lprepend!, radd_or_modify!),
     "L_APPEND" => (lappend!, radd_or_modify!),
     "L_TRIMR" => (ltrimr!, rmodify!),
     "L_TRIML" => (ltriml!, rmodify!),
