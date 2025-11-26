@@ -27,6 +27,7 @@ export  S_PALETTE
         _lget, llen,
         _dequeue!,
         ltrimr!, ltriml!, _ltriml, _ltrimr,
+        lpop!, ldequeue!,
         lrange, _lmove!, _lconcat, ladd!)
 # Const for linkedlist type
 export LL_PALETTE

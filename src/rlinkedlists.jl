@@ -328,45 +328,47 @@ function _lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
 end
 
 
-
-# mutable struct DLinkedListElement{T}
-#     data::T
-#     next::Union{DLinkedListElement{T}, Nothing}
-#     prev::Union{DLinkedListElement{T}, Nothing}
-# end
-
-# # Struct of the basic module
-# mutable struct DLinkedStartEnd{T}
-#     head::Union{DLinkedListElement{T}, Nothing}
-#     tail::Union{DLinkedListElement{T}, Nothing}
-#     len::Int
-    
-#     DLinkedStartEnd{T}() where T = new{T}(nothing, nothing, 0)
-#     DLinkedStartEnd{T}(h, t, l) where T = new{T}(h, t, l)
-# end
-
-
 # Eliminate an element from the head
 # rget_on_modify_or_expire!
 function _dequeue!(list::DLinkedStartEnd{T}) where T
 
+    # Get first element data
+    value = list.head.data
+
     # Eliminate the first element
     list.head = list.head.next
     list.head.prev = nothing
-    list.len =- 1
+    list.len = list.len - 1
+
+    return value
 end
 
 # Eliminate an element from the tail
 # rget_on_modify_or_expire!
 function Base.pop!(list::DLinkedStartEnd{T}) where T
 
+    # Get last element data
+    value = list.tail.data
+
     # Eliminate last element
     list.tail = list.tail.prev
     list.tail.next = nothing
-    list.len -= 1
+    list.len = list.len - 1
+
+    return value
 end
 
 
+function ldequeue!(element::RadishElement)
+    res = _dequeue!(element.value)
+    return res
+end
+
+
+function lpop!(element::RadishElement)
+    res = pop!(element.value)
+    return res
+end
 
 # TODO LCONCAT! 
 # THINK ABOUT DOING IT (ASSIGN NEW ELEMENT? )
@@ -394,5 +396,7 @@ const LL_PALETTE = Dict{String, Tuple}(
     "L_GET" => (lget, rget_or_expire!),
     "L_RANGE" => (lrange, rget_or_expire!),
     "L_MOVE" => (lmove!, relement_to_element_consume_key2!),
+    "L_POP" => (lpop!, rget_on_modify_or_expire!),
+    "L_DEQUEUE" => (ldequeue!, rget_on_modify_or_expire!),
     # "L_CONCAT" => (lconcat, radd!),
 )
