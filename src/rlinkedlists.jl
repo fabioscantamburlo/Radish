@@ -331,30 +331,46 @@ end
 # Eliminate an element from the head
 # rget_on_modify_or_expire!
 function _dequeue!(list::DLinkedStartEnd{T}) where T
-
-    # Get first element data
+    if list.len == 0
+        error("Cannot dequeue from empty list")
+    end
+    
     value = list.head.data
-
-    # Eliminate the first element
+    
+    if list.len == 1
+        list.head = nothing
+        list.tail = nothing
+        list.len = 0
+        return value
+    end
+    
     list.head = list.head.next
     list.head.prev = nothing
     list.len = list.len - 1
-
+    
     return value
 end
 
 # Eliminate an element from the tail
 # rget_on_modify_or_expire!
 function Base.pop!(list::DLinkedStartEnd{T}) where T
-
-    # Get last element data
+    if list.len == 0
+        error("Cannot pop from empty list")
+    end
+    
     value = list.tail.data
-
-    # Eliminate last element
+    
+    if list.len == 1
+        list.head = nothing
+        list.tail = nothing
+        list.len = 0
+        return value
+    end
+    
     list.tail = list.tail.prev
     list.tail.next = nothing
     list.len = list.len - 1
-
+    
     return value
 end
 
