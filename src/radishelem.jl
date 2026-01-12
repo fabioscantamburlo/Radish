@@ -236,16 +236,16 @@ function relement_to_element(context::Dict, key, command::Function, args...)
 end
 
 function rlistkeys(context::Dict, args...)
-    limit = args[1]
-    limit_s = tryparse(Int, limit)
-    if isa(limit_s, Nothing)
-        return rlistkeys(context)
+    key_list = [(k, context[k].datatype) for k in keys(context)]
+    
+    if isempty(args)
+        return key_list
     end
-    key_list = [(k, context[k].datatype) for k in keys(context)]
+    
+    limit_s = tryparse(Int, args[1])
+    if isa(limit_s, Nothing)
+        return key_list
+    end
+    
     return first(key_list, limit_s)
-end
-
-function rlistkeys(context::Dict)
-    key_list = [(k, context[k].datatype) for k in keys(context)]
-    return key_list
 end

@@ -6,7 +6,10 @@ export RadishLock
 
 
 const NOKEY_PALETTE = Dict{String, Function}(
-    "KLIST" => rlistkeys
+    "KLIST" => rlistkeys,
+    "PING" => (ctx, args...) -> "PONG",
+    "QUIT" => (ctx, args...) -> "Goodbye",
+    "EXIT" => (ctx, args...) -> "Goodbye"
 )
 
 const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE))
