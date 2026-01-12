@@ -81,11 +81,11 @@ With this pattern of delegation and strict "data contracts", I hope it's going t
 using Dates
 using Logging
 # Base struct of the RadishElement
-# TODO optimise ttl and tinit in a single tuple ttl{(int, datetime), Nothing}
 mutable struct RadishElement
     value::Any
     ttl::Union{Int128, Nothing}
     tinit::DateTime
+    datatype::Symbol
 end
 
 # Base function to get RadishElement from the context
@@ -241,10 +241,11 @@ function rlistkeys(context::Dict, args...)
     if isa(limit_s, Nothing)
         return rlistkeys(context)
     end
-    key_iterator = collect(keys(context))
-    return first(key_iterator, limit_s)
+    key_list = [(k, context[k].datatype) for k in keys(context)]
+    return first(key_list, limit_s)
 end
+
 function rlistkeys(context::Dict)
-    key_iterator = collect(keys(context))
-    return key_iterator
+    key_list = [(k, context[k].datatype) for k in keys(context)]
+    return key_list
 end

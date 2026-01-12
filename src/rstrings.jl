@@ -19,7 +19,7 @@ function sadd(value::AbstractString, ttl::AbstractString)
     if isa(ttl_p, Nothing)
         println("ttl not a valid integer - got '$ttl' tt forced to nothing")
     end
-    return RadishElement(value_n, ttl_p, now())
+    return RadishElement(value_n, ttl_p, now(), :string)
 end
 
 function sadd(value::AbstractString, ttl::Nothing)
@@ -27,7 +27,7 @@ function sadd(value::AbstractString, ttl::Nothing)
     if isa(value_n, Nothing)
         value_n = value
     end
-    return RadishElement(value_n, ttl, now())
+    return RadishElement(value_n, ttl, now(), :string)
 end
 
 function sadd(value::AbstractString)
@@ -35,7 +35,7 @@ function sadd(value::AbstractString)
     if isa(value_n, Nothing)
         value_n = value
     end
-    return RadishElement(value, nothing, now())
+    return RadishElement(value, nothing, now(), :string)
 end
 
 # INCREMENT

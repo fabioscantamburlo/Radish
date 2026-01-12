@@ -35,12 +35,12 @@ end
 # Add a list of 1 element
 function ladd!(value::AbstractString)
     new_element =  DLinkedStartEnd(value)
-    return RadishElement(new_element, nothing, now())
+    return RadishElement(new_element, nothing, now(), :list)
 end
 
 function ladd!(value::AbstractString, ttl::DateTime)
     new_element =  DLinkedStartEnd(value)
-    return RadishElement(new_element, ttl, now())
+    return RadishElement(new_element, ttl, now(), :list)
 end 
 
 # Function to add on top of the list 

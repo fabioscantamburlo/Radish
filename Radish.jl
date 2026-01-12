@@ -2,8 +2,10 @@ module Radish
 
 include(joinpath(@__DIR__, "src", "radishelem.jl"))
 include(joinpath(@__DIR__, "src", "rstrings.jl"))
-include(joinpath(@__DIR__, "src", "main_loop.jl"))
 include(joinpath(@__DIR__, "src", "rlinkedlists.jl"))
+include(joinpath(@__DIR__, "src", "server.jl"))
+include(joinpath(@__DIR__, "src", "dispatcher.jl"))
+include(joinpath(@__DIR__, "src", "main_loop.jl"))
 
 
 # Main loop
