@@ -17,17 +17,18 @@ end
 
 
 const RadishContext = Dict{String, RadishElement}
-# const RadishLock = ReentrantLock
-struct ShardedLock
-    shards::Vector{ReadWriteLock}
-    num_shards::Int
-end
+const RadishLock = ReentrantLock
 
-ShardedLock(n=2048) = ShardedLock([ReadWriteLock() for _ in 1:n], n)
+# struct ShardedLock
+#     shards::Vector{ReadWriteLock}
+#     num_shards::Int
+# end
 
-function shard_id(lock::ShardedLock, key::String)
-    return (hash(key) % lock.num_shards) + 1
-end
+# ShardedLock(n=2048) = ShardedLock([ReadWriteLock() for _ in 1:n], n)
+
+# function shard_id(lock::ShardedLock, key::String)
+#     return (hash(key) % lock.num_shards) + 1
+# end
 
 
 # Function to clean some expired data every loop cycle

@@ -40,7 +40,7 @@ end
 
 # INCREMENT
 function sincr!(elem::RadishElement)
-    elem_n = tryparse(Int, elem.value)
+    elem_n = tryparse(Int, string(elem.value))
     if isa(elem_n, Int)
         elem_n += 1
         elem.value = string(elem_n)
@@ -51,7 +51,7 @@ end
 
 # GET INCREMENT: GET AND THEN INCREMENT
 function sgincr!(elem::RadishElement)
-    elem_n = tryparse(Int, elem.value)
+    elem_n = tryparse(Int, string(elem.value))
     orig_elem = elem_n
     if isa(elem_n, Int)
         elem_n += 1
@@ -63,7 +63,7 @@ end
 
 # INCRBY
 function sgincr_by!(elem::RadishElement, incr::AbstractString)
-    elem_n = tryparse(Int, elem.value)
+    elem_n = tryparse(Int, string(elem.value))
     original_elem = elem_n
     incr_n = tryparse(Int, incr)
     if isa(elem_n, Int)
@@ -78,7 +78,7 @@ end
 
 # INCRBY
 function sincr_by!(elem::RadishElement, incr::AbstractString)
-    elem_n = tryparse(Int, elem.value)
+    elem_n = tryparse(Int, string(elem.value))
     incr_n = tryparse(Int, incr)
     if isa(elem_n, Int)
         if isa(incr_n, Int)

@@ -247,14 +247,45 @@ NOKEY_PALETTE = Dict{String, Function}(
 
 Strict return value contracts ensure consistency:
 
+### Hypercommand Return Values
+
 - **rget_or_expire!** → Element value or `nothing` if not found/expired
 - **rget_on_modify_or_expire!** → Modified element or `nothing` if not found/modification failed
 - **radd!** → `true` (success) or `false` (key exists)
 - **radd_or_modify!** → Result of add or modify operation
-- **rmodify!** → `true`/result (success) or `false` (key not found)
+- **rmodify!** → Result value or `nothing` if key not found
 - **rdelete!** → `true` (deleted) or `false` (key not found)
-- **relement_to_element** → Comparison result or `nothing` if error
-- **relement_to_element_consume_key2!** → Operation result or `nothing` if error
+- **relement_to_element** → Comparison result or `nothing` if either key not found
+- **relement_to_element_consume_key2!** → Operation result or `nothing` if either key not found
+
+### ExecuteResult Status Mapping
+
+The dispatcher maps hypercommand results to ExecutionStatus:
+
+```julia
+@enum ExecutionStatus begin
+    SUCCESS          # Command executed successfully
+    KEY_NOT_FOUND    # Command valid but key doesn't exist
+    ERROR            # Command error (wrong command, wrong type, etc.)
+end
+```
+
+**Mapping logic:**
+
+1. **ERROR status** - Used for:
+   - Unknown commands
+   - Type mismatches (WRONGTYPE)
+   - Missing required arguments
+   - Exceptions during execution
+
+2. **KEY_NOT_FOUND status** - Used when:
+   - Hypercommand returns `nothing` (key not found or expired)
+   - Client receives `(nil)` response
+
+3. **SUCCESS status** - Used when:
+   - Hypercommand returns any non-`nothing` value
+   - Includes `true`, `false`, integers, strings, arrays, tuples
+   - Client receives formatted value or `+OK`
 
 ## Type Validation
 

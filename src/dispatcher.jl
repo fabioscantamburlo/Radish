@@ -2,7 +2,7 @@ using Dates
 using Logging 
 
 export RadishElement, S_PALETTE, LL_PALETTE, RadishContext
-export RadishLock
+export RadishLock, ExecutionStatus, ExecuteResult, Command
 
 
 const NOKEY_PALETTE = Dict{String, Function}(
@@ -14,6 +14,13 @@ const NOKEY_PALETTE = Dict{String, Function}(
 
 const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE))
 
+# Execution status enum
+@enum ExecutionStatus begin
+    SUCCESS          # Command executed successfully
+    KEY_NOT_FOUND    # Command valid but key doesn't exist
+    ERROR            # Command error (wrong command, wrong type, etc.)
+end
+
 # Struct for the Basic Radish Command
 struct Command
     name::String #Command name in Palette
@@ -22,11 +29,10 @@ struct Command
 end
 
 # Struct to capture result of the command
-# Rework the return type - very important
 struct ExecuteResult
-    ack::Bool # Result ok or error
-    value::Any # Result return (nothing or value)
-    error::Union{Nothing, String} # Error happening or nothing if all ok
+    status::ExecutionStatus      # Execution status
+    value::Any                   # Result return (nothing or value)
+    error::Union{Nothing, String} # Error message (only for ERROR status)
 end
 
 function execute!(ctx::RadishContext, db_lock::RadishLock, cmd::Command)
@@ -42,49 +48,61 @@ function execute!(ctx::RadishContext, db_lock::RadishLock, cmd::Command)
             if cmd_key === nothing
                 hypercommand = NOKEY_PALETTE[cmd_name]
                 ret_value = hypercommand(ctx, cmd_args...)
-                return ExecuteResult(true, ret_value, nothing)
+                return ExecuteResult(SUCCESS, ret_value, nothing)
             else
-                return ExecuteResult(false, nothing, "Command $(cmd_name) does not accept a key")
+                return ExecuteResult(ERROR, nothing, "Command $(cmd_name) does not accept a key")
             end
         
         # STRING commands (key required)
         elseif cmd_name in keys(S_PALETTE)
             if cmd_key === nothing
-                return ExecuteResult(false, nothing, "Command $(cmd_name) requires a key")
+                return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
             end
             
             # Type validation for existing keys
             if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :string
-                return ExecuteResult(false, nothing, 
+                return ExecuteResult(ERROR, nothing, 
                     "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a string")
             end
             
             type_command, hypercommand = S_PALETTE[cmd_name]
             ret_value = hypercommand(ctx, cmd_key, type_command, cmd_args...)
-            return ExecuteResult(true, ret_value, nothing)
+            
+            # Check if key was not found
+            if ret_value === nothing
+                return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+            else
+                return ExecuteResult(SUCCESS, ret_value, nothing)
+            end
         
         # LINKEDLIST commands (key required)
         elseif cmd_name in keys(LL_PALETTE)
             if cmd_key === nothing
-                return ExecuteResult(false, nothing, "Command $(cmd_name) requires a key")
+                return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
             end
             
             # Type validation for existing keys
             if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :list
-                return ExecuteResult(false, nothing, 
+                return ExecuteResult(ERROR, nothing, 
                     "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a list")
             end
             
             type_command, hypercommand = LL_PALETTE[cmd_name]
             ret_value = hypercommand(ctx, cmd_key, type_command, cmd_args...)
-            return ExecuteResult(true, ret_value, nothing)
+            
+            # Check if key was not found
+            if ret_value === nothing
+                return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+            else
+                return ExecuteResult(SUCCESS, ret_value, nothing)
+            end
         
         else
-            return ExecuteResult(false, nothing, "Unknown command: $(cmd_name)")
+            return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
         end
 
     catch e
-        return ExecuteResult(false, nothing, string(e))
+        return ExecuteResult(ERROR, nothing, string(e))
     finally
         unlock(db_lock)
     end

@@ -122,12 +122,23 @@ The dispatcher's `execute!` function:
 6. **Releases lock**
 
 ```julia
+@enum ExecutionStatus begin
+    SUCCESS          # Command executed successfully
+    KEY_NOT_FOUND    # Command valid but key doesn't exist
+    ERROR            # Command error (wrong command, wrong type, etc.)
+end
+
 struct ExecuteResult
-    ack::Bool                       # Success or error
-    value::Any                      # Return value (or nothing)
-    error::Union{Nothing, String}   # Error message (or nothing)
+    status::ExecutionStatus      # Execution status
+    value::Any                   # Return value (or nothing)
+    error::Union{Nothing, String} # Error message (only for ERROR status)
 end
 ```
+
+**Execution flow:**
+- **ERROR status**: Wrong command, type mismatch, missing arguments
+- **KEY_NOT_FOUND status**: Command valid but key doesn't exist (returns nil to client)
+- **SUCCESS status**: Command executed, may have return value or nothing
 
 ### 3. Type Validation
 
@@ -213,16 +224,21 @@ $5\r\nhello\r\n           (bulk string)
 ### Response Type Mapping
 
 ```julia
-if result.value === nothing
-    write(sock, "+OK\r\n")
-elseif isa(result.value, Bool)
-    write(sock, result.value ? ":1\r\n" : ":0\r\n")
-elseif isa(result.value, Integer)
-    write(sock, ":$(result.value)\r\n")
-elseif isa(result.value, AbstractString)
-    write(sock, "\$$(length(result.value))\r\n$(result.value)\r\n")
-elseif isa(result.value, Vector)
-    # Array response with multiple bulk strings
+if result.status == ERROR
+    write(sock, "-ERR $(result.error)\r\n")
+elseif result.status == KEY_NOT_FOUND
+    write(sock, "\$-1\r\n")  # Nil bulk string
+elseif result.status == SUCCESS
+    if result.value === nothing
+        write(sock, "+OK\r\n")
+    elseif isa(result.value, Bool)
+        write(sock, result.value ? ":1\r\n" : ":0\r\n")
+    elseif isa(result.value, Integer)
+        write(sock, ":$(result.value)\r\n")
+    elseif isa(result.value, AbstractString)
+        write(sock, "\$$(length(result.value))\r\n$(result.value)\r\n")
+    # ... arrays, tuples, etc.
+end
 ```
 
 ## Concurrency & Thread Safety
@@ -270,13 +286,7 @@ Each client connection runs in its own async task, allowing multiple concurrent 
 
 ## Legacy REPL Mode
 
-The old single-process REPL is still available:
-
-```bash
-julia runner.jl
-```
-
-This mode uses the same dispatcher and command system but runs in a local REPL instead of over TCP.
+The legacy single-process REPL mode has been removed. Use the client-server architecture instead.
 
 ## File Structure
 
@@ -288,8 +298,7 @@ src/
 ├── dispatcher.jl   - Command routing, execution, type validation
 ├── radishelem.jl   - Core hypercommands, RadishElement struct
 ├── rstrings.jl     - String type commands and S_PALETTE
-├── rlinkedlists.jl - List type commands and LL_PALETTE
-└── main_loop.jl    - Legacy REPL mode
+└── rlinkedlists.jl - List type commands and LL_PALETTE
 ```
 
 ## Next Steps

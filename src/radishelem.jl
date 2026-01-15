@@ -110,7 +110,7 @@ function rmodify!(context::Dict, key::AbstractString, command::Function, args...
         return ret_value
     end
     @warn "Element at key '$key' not found"
-    return false
+    return nothing
 end
 
 function relement_to_element_consume_key2!(context::Dict, key, command::Function, args...)

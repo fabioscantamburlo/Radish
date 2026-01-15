@@ -62,7 +62,13 @@ end
 
 # Write ExecuteResult as RESP to socket
 function write_resp_response(sock::TCPSocket, result::ExecuteResult)
-    if result.ack
+    if result.status == ERROR
+        # Error response
+        write(sock, "-ERR $(result.error)\r\n")
+    elseif result.status == KEY_NOT_FOUND
+        # Key not found - return nil
+        write(sock, "\$-1\r\n")
+    elseif result.status == SUCCESS
         # Success - format based on value type
         if result.value === nothing
             write(sock, "+OK\r\n")
@@ -97,9 +103,6 @@ function write_resp_response(sock::TCPSocket, result::ExecuteResult)
             str = string(result.value)
             write(sock, "\$$(length(str))\r\n$(str)\r\n")
         end
-    else
-        # Error response
-        write(sock, "-ERR $(result.error)\r\n")
     end
 end
 
@@ -147,7 +150,7 @@ function read_resp_response(sock::TCPSocket)
         # Bulk string
         len = parse(Int, line[2:end])
         if len == -1
-            return "(nil)"
+            return "✅ (nil)"
         end
         data = readline(sock)
         return "✅ $(rstrip(data))"

@@ -1,116 +1,250 @@
+#!/usr/bin/env julia
+# Radish Benchmark Suite
+# Tests all commands on native types (bypassing dispatcher/REPL)
+# Usage: julia bench.jl [num_iterations]
+
 using Dates
+using Printf
 include("Radish.jl")
 using .Radish
 
+# Parse command line arguments
+const NUM_ITERATIONS = length(ARGS) >= 1 ? parse(Int, ARGS[1]) : 100_000
+const LIST_LENGTH = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 200_000
+const TRIM_PAR = 15
+println("="^60)
+println("RADISH BENCHMARK SUITE")
+println("="^60)
+println("Iterations: $(NUM_ITERATIONS)")
+println("List Length: $(LIST_LENGTH)")
+println("="^60)
 
-println("---- New Run ----")
+# Storage for timing results
+results = Dict{String, Float64}()
 
-radish_context = Dict{String, RadishElement}()
-
-
-const NUM_ELEMENTS = 1_000_000
-info_num = NUM_ELEMENTS/10
-
-radish_context = Dict{String, RadishElement}()
-# sizehint!(radish_context, NUM_ELEMENTS)
-
-println("--- STARTING BENCHMARK ON STRING DATATYPE ---")
-println("--- Starting Benchmark: Adding $NUM_ELEMENTS elements ---")
-
-# Use @time to measure the execution time and memory allocation of this block.
-@time begin
-    for i in 1:NUM_ELEMENTS
-        key = "user$i"
-        # For this test, the value is just the number 'i'. No expiration is set.
-        radd!(radish_context, key, sadd, string(i), string(50))
-
-        # Print progress without slowing down the loop too much
-        if i % info_num == 0
-            println("... Added $i elements ...")
-        end
+# Helper macro to benchmark and store results
+macro bench(name, expr)
+    quote
+        print("Testing $($(name))... ")
+        local t = @elapsed $(esc(expr))
+        results[$(name)] = t
+        @printf("%.4f s\n", t)
     end
 end
 
-println("\n--- Finished Adding. Dictionary contains $(length(radish_context)) elements. ---")
-println("--- Starting Benchmark: Retrieving $NUM_ELEMENTS elements ---")
+# Create test context
+ctx = Dict{String, RadishElement}()
 
+println("\n" * "="^60)
+println("STRING COMMANDS")
+println("="^60)
 
-
-@time begin
-    for i in 1:NUM_ELEMENTS
-        key = "user$i"
-        value = rget_or_expire!(radish_context, key, sget)
-
-        if i % info_num == 0
-            println("... Retrieved $i elements ...")
-        end
+# S_SET (via radd!)
+@bench "S_SET" begin
+    for i in 1:NUM_ITERATIONS
+        radd!(ctx, "key$i", sadd, "value$i", nothing)
     end
 end
 
-println("\n--- Finished Retrieving. ---")
-
-
-println("--- Starting Benchmark: Rpad $NUM_ELEMENTS elements ---")
-# Use @time to measure the execution time and memory allocation of this block.
-@time begin
-    for i in 1:NUM_ELEMENTS
-        key = "user$i"
-        # For this test, the value is just the number 'i'. No expiration is set.
-        # radd!(radish_context, key, sadd(key, i, 1))
-        rmodify!(radish_context, key, srpad!, "10", "_")
-        # Print progress without slowing down the loop too much
-        if i % info_num == 0
-            println("... RightPadding $i elements ...")
-        end
+# S_GET (via rget_or_expire!)
+@bench "S_GET" begin
+    for i in 1:NUM_ITERATIONS
+        rget_or_expire!(ctx, "key$i", sget)
     end
 end
 
-@time begin
-    for i in 1:NUM_ELEMENTS - 1
-        key = "user$i"
-        j = i + 1
-        key_succ = "user$j"
-        # For this test, the value is just the number 'i'. No expiration is set.
-        # radd!(radish_context, key, sadd(key, i, 1))
-        res = relement_to_element(radish_context, string(key), slcs, string(key_succ))
-        # Print progress without slowing down the loop too much
-        if i % info_num == 0
-            println("... Testing lcs '$i-th' element ...")
-            e1, e2 = rget_or_expire!(radish_context, key, sget), rget_or_expire!(radish_context, key_succ, sget)
-            println("... Result lcs for '$e1', $e2', = '$res")
-        end
+# S_APPEND
+@bench "S_APPEND" begin
+    for i in 1:NUM_ITERATIONS
+        rmodify!(ctx, "key$i", sappend!, "_suffix")
     end
 end
 
-
-
-# Example of retrieving a few specific values, just like in your example
-println("\n--- Final check of specific users ---")
-a = rget_or_expire!(radish_context, "user1", sget)
-b = rget_or_expire!(radish_context, "user80", sget)
-c = rget_or_expire!(radish_context, "user99", sget)
-d = rget_or_expire!(radish_context, "user499999", sget)
-
-println("Value of user1: ", a)
-println("Value of user80: ", b)
-println("Value of user99: ", c)
-println("Value of user499999: ", d)
-
-
-println("--- STARTING BENCHMARK ON LINKED LISTS DATATYPE ---")
-
-my_list = DLinkedStartEnd("ciao")
-
-
-@time begin
-    for i in 1:NUM_ELEMENTS - 1
-        append!(my_list, string(i))
-        if i % info_num == 0
-            println("... Testing append on '$i-th' element ...")
-        end
+# S_LEN
+@bench "S_LEN" begin
+    for i in 1:NUM_ITERATIONS
+        rget_or_expire!(ctx, "key$i", slen)
     end
 end
 
-println(lget(my_list))
-println(length(lget(my_list)))
-println(llen(my_list))
+# S_GETRANGE
+@bench "S_GETRANGE" begin
+    for i in 1:NUM_ITERATIONS
+        rget_or_expire!(ctx, "key$i", sgetrange, "1", "5")
+    end
+end
+
+# S_RPAD
+@bench "S_RPAD" begin
+    for i in 1:NUM_ITERATIONS
+        rmodify!(ctx, "key$i", srpad!, "20", "_")
+    end
+end
+
+# S_LPAD
+@bench "S_LPAD" begin
+    for i in 1:NUM_ITERATIONS
+        rmodify!(ctx, "key$i", slpad!, "25", "*")
+    end
+end
+
+# Setup integer keys for increment tests
+for i in 1:NUM_ITERATIONS
+    radd!(ctx, "counter$i", sadd, "0", nothing)
+end
+
+# S_INCR
+@bench "S_INCR" begin
+    for i in 1:NUM_ITERATIONS
+        rmodify!(ctx, "counter$i", sincr!)
+    end
+end
+
+# S_INCRBY
+@bench "S_INCRBY" begin
+    for i in 1:NUM_ITERATIONS
+        rmodify!(ctx, "counter$i", sincr_by!, "5")
+    end
+end
+
+# S_GINCR
+@bench "S_GINCR" begin
+    for i in 1:NUM_ITERATIONS
+        rget_on_modify_or_expire!(ctx, "counter$i", sgincr!)
+    end
+end
+
+# S_GINCRBY
+@bench "S_GINCRBY" begin
+    for i in 1:NUM_ITERATIONS
+        rget_on_modify_or_expire!(ctx, "counter$i", sgincr_by!, "3")
+    end
+end
+
+# S_LCS (two-key operation)
+radd!(ctx, "lcs1", sadd, "abcdef", nothing)
+radd!(ctx, "lcs2", sadd, "abedef", nothing)
+@bench "S_LCS" begin
+    for i in 1:NUM_ITERATIONS
+        relement_to_element(ctx, "lcs1", slcs, "lcs2")
+    end
+end
+
+# S_COMPLEN
+@bench "S_COMPLEN" begin
+    for i in 1:NUM_ITERATIONS
+        relement_to_element(ctx, "lcs1", sclen, "lcs2")
+    end
+end
+
+println("\n" * "="^60)
+println("LIST COMMANDS")
+println("="^60)
+
+# Create a fixed-length test list
+radd!(ctx, "testlist", ladd!, "item0")
+for i in 1:(LIST_LENGTH-1)
+    lappend!(ctx["testlist"], "item$i")
+end
+
+# L_PREPEND
+@bench "L_PREPEND" begin
+    for i in 1:NUM_ITERATIONS
+        radd_or_modify!(ctx, "preplist", lprepend!, "new_item")
+    end
+end
+
+# L_APPEND
+@bench "L_APPEND" begin
+    for i in 1:NUM_ITERATIONS
+        radd_or_modify!(ctx, "applist", lappend!, "new_item")
+    end
+end
+
+# L_LEN
+@bench "L_LEN" begin
+    for i in 1:NUM_ITERATIONS
+        rget_or_expire!(ctx, "testlist", llen)
+    end
+end
+
+# L_RANGE
+@bench "L_RANGE" begin
+    for i in 1:NUM_ITERATIONS
+        rget_or_expire!(ctx, "testlist", lrange, "1", "5")
+    end
+end
+
+# L_POP (add items first, then pop them)
+radd!(ctx, "poplist", ladd!, "item0")
+for i in 1:NUM_ITERATIONS
+    lappend!(ctx["poplist"], "temp_item")
+end
+@bench "L_POP" begin
+    for i in 1:NUM_ITERATIONS
+        rget_on_modify_or_expire!(ctx, "poplist", lpop!)
+    end
+end
+
+# L_DEQUEUE (add items first, then dequeue them)
+radd!(ctx, "dequeuelist", ladd!, "item0")
+for i in 1:NUM_ITERATIONS
+    lprepend!(ctx["dequeuelist"], "temp_item")
+end
+@bench "L_DEQUEUE" begin
+    for i in 1:NUM_ITERATIONS
+        rget_on_modify_or_expire!(ctx, "dequeuelist", ldequeue!)
+    end
+end
+
+# Skip TRIM commands due to known issues
+
+# L_MOVE (recreate list2 each iteration since it gets consumed)
+@bench "L_MOVE" begin
+    for i in 1:NUM_ITERATIONS
+        radd!(ctx, "movelist1_$i", ladd!, "a")
+        radd!(ctx, "movelist2_$i", ladd!, "b")
+        relement_to_element_consume_key2!(ctx, "movelist1_$i", lmove!, "movelist2_$i")
+    end
+end
+
+println("\n" * "="^60)
+println("CONTEXT COMMANDS")
+println("="^60)
+
+# KLIST (test on small context)
+small_ctx = Dict{String, RadishElement}()
+for i in 1:100
+    radd!(small_ctx, "testkey$i", sadd, "value$i", nothing)
+end
+@bench "KLIST" begin
+    for i in 1:NUM_ITERATIONS
+        rlistkeys(small_ctx)
+    end
+end
+
+# rdelete!
+@bench "DELETE" begin
+    for i in 1:NUM_ITERATIONS
+        rdelete!(ctx, "key$i")
+    end
+end
+
+println("\n" * "="^60)
+println("BENCHMARK SUMMARY")
+println("="^60)
+
+# Sort results by time
+sorted_results = sort(collect(results), by=x->x[2])
+
+println(@sprintf("%-20s %12s %15s", "Command", "Time (s)", "Ops/sec"))
+println("-"^60)
+
+for (cmd, time) in sorted_results
+    ops_per_sec = NUM_ITERATIONS/time
+    @printf("%-20s %12.4f %15.0f\n", cmd, time, ops_per_sec)
+end
+
+println("="^60)
+println("Total benchmark time: $(sum(values(results))) seconds")
+println("="^60)

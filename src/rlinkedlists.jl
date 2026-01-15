@@ -156,14 +156,13 @@ function _ltriml!(list::DLinkedStartEnd, value::Int)
     j = list.tail
     len = list.len
     if len <= value
-        println("Trimming a list of len '$len' to '$value' - nothing changes")
+        @warn "Trimming a list of len '$len' to '$value' - nothing changes"
         return
     end
 
     while iterator < value
         j = j.prev
         iterator = iterator + 1
-        println("iterator '$iterator'")
     end
     
     j.prev = nothing
