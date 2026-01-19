@@ -158,7 +158,7 @@ function read_resp_response(sock::TCPSocket)
         # Array
         count = parse(Int, line[2:end])
         if count == 0
-            return "(empty array)"
+            return "[]"
         end
         
         results = String[]
@@ -168,10 +168,10 @@ function read_resp_response(sock::TCPSocket)
                 return "❌ Protocol error: empty line in array"
             end
             len = parse(Int, len_line[2:end])
-            data = readline(sock)
-            push!(results, "  $i) $(rstrip(data))")
+            data = rstrip(readline(sock))
+            push!(results, data)
         end
-        return "✅ Array with $count elements:\n" * join(results, "\n")
+        return "[" * join(results, ", ") * "]" 
     else
         return "Unknown RESP type: $first_char"
     end
