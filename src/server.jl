@@ -1,5 +1,6 @@
 using Dates
 using Logging
+using StatsBase
 using Sockets
 using ConcurrentUtilities
 
@@ -19,25 +20,71 @@ end
 const RadishContext = Dict{String, RadishElement}
 
 
-# TODO MODIFY TO DO NOT LOCK ENTIRE DATA BUT GOING SHARD BY SHARD.
-function async_cleaner(ctx::RadishContext, db_lock::ShardedLock, interval::Int=2)
+
+function async_cleaner(ctx::RadishContext, db_lock::ShardedLock, interval::Float64=0.001)
     while true
-        shard_ids = acquire_all_write!(db_lock)
-        try
-            key_iterator = collect(keys(ctx))
-            for i in key_iterator
-                if haskey(ctx, i) 
-                    ttl = ctx[i].ttl
-                    tinit = ctx[i].tinit
-                    if ttl !== nothing && now() > tinit + Second(ttl)
-                        delete!(ctx, i)
+        all_keys = collect(keys(ctx))
+        
+        if isempty(all_keys)
+            sleep(interval)
+            continue
+        end
+        
+        all_key_len = length(all_keys)
+        # Sample 10% of keys randomly
+        # Check all keys if < a fixed value
+        if all_key_len < 100_000
+            sample_size = length(all_keys)
+            sampled_keys = all_keys
+        else 
+            sample_size = max(1, round(Int, 0.10 * length(all_keys)))
+            sampled_keys = sample(all_keys, min(sample_size, length(all_keys)), replace=false)
+        end
+
+        # Group keys by shard
+        keys_by_shard = Dict{Int, Vector{String}}()
+        for key in sampled_keys
+            shard = shard_id(db_lock, key)
+            if !haskey(keys_by_shard, shard)
+                keys_by_shard[shard] = String[]
+            end
+            push!(keys_by_shard[shard], key)
+        end
+        
+        # Process one shard at a time
+        shard_list = sort(collect(Base.keys(keys_by_shard)))
+        total_cleaned = 0
+        
+        @info "🧹 Cleaner: checking $(length(sampled_keys)) keys across $(length(shard_list)) shards"
+        
+        for shard in shard_list
+            Base.lock(db_lock.shards[shard])
+            
+            try
+                cleaned_in_shard = 0
+                for key in keys_by_shard[shard]
+                    if haskey(ctx, key)
+                        elem = ctx[key]
+                        if elem.ttl !== nothing && now() > elem.tinit + Second(elem.ttl)
+                            delete!(ctx, key)
+                            cleaned_in_shard += 1
+                        end
                     end
                 end
-            end 
-            
-        finally
-            release_write!(db_lock, shard_ids)
+                
+                # if cleaned_in_shard > 0
+                #     @info "  Shard #$shard: cleaned $cleaned_in_shard keys"
+                # end
+                total_cleaned += cleaned_in_shard
+            finally
+                Base.unlock(db_lock.shards[shard])
+            end
         end
+        
+        if total_cleaned > 0
+            @info "✅ Cleaner: removed $total_cleaned expired keys"
+        end
+        
         sleep(interval)
     end
 end
@@ -73,6 +120,9 @@ function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::ShardedLock
     catch e
         if isa(e, EOFError)
             @info "Client #$client_id disconnected"
+        elseif isa(e, Base.IOError) && e.code == -32
+            # Broken pipe - client disconnected, this is normal
+            @info "Client #$client_id disconnected (broken pipe)"
         else
             @warn "Client #$client_id error: $e"
         end
@@ -96,7 +146,7 @@ function start_server(host="127.0.0.1", port=6379)
     radd!(ctx, "user3", sadd, "cioa3", nothing)
     
     # Start background cleaner
-    @async async_cleaner(ctx, db_lock, 2)
+    @async async_cleaner(ctx, db_lock, 0.1)
     
     # Start TCP server
     server = listen(IPv4(host), port)
