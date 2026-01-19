@@ -2,7 +2,7 @@ using Dates
 using Logging 
 
 export RadishElement, S_PALETTE, LL_PALETTE, RadishContext
-export RadishLock, ExecutionStatus, ExecuteResult, Command
+export ShardedLock, ExecutionStatus, ExecuteResult, Command
 
 
 const NOKEY_PALETTE = Dict{String, Function}(
@@ -13,6 +13,12 @@ const NOKEY_PALETTE = Dict{String, Function}(
 )
 
 const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE))
+
+# Read operations (can run concurrently)
+const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET", "L_LEN", "L_RANGE", "KLIST"])
+
+# Multi-key operations
+const MULTI_KEY_OPS = Set(["S_LCS", "S_COMPLEN", "L_MOVE"])
 
 # Execution status enum
 @enum ExecutionStatus begin
@@ -35,12 +41,40 @@ struct ExecuteResult
     error::Union{Nothing, String} # Error message (only for ERROR status)
 end
 
-function execute!(ctx::RadishContext, db_lock::RadishLock, cmd::Command)
-    lock(db_lock)
-    
+function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command)
     cmd_name = cmd.name
     cmd_key = cmd.key
     cmd_args = cmd.args
+    
+    # Determine lock type and keys
+    is_read = cmd_name in READ_OPS
+    is_multi = cmd_name in MULTI_KEY_OPS
+    
+    # Acquire locks
+    shard_ids = if cmd_name in keys(NOKEY_PALETTE)
+        if cmd_name == "KLIST"
+            acquire_all_read!(db_lock)
+        else
+            Int[]  # PING, QUIT, EXIT - no lock needed
+        end
+    elseif is_multi && cmd_key !== nothing && !isempty(cmd_args)
+        # Multi-key: lock both keys
+        key_list = [cmd_key, cmd_args[1]]
+        if is_read
+            acquire_read!(db_lock, key_list)
+        else
+            acquire_write!(db_lock, key_list)
+        end
+    elseif cmd_key !== nothing
+        # Single key
+        if is_read
+            acquire_read!(db_lock, cmd_key)
+        else
+            acquire_write!(db_lock, cmd_key)
+        end
+    else
+        Int[]
+    end
 
     try
         # NOKEY commands (no key required)
@@ -104,6 +138,13 @@ function execute!(ctx::RadishContext, db_lock::RadishLock, cmd::Command)
     catch e
         return ExecuteResult(ERROR, nothing, string(e))
     finally
-        unlock(db_lock)
+        # Release locks
+        if !isempty(shard_ids)
+            if is_read || cmd_name == "KLIST"
+                release_read!(db_lock, shard_ids)
+            else
+                release_write!(db_lock, shard_ids)
+            end
+        end
     end
 end

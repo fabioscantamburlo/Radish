@@ -3,7 +3,7 @@ using Logging
 using Sockets
 using ConcurrentUtilities
 
-export RadishElement, S_PALETTE, LL_PALETTE, RadishContext, RadishLock
+export RadishElement, S_PALETTE, LL_PALETTE, RadishContext, ShardedLock
 export start_server
 
 
@@ -17,25 +17,12 @@ end
 
 
 const RadishContext = Dict{String, RadishElement}
-const RadishLock = ReentrantLock
-
-# struct ShardedLock
-#     shards::Vector{ReadWriteLock}
-#     num_shards::Int
-# end
-
-# ShardedLock(n=2048) = ShardedLock([ReadWriteLock() for _ in 1:n], n)
-
-# function shard_id(lock::ShardedLock, key::String)
-#     return (hash(key) % lock.num_shards) + 1
-# end
 
 
-# Function to clean some expired data every loop cycle
-# TODO IMPROVE !
-function async_cleaner(ctx::RadishContext, db_lock::RadishLock, interval::Int=2)
+# TODO MODIFY TO DO NOT LOCK ENTIRE DATA BUT GOING SHARD BY SHARD.
+function async_cleaner(ctx::RadishContext, db_lock::ShardedLock, interval::Int=2)
     while true
-        lock(db_lock) 
+        shard_ids = acquire_all_write!(db_lock)
         try
             key_iterator = collect(keys(ctx))
             for i in key_iterator
@@ -49,14 +36,14 @@ function async_cleaner(ctx::RadishContext, db_lock::RadishLock, interval::Int=2)
             end 
             
         finally
-            unlock(db_lock) 
+            release_write!(db_lock, shard_ids)
         end
         sleep(interval)
     end
 end
 
 # Handle individual client connection
-function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::RadishLock, client_id::Int)
+function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::ShardedLock, client_id::Int)
     @info "Client #$client_id connected from $(getpeername(sock))"
     
     try
@@ -101,7 +88,7 @@ function start_server(host="127.0.0.1", port=6379)
     
     # Initialize context and lock
     ctx = RadishContext()
-    db_lock = RadishLock()
+    db_lock = ShardedLock(256)
     
     # Seed test data
     radd!(ctx, "user1", sadd, "ciao", nothing)

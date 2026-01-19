@@ -3,6 +3,7 @@ module Radish
 include(joinpath(@__DIR__, "src", "radishelem.jl"))
 include(joinpath(@__DIR__, "src", "rstrings.jl"))
 include(joinpath(@__DIR__, "src", "rlinkedlists.jl"))
+include(joinpath(@__DIR__, "src", "sharded_lock.jl"))
 include(joinpath(@__DIR__, "src", "server.jl"))
 include(joinpath(@__DIR__, "src", "dispatcher.jl"))
 include(joinpath(@__DIR__, "src", "resp.jl"))
@@ -13,6 +14,9 @@ include(joinpath(@__DIR__, "src", "client.jl"))
         relement_to_element_consume_key2!,
         rget_on_modify_or_expire!, rdelete!, radd!,radd_or_modify!,
         relement_to_element, rlistkeys )
+
+# Sharded lock exports
+export ShardedLock
 
 # Functions for the stringtype
 (export sincr!, sincr_by!, sget, sadd, slpad!, srpad!,
