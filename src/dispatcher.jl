@@ -1,9 +1,7 @@
 using Dates
 using Logging 
 
-export RadishElement, S_PALETTE, LL_PALETTE, RadishContext
-export ShardedLock, ExecutionStatus, ExecuteResult, Command
-
+export RadishElement, S_PALETTE, LL_PALETTE
 
 const NOKEY_PALETTE = Dict{String, Function}(
     "KLIST" => rlistkeys,
@@ -12,7 +10,7 @@ const NOKEY_PALETTE = Dict{String, Function}(
     "EXIT" => (ctx, args...) -> "Goodbye"
 )
 
-const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE))
+const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE), ["MULTI", "EXEC", "DISCARD"])
 
 # Read operations (can run concurrently)
 const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET", "L_LEN", "L_RANGE", "KLIST"])
@@ -20,28 +18,7 @@ const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET", "L_LEN", "L_RANGE
 # Multi-key operations
 const MULTI_KEY_OPS = Set(["S_LCS", "S_COMPLEN", "L_MOVE"])
 
-# Execution status enum
-@enum ExecutionStatus begin
-    SUCCESS          # Command executed successfully
-    KEY_NOT_FOUND    # Command valid but key doesn't exist
-    ERROR            # Command error (wrong command, wrong type, etc.)
-end
-
-# Struct for the Basic Radish Command
-struct Command
-    name::String #Command name in Palette
-    key::Union{Nothing, String} # Key or nothing of the inmemory context
-    args::Vector{String} # Remaining Arguments
-end
-
-# Struct to capture result of the command
-struct ExecuteResult
-    status::ExecutionStatus      # Execution status
-    value::Any                   # Result return (nothing or value)
-    error::Union{Nothing, String} # Error message (only for ERROR status)
-end
-
-function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command)
+function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, session::ClientSession)
     cmd_name = cmd.name
     cmd_key = cmd.key
     cmd_args = cmd.args
@@ -50,7 +27,45 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command)
     is_read = cmd_name in READ_OPS
     is_multi = cmd_name in MULTI_KEY_OPS
     
-    # Acquire locks
+    # 1. Handle MULTI command
+    if cmd.name == "MULTI"
+        session.in_transaction = true
+        return ExecuteResult(SUCCESS, "OK", nothing)
+    end
+    
+    # 2. Handle DISCARD command
+    if cmd.name == "DISCARD"
+        if !session.in_transaction
+            return ExecuteResult(ERROR, nothing, "DISCARD without MULTI")
+        end
+        session.in_transaction = false
+        empty!(session.queued_commands)
+        return ExecuteResult(SUCCESS, "OK", nothing)
+    end
+    
+    # 3. Handle EXEC command
+    if cmd.name == "EXEC"
+        if !session.in_transaction
+            return ExecuteResult(ERROR, nothing, "EXEC without MULTI")
+        end
+        return execute_transaction!(ctx, db_lock, session)
+    end
+    
+    # 4. If in transaction, queue command instead of executing
+    if session.in_transaction
+        # Validate command exists before queuing
+        if cmd_name in keys(NOKEY_PALETTE) || cmd_name in keys(S_PALETTE) || cmd_name in keys(LL_PALETTE)
+            push!(session.queued_commands, cmd)
+            return ExecuteResult(SUCCESS, "QUEUED", nothing)
+        else
+            # Invalid command - abort transaction
+            session.in_transaction = false
+            empty!(session.queued_commands)
+            return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
+        end
+    end
+
+    # Normal execution: Acquire locks
     shard_ids = if cmd_name in keys(NOKEY_PALETTE)
         if cmd_name == "KLIST"
             acquire_all_read!(db_lock)
@@ -146,5 +161,117 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command)
                 release_write!(db_lock, shard_ids)
             end
         end
+    end
+end
+
+
+# Helper: extract all keys from queued commands
+function extract_all_keys(commands::Vector{Command})
+    keys = String[]
+    for cmd in commands
+        if cmd.key !== nothing
+            push!(keys, cmd.key)
+        end
+        # Handle multi-key operations (S_LCS, S_COMPLEN, L_MOVE)
+        if cmd.name in MULTI_KEY_OPS && !isempty(cmd.args)
+            push!(keys, cmd.args[1])
+        end
+    end
+    return keys
+end
+
+# Execute transaction: lock all keys and execute commands sequentially
+function execute_transaction!(ctx::RadishContext, db_lock::ShardedLock, session::ClientSession)
+    # Extract all keys from queued commands
+    all_keys = extract_all_keys(session.queued_commands)
+    
+    # Acquire write locks for all keys (sorted order to prevent deadlock)
+    shard_ids = if isempty(all_keys)
+        Int[]
+    else
+        acquire_write!(db_lock, sort(unique(all_keys)))
+    end
+    
+    results = ExecuteResult[]
+    try
+        # Execute each command without re-locking
+        for cmd in session.queued_commands
+            result = execute_unlocked!(ctx, cmd)
+            push!(results, result)
+        end
+    finally
+        # Release locks and reset session
+        if !isempty(shard_ids)
+            release_write!(db_lock, shard_ids)
+        end
+        session.in_transaction = false
+        empty!(session.queued_commands)
+    end
+    
+    return ExecuteResult(SUCCESS, results, nothing)
+end
+
+# Execute command without acquiring locks (locks already held by transaction)
+function execute_unlocked!(ctx::RadishContext, cmd::Command)
+    cmd_name = cmd.name
+    cmd_key = cmd.key
+    cmd_args = cmd.args
+    
+    # NOKEY commands (no key required)
+    if cmd_name in keys(NOKEY_PALETTE)
+        if cmd_key === nothing
+            hypercommand = NOKEY_PALETTE[cmd_name]
+            ret_value = hypercommand(ctx, cmd_args...)
+            return ExecuteResult(SUCCESS, ret_value, nothing)
+        else
+            return ExecuteResult(ERROR, nothing, "Command $(cmd_name) does not accept a key")
+        end
+    
+    # STRING commands (key required)
+    elseif cmd_name in keys(S_PALETTE)
+        if cmd_key === nothing
+            return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
+        end
+        
+        # Type validation for existing keys
+        if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :string
+            return ExecuteResult(ERROR, nothing, 
+                "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a string")
+        end
+        
+        type_command, hypercommand = S_PALETTE[cmd_name]
+        ret_value = hypercommand(ctx, cmd_key, type_command, cmd_args...)
+        
+        # Check if key was not found
+        if ret_value === nothing
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+        else
+            return ExecuteResult(SUCCESS, ret_value, nothing)
+        end
+    
+    # LINKEDLIST commands (key required)
+    elseif cmd_name in keys(LL_PALETTE)
+        if cmd_key === nothing
+            return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
+        end
+        
+        # Type validation for existing keys
+        if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :list
+            return ExecuteResult(ERROR, nothing, 
+                "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a list")
+        end
+        
+        type_command, hypercommand = LL_PALETTE[cmd_name]
+        ret_value = hypercommand(ctx, cmd_key, type_command, cmd_args...)
+        
+        # Check if key was not found
+        if ret_value === nothing
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+        else
+            return ExecuteResult(SUCCESS, ret_value, nothing)
+        end
+    
+    else
+        return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
     end
 end

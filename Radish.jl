@@ -1,12 +1,13 @@
 module Radish
 
 include(joinpath(@__DIR__, "src", "radishelem.jl"))
+include(joinpath(@__DIR__, "src", "definitions.jl"))
 include(joinpath(@__DIR__, "src", "rstrings.jl"))
 include(joinpath(@__DIR__, "src", "rlinkedlists.jl"))
 include(joinpath(@__DIR__, "src", "sharded_lock.jl"))
-include(joinpath(@__DIR__, "src", "server.jl"))
 include(joinpath(@__DIR__, "src", "dispatcher.jl"))
 include(joinpath(@__DIR__, "src", "resp.jl"))
+include(joinpath(@__DIR__, "src", "server.jl"))
 include(joinpath(@__DIR__, "src", "client.jl"))
 
 # Functions of the Radish
@@ -17,6 +18,9 @@ include(joinpath(@__DIR__, "src", "client.jl"))
 
 # Sharded lock exports
 export ShardedLock
+
+# Core definitions exports
+export RadishContext, ExecutionStatus, ExecuteResult, Command, ClientSession
 
 # Functions for the stringtype
 (export sincr!, sincr_by!, sget, sadd, slpad!, srpad!,

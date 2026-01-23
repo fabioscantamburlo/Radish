@@ -12,6 +12,11 @@ function show_help()
       HELP                    - Show this help message
       QUIT / EXIT             - Disconnect from server
     
+    Transaction Commands:
+      MULTI                   - Start transaction
+      EXEC                    - Execute queued commands atomically
+      DISCARD                 - Abort transaction and clear queue
+    
     Context Commands:
       KLIST [limit]           - List all keys (optional: limit results)
     
@@ -47,6 +52,13 @@ function show_help()
       S_SET mykey hello 60       - Set 'mykey' to 'hello' with 60s TTL
       L_PREPEND mylist item1     - Add 'item1' to head of 'mylist'
       KLIST 10                   - Show first 10 keys
+    
+    Transaction Example:
+      MULTI
+      S_SET account_A 100
+      S_INCR account_A
+      S_GET account_A
+      EXEC                       - Returns: [OK, true, 101]
     """)
 end
 

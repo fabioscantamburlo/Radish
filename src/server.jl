@@ -4,7 +4,7 @@ using StatsBase
 using Sockets
 using ConcurrentUtilities
 
-export RadishElement, S_PALETTE, LL_PALETTE, RadishContext, ShardedLock
+export RadishElement, S_PALETTE, LL_PALETTE
 export start_server
 
 
@@ -15,10 +15,6 @@ end
 ## Function TO RESTORE RADISH ON STARTUP
 function restore_radish()
 end
-
-
-const RadishContext = Dict{String, RadishElement}
-
 
 
 function async_cleaner(ctx::RadishContext, db_lock::ShardedLock, interval::Float64=0.001)
@@ -96,7 +92,8 @@ function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::ShardedLock
     try
         # Send welcome message
         write(sock, "+Welcome to Radish Server\r\n")
-        
+        session = ClientSession()
+
         while isopen(sock)
             # Read RESP command from socket
             cmd = read_resp_command(sock)
@@ -107,7 +104,7 @@ function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::ShardedLock
             end
             
             # Execute via dispatcher
-            result = execute!(ctx, db_lock, cmd)
+            result = execute!(ctx, db_lock, cmd, session)
             
             # Write RESP response back
             write_resp_response(sock, result)

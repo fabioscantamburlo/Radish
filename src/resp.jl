@@ -79,16 +79,25 @@ function write_resp_response(sock::TCPSocket, result::ExecuteResult)
         elseif isa(result.value, AbstractString)
             write(sock, "\$$(length(result.value))\r\n$(result.value)\r\n")
         elseif isa(result.value, Vector)
-            # Array response
-            write(sock, "*$(length(result.value))\r\n")
-            for item in result.value
-                if isa(item, Tuple)
-                    # For KLIST: (key, datatype)
-                    str = "$(item[1]) → $(item[2])"
-                    write(sock, "\$$(length(str))\r\n$(str)\r\n")
-                else
-                    str = string(item)
-                    write(sock, "\$$(length(str))\r\n$(str)\r\n")
+            # Check if it's a vector of ExecuteResult (transaction result)
+            if !isempty(result.value) && isa(result.value[1], ExecuteResult)
+                # Transaction result: array of sub-results
+                write(sock, "*$(length(result.value))\r\n")
+                for sub_result in result.value
+                    write_resp_response(sock, sub_result)  # Recursive call
+                end
+            else
+                # Regular array response
+                write(sock, "*$(length(result.value))\r\n")
+                for item in result.value
+                    if isa(item, Tuple)
+                        # For KLIST: (key, datatype)
+                        str = "$(item[1]) → $(item[2])"
+                        write(sock, "\$$(length(str))\r\n$(str)\r\n")
+                    else
+                        str = string(item)
+                        write(sock, "\$$(length(str))\r\n$(str)\r\n")
+                    end
                 end
             end
         elseif isa(result.value, Tuple)
@@ -163,13 +172,9 @@ function read_resp_response(sock::TCPSocket)
         
         results = String[]
         for i in 1:count
-            len_line = rstrip(readline(sock))
-            if isempty(len_line)
-                return "❌ Protocol error: empty line in array"
-            end
-            len = parse(Int, len_line[2:end])
-            data = rstrip(readline(sock))
-            push!(results, data)
+            # Recursively read each element (could be any RESP type)
+            element = read_resp_response(sock)
+            push!(results, element)
         end
         return "[" * join(results, ", ") * "]" 
     else

@@ -103,95 +103,13 @@ function client_worker(client_id::Int, num_ops::Int, total_keys::Int, run_foreve
             end
             
             ops_count += 1
-            # Pick random existing key
-            key_id = rand(1:total_keys)
-            is_string = key_id <= (total_keys ÷ 2)
             
-            if is_string
-                # STRING OPERATIONS on existing keys
-                key = "str_$key_id"
-                
-                # S_GET (read)
-                if rand() < 0.4
-                    send_command(sock, ["S_GET", key])
-                end
-                
-                # S_APPEND (write)
-                if rand() < 0.2
-                    send_command(sock, ["S_APPEND", key, "_x"])
-                end
-                
-                # S_LEN (read)
-                if rand() < 0.2
-                    send_command(sock, ["S_LEN", key])
-                end
-                
-                # S_GETRANGE (read)
-                if rand() < 0.1
-                    send_command(sock, ["S_GETRANGE", key, "0", "3"])
-                end
-                
-                # S_LCS (multi-key read)
-                if rand() < 0.1
-                    key2_id = rand(1:(total_keys ÷ 2))
-                    key2 = "str_$key2_id"
-                    send_command(sock, ["S_LCS", key, key2])
-                end
-                
+            # 10% chance to use a transaction
+            if rand() < 0.1
+                execute_transaction(sock, total_keys)
+                ops_count += rand(3:10)  # Count transaction ops
             else
-                # LIST OPERATIONS on existing keys
-                key = "list_$key_id"
-                
-                # L_PREPEND (write)
-                if rand() < 0.3
-                    send_command(sock, ["L_PREPEND", key, "new_item"])
-                end
-                
-                # L_APPEND (write)
-                if rand() < 0.3
-                    send_command(sock, ["L_APPEND", key, "tail_item"])
-                end
-                
-                # L_LEN (read)
-                if rand() < 0.2
-                    send_command(sock, ["L_LEN", key])
-                end
-                
-                # L_RANGE (read)
-                if rand() < 0.2
-                    send_command(sock, ["L_RANGE", key, "0", "10"])
-                end
-                
-                # L_POP (write)
-                if rand() < 0.05
-                    send_command(sock, ["L_POP", key])
-                end
-                
-                # L_MOVE (multi-key write) - use KLIST to find valid list key
-                if rand() < 0.01
-                    # Get 50 random keys and find a list
-                    response = send_command(sock, ["KLIST", "50"])
-                    # Parse response: [key1 → type1, key2 → type2, ...]
-                    if startswith(response, "[")
-                        # Extract list keys from response
-                        items = split(response[2:end-1], ", ")
-                        list_keys = String[]
-                        for item in items
-                            if contains(item, " → list")
-                                key_name = split(item, " → ")[1]
-                                if key_name != key  # Don't use same key
-                                    push!(list_keys, key_name)
-                                end
-                            end
-                        end
-                        
-                        # If we found a valid list key, do L_MOVE
-                        if !isempty(list_keys)
-                            key2 = rand(list_keys)
-                            send_command(sock, ["L_MOVE", key, key2])
-                        end
-                    end
-                end
+                execute_single_operation(sock, total_keys)
             end
             
             if ops_count % 1000 == 0
@@ -215,7 +133,121 @@ function client_worker(client_id::Int, num_ops::Int, total_keys::Int, run_foreve
     end
 end
 
-function run_heavy_test(num_clients::Int, ops_per_client::Int, initial_keys::Int, 
+function execute_single_operation(sock::TCPSocket, total_keys::Int)
+    # Pick random existing key
+    key_id = rand(1:total_keys)
+    is_string = key_id <= (total_keys ÷ 2)
+    
+    if is_string
+        # STRING OPERATIONS on existing keys
+        key = "str_$key_id"
+        
+        # S_GET (read)
+        if rand() < 0.4
+            send_command(sock, ["S_GET", key])
+        end
+        
+        # S_APPEND (write)
+        if rand() < 0.2
+            send_command(sock, ["S_APPEND", key, "_x"])
+        end
+        
+        # S_LEN (read)
+        if rand() < 0.2
+            send_command(sock, ["S_LEN", key])
+        end
+        
+        # S_GETRANGE (read)
+        if rand() < 0.1
+            send_command(sock, ["S_GETRANGE", key, "0", "3"])
+        end
+        
+        # S_LCS (multi-key read)
+        if rand() < 0.1
+            key2_id = rand(1:(total_keys ÷ 2))
+            key2 = "str_$key2_id"
+            send_command(sock, ["S_LCS", key, key2])
+        end
+        
+    else
+        # LIST OPERATIONS on existing keys
+        key = "list_$key_id"
+        
+        # L_PREPEND (write)
+        if rand() < 0.3
+            send_command(sock, ["L_PREPEND", key, "new_item"])
+        end
+        
+        # L_APPEND (write)
+        if rand() < 0.3
+            send_command(sock, ["L_APPEND", key, "tail_item"])
+        end
+        
+        # L_LEN (read)
+        if rand() < 0.2
+            send_command(sock, ["L_LEN", key])
+        end
+        
+        # L_RANGE (read)
+        if rand() < 0.2
+            send_command(sock, ["L_RANGE", key, "0", "10"])
+        end
+        
+        # L_POP (write)
+        if rand() < 0.05
+            send_command(sock, ["L_POP", key])
+        end
+    end
+end
+
+function execute_transaction(sock::TCPSocket, total_keys::Int)
+    # Start transaction
+    send_command(sock, ["MULTI"])
+    
+    # Queue 3-100 operations
+    num_ops = rand(3:100)
+    
+    for _ in 1:num_ops
+        key_id = rand(1:total_keys)
+        is_string = key_id <= (total_keys ÷ 2)
+        
+        if is_string
+            key = "str_$key_id"
+            op = rand(1:5)
+            
+            if op == 1
+                send_command(sock, ["S_GET", key])
+            elseif op == 2
+                send_command(sock, ["S_APPEND", key, "_tx"])
+            elseif op == 3
+                send_command(sock, ["S_LEN", key])
+            elseif op == 4
+                send_command(sock, ["S_INCR", key])
+            else
+                send_command(sock, ["S_GETRANGE", key, "0", "5"])
+            end
+        else
+            key = "list_$key_id"
+            op = rand(1:4)
+            
+            if op == 1
+                send_command(sock, ["L_GET", key])
+            elseif op == 2
+                send_command(sock, ["L_PREPEND", key, "tx_item"])
+            elseif op == 3
+                send_command(sock, ["L_APPEND", key, "tx_tail"])
+            else
+                send_command(sock, ["L_LEN", key])
+            end
+        end
+    end
+    
+    # Execute transaction
+    send_command(sock, ["EXEC"])
+end
+
+function run_heavy_test(num_clients::Int, ops_per_client::Int, initial_keys::Int,
+ 
                         setup_only::Bool=false, run_forever::Bool=false)
     println("🔥 Starting HEAVY test")
     println("   Mode: $(setup_only ? "SETUP ONLY" : run_forever ? "CONTINUOUS LOAD" : "TIMED TEST")")

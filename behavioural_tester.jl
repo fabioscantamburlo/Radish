@@ -51,12 +51,40 @@ function assert_equals(response::String, expected::String, test_name::String, st
 end
 
 function assert_success(response::String, test_name::String, stats::TestStats)
-    if startswith(response, "✅") || startswith(response, "OK")
+    if startswith(response, "✅") || response == "OK" || response == "QUEUED"
         println("✅ $test_name")
         stats.passed += 1
         return true
     else
         println("❌ $test_name")
+        println("   Got: '$response'")
+        stats.failed += 1
+        return false
+    end
+end
+
+function assert_is_array(response::String, test_name::String, stats::TestStats)
+    if startswith(response, "[")
+        println("✅ $test_name")
+        stats.passed += 1
+        return true
+    else
+        println("❌ $test_name")
+        println("   Expected array starting with '['") 
+        println("   Got: '$response'")
+        stats.failed += 1
+        return false
+    end
+end
+
+function assert_is_nil(response::String, test_name::String, stats::TestStats)
+    if occursin("(nil)", response)
+        println("✅ $test_name")
+        stats.passed += 1
+        return true
+    else
+        println("❌ $test_name")
+        println("   Expected nil")
         println("   Got: '$response'")
         stats.failed += 1
         return false
@@ -73,11 +101,11 @@ function test_context_commands(sock::TCPSocket, stats::TestStats)
     
     # KLIST
     resp = send_command(sock, "KLIST")
-    assert_contains(resp, "Array", "KLIST command", stats)
+    assert_is_array(resp, "KLIST command", stats)
     
     # KLIST with limit
     resp = send_command(sock, "KLIST 2")
-    assert_contains(resp, "Array", "KLIST with limit", stats)
+    assert_is_array(resp, "KLIST with limit", stats)
 end
 
 function test_string_commands(sock::TCPSocket, stats::TestStats)
@@ -161,7 +189,7 @@ function test_string_commands(sock::TCPSocket, stats::TestStats)
     resp = send_command(sock, "S_SET str1 abcdef")
     resp = send_command(sock, "S_SET str2 acdxf")
     resp = send_command(sock, "S_LCS str1 str2")
-    assert_contains(resp, "Array", "S_LCS", stats)
+    assert_is_array(resp, "S_LCS", stats)
     
     # S_COMPLEN (compare lengths)
     resp = send_command(sock, "S_SET len1 hello")
@@ -201,7 +229,7 @@ function test_list_commands(sock::TCPSocket, stats::TestStats)
     
     # L_RANGE
     resp = send_command(sock, "L_RANGE mylist 1 2")
-    assert_contains(resp, "Array", "L_RANGE", stats)
+    assert_is_array(resp, "L_RANGE", stats)
     
     # L_POP (remove from tail)
     resp = send_command(sock, "L_POP mylist")
@@ -258,17 +286,9 @@ end
 function test_error_cases(sock::TCPSocket, stats::TestStats)
     println("\n⚠️  Testing Error Cases...")
     
-    # Get non-existent key (returns nothing/OK)
+    # Get non-existent key (returns nil)
     resp = send_command(sock, "S_GET nonexistent")
-    if resp == "OK"
-        println("✅ S_GET non-existent key returns OK")
-        stats.passed += 1
-    else
-        println("❌ S_GET non-existent key returns OK")
-        println("   Expected: 'OK'")
-        println("   Got: '$resp'")
-        stats.failed += 1
-    end
+    assert_is_nil(resp, "S_GET non-existent key returns nil", stats)
     
     # Wrong type operation
     resp = send_command(sock, "S_SET stringkey value")
@@ -279,6 +299,71 @@ function test_error_cases(sock::TCPSocket, stats::TestStats)
     resp = send_command(sock, "S_SET existkey val")
     resp = send_command(sock, "S_SET existkey val2")
     assert_contains(resp, "0", "S_SET on existing key returns false", stats)
+end
+
+function test_transaction_commands(sock::TCPSocket, stats::TestStats)
+    println("\n💳 Testing Transaction Commands...")
+    
+    # Basic MULTI/EXEC
+    resp = send_command(sock, "MULTI")
+    assert_success(resp, "MULTI starts transaction", stats)
+    
+    resp = send_command(sock, "S_SET tx_key1 value1")
+    assert_success(resp, "Command queued in transaction", stats)
+    
+    resp = send_command(sock, "S_GET tx_key1")
+    assert_success(resp, "Second command queued", stats)
+    
+    resp = send_command(sock, "EXEC")
+    assert_is_array(resp, "EXEC returns array", stats)
+    
+    # Verify transaction executed
+    resp = send_command(sock, "S_GET tx_key1")
+    assert_contains(resp, "value1", "Transaction committed changes", stats)
+    
+    # DISCARD test
+    resp = send_command(sock, "MULTI")
+    assert_success(resp, "MULTI for discard test", stats)
+    
+    resp = send_command(sock, "S_SET tx_key2 value2")
+    assert_success(resp, "Command queued for discard", stats)
+    
+    resp = send_command(sock, "DISCARD")
+    assert_success(resp, "DISCARD aborts transaction", stats)
+    
+    resp = send_command(sock, "S_GET tx_key2")
+    assert_is_nil(resp, "Discarded transaction didn't commit", stats)
+    
+    # Invalid command aborts transaction
+    resp = send_command(sock, "MULTI")
+    assert_success(resp, "MULTI for invalid command test", stats)
+    
+    resp = send_command(sock, "S_SET tx_key3 value3")
+    assert_success(resp, "Valid command queued", stats)
+    
+    resp = send_command(sock, "INVALID_CMD")
+    assert_contains(resp, "ERR", "Invalid command aborts transaction", stats)
+    
+    resp = send_command(sock, "S_GET tx_key3")
+    assert_is_nil(resp, "Aborted transaction didn't commit", stats)
+    
+    # Multi-operation transaction
+    resp = send_command(sock, "S_SET counter_tx 10")
+    resp = send_command(sock, "MULTI")
+    resp = send_command(sock, "S_INCR counter_tx")
+    resp = send_command(sock, "S_INCR counter_tx")
+    resp = send_command(sock, "S_INCR counter_tx")
+    resp = send_command(sock, "S_GET counter_tx")
+    resp = send_command(sock, "EXEC")
+    assert_contains(resp, "13", "Multi-operation transaction", stats)
+    
+    # EXEC without MULTI
+    resp = send_command(sock, "EXEC")
+    assert_contains(resp, "ERR", "EXEC without MULTI errors", stats)
+    
+    # DISCARD without MULTI
+    resp = send_command(sock, "DISCARD")
+    assert_contains(resp, "ERR", "DISCARD without MULTI errors", stats)
 end
 
 # Main test runner
@@ -307,6 +392,7 @@ function run_all_tests()
         test_context_commands(sock, stats)
         test_string_commands(sock, stats)
         test_list_commands(sock, stats)
+        test_transaction_commands(sock, stats)
         test_error_cases(sock, stats)
         
         # Cleanup
