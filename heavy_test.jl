@@ -37,9 +37,16 @@ function setup_worker(worker_id::Int, start_key::Int, end_key::Int, total_keys::
                 # Note: Lists don't support TTL in current implementation
                 len_list = rand(1:20)
                 key = "list_$i"
-                send_command(sock, ["L_ADD", key, "item_1"])
-                for j in 2:len_list
-                    send_command(sock, ["L_APPEND", key, "item_$j"])
+                if has_ttl 
+                    send_command(sock, ["L_ADD", key, "item_1", ttl])
+                    for j in 2:len_list
+                        send_command(sock, ["L_APPEND", key, "item_$j"])
+                    end
+                else
+                    send_command(sock, ["L_ADD", key, "item_1"])
+                    for j in 2:len_list
+                        send_command(sock, ["L_APPEND", key, "item_$j"])
+                    end
                 end
             end
         end
@@ -54,7 +61,7 @@ end
 
 function setup_initial_data(num_keys::Int=100_000, num_workers::Int=10)
     println("📦 Setting up $num_keys initial keys using $num_workers workers...")
-    println("   50% strings (50% with TTL 60-3600s), 50% lists (length 1-20 each)")
+    println("   50% strings (50% with TTL 60-3600s), 50% lists (length 1-20 each with TTL 60-3600s)")
     
     start_time = time()
     
@@ -224,7 +231,7 @@ function run_heavy_test(num_clients::Int, ops_per_client::Int, initial_keys::Int
     sleep(2)
     
     # Setup initial data
-    setup_initial_data(initial_keys)
+    setup_initial_data(initial_keys, num_clients)
     
     # If setup_only, exit here
     if setup_only
