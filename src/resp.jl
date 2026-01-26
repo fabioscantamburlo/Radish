@@ -129,7 +129,7 @@ function write_resp_command(sock::TCPSocket, line::String)
 end
 
 # Client-side: read RESP response and return formatted string
-function read_resp_response(sock::TCPSocket, in_array::Bool=false)
+function read_resp_response(sock::TCPSocket, in_array::Bool=false, add_prefix::Bool=true)
     line = readline(sock)
     
     if isempty(line)
@@ -154,15 +154,15 @@ function read_resp_response(sock::TCPSocket, in_array::Bool=false)
         return "❌ $(line[2:end])"
     elseif first_char == ':'
         # Integer
-        return in_array ? line[2:end] : "✅ $(line[2:end])"
+        return in_array ? line[2:end] : (add_prefix ? "✅ $(line[2:end])" : line[2:end])
     elseif first_char == '$'
         # Bulk string
         len = parse(Int, line[2:end])
         if len == -1
-            return in_array ? "(nil)" : "✅ (nil)"
+            return in_array ? "(nil)" : (add_prefix ? "✅ (nil)" : "(nil)")
         end
         data = readline(sock)
-        return in_array ? rstrip(data) : "✅ $(rstrip(data))"
+        return in_array ? rstrip(data) : (add_prefix ? "✅ $(rstrip(data))" : rstrip(data))
     elseif first_char == '*'
         # Array
         count = parse(Int, line[2:end])
@@ -173,10 +173,10 @@ function read_resp_response(sock::TCPSocket, in_array::Bool=false)
         results = String[]
         for i in 1:count
             # Recursively read each element (could be any RESP type)
-            element = read_resp_response(sock, true)  # Pass true for in_array
+            element = read_resp_response(sock, true, add_prefix)  # Pass through add_prefix
             push!(results, element)
         end
-        return in_array ? "[" * join(results, ", ") * "]" : "✅ [" * join(results, ", ") * "]" 
+        return in_array ? "[" * join(results, ", ") * "]" : (add_prefix ? "✅ [" * join(results, ", ") * "]" : "[" * join(results, ", ") * "]")
     else
         return "Unknown RESP type: $first_char"
     end

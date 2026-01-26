@@ -18,12 +18,12 @@ mutable struct TestStats
 end
 
 function send_command(sock::TCPSocket, cmd::String)
-    write_resp_command(sock, cmd)
-    return read_resp_response(sock)
+    Radish.write_resp_command(sock, cmd)
+    return Radish.read_resp_response(sock, false, false)  # in_array=false, add_prefix=false for tests
 end
 
-function assert_contains(response::String, expected::String, test_name::String, stats::TestStats)
-    if occursin(expected, response)
+function assert_contains(response, expected, test_name, stats)
+    if occursin(string(expected), string(response))
         println("✅ $test_name")
         stats.passed += 1
         return true
@@ -36,8 +36,8 @@ function assert_contains(response::String, expected::String, test_name::String, 
     end
 end
 
-function assert_equals(response::String, expected::String, test_name::String, stats::TestStats)
-    if response == expected
+function assert_equals(response, expected, test_name, stats)
+    if string(response) == string(expected)
         println("✅ $test_name")
         stats.passed += 1
         return true
@@ -50,8 +50,9 @@ function assert_equals(response::String, expected::String, test_name::String, st
     end
 end
 
-function assert_success(response::String, test_name::String, stats::TestStats)
-    if startswith(response, "✅") || response == "OK" || response == "QUEUED"
+function assert_success(response, test_name, stats)
+    resp_str = string(response)
+    if resp_str == "OK" || resp_str == "QUEUED" || resp_str == "1" || resp_str == "true"
         println("✅ $test_name")
         stats.passed += 1
         return true
@@ -63,8 +64,8 @@ function assert_success(response::String, test_name::String, stats::TestStats)
     end
 end
 
-function assert_is_array(response::String, test_name::String, stats::TestStats)
-    if startswith(response, "[")
+function assert_is_array(response, test_name, stats)
+    if startswith(string(response), "[")
         println("✅ $test_name")
         stats.passed += 1
         return true
@@ -77,8 +78,8 @@ function assert_is_array(response::String, test_name::String, stats::TestStats)
     end
 end
 
-function assert_is_nil(response::String, test_name::String, stats::TestStats)
-    if occursin("(nil)", response)
+function assert_is_nil(response, test_name, stats)
+    if occursin("(nil)", string(response))
         println("✅ $test_name")
         stats.passed += 1
         return true
@@ -298,7 +299,7 @@ function test_error_cases(sock::TCPSocket, stats::TestStats)
     # Key already exists
     resp = send_command(sock, "S_SET existkey val")
     resp = send_command(sock, "S_SET existkey val2")
-    assert_contains(resp, "0", "S_SET on existing key returns false", stats)
+    assert_contains(resp, "ERR", "S_SET on existing key returns error", stats)
 end
 
 function test_transaction_commands(sock::TCPSocket, stats::TestStats)

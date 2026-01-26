@@ -17,15 +17,19 @@ function rget_or_expire!(context::Dict{String, RadishElement}, key::AbstractStri
         element = context[key]
         # Check if ttl exist and it is expired
         if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
-            # println("Key '$key' has expired. Deleting.")
             delete!(context, key)
-            return nothing
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
         end
         @debug "Executing command '$command' with args '$args...'"
-        return command(element, args...)
+        cmd_result = command(element, args...)
+        
+        if !cmd_result.success
+            return ExecuteResult(ERROR, nothing, cmd_result.error)
+        end
+        return ExecuteResult(SUCCESS, cmd_result.value, nothing)
     end
     @warn "Element at key '$key' not found"
-    return nothing
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
 end
 
 # Basic function to get Radishelement from the context and modify it right after
@@ -35,26 +39,35 @@ function rget_on_modify_or_expire!(context::Dict{String, RadishElement}, key::Ab
         element = context[key]
         # Check if ttl exist and it is expired
         if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
-            # println("Key '$key' has expired. Deleting.")
             delete!(context, key)
-            return nothing
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
         end
         @debug "Executing command '$command' with args '$args...'"
-        return command(element, args...)
+        cmd_result = command(element, args...)
+        
+        if !cmd_result.success
+            return ExecuteResult(ERROR, nothing, cmd_result.error)
+        end
+        return ExecuteResult(SUCCESS, cmd_result.value, nothing)
     end
     @warn "Element at key '$key' not found"
-    return nothing
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
 end
 
 
 # radd!(radish_context, "user1", sadd("user1", 1, nothing)) -> radd!(radish_context, "user1", sadd, "user1", 1, nothing)
 function radd!(context::Dict{String, RadishElement}, key::AbstractString, command::Function, args...)
     if haskey(context, key)
-        println("Element at key '$key' already present")
-        return false
+        return ExecuteResult(ERROR, nothing, "Key '$key' already exists")
     end
-    context[key] = command(args...)
-    return true
+    cmd_result = command(args...)
+    
+    if !cmd_result.success
+        return ExecuteResult(ERROR, nothing, cmd_result.error)
+    end
+    
+    context[key] = cmd_result.element
+    return ExecuteResult(SUCCESS, true, nothing)
 end
 
 # Radd with option of not logging if element already present
@@ -63,10 +76,16 @@ function radd!(context::Dict{String, RadishElement}, key::AbstractString, comman
         if log
             println("Element at key '$key' already present")
         end
-        return false
+        return ExecuteResult(ERROR, nothing, "Key '$key' already exists")
     end
-    context[key] = command(args...)
-    return true
+    cmd_result = command(args...)
+    
+    if !cmd_result.success
+        return ExecuteResult(ERROR, nothing, cmd_result.error)
+    end
+    
+    context[key] = cmd_result.element
+    return ExecuteResult(SUCCESS, true, nothing)
 end
 
 # Base function to delete RadishElement from the context
@@ -83,34 +102,30 @@ end
 # This is useful to define two behaviors for commands that should modify in place a key or create a new key if is not
 # present, this hypercommand allows the existance of functions like lpush -> push el to list otherwise create a list with that element
 function radd_or_modify!(context::Dict, key::AbstractString, command::Function, args...)
-    res_add = radd!(context, key, command, false, args...)
-    if res_add != false
-        return res_add
+    if haskey(context, key)
+        # Key exists, modify it
+        return rmodify!(context, key, command, args...)
     else
-        res_rmodify = rmodify!(context, key, command, args...)
-        if res_rmodify != false
-            return res_rmodify
-        end
+        # Key doesn't exist, add it
+        return radd!(context, key, command, false, args...)
     end
-
-    @info "radd_or_modify did not work ! "
-    return false
-
 end
 
 # Base function to modify RadishElement from the context using a Value
 function rmodify!(context::Dict, key::AbstractString, command::Function, args...)
-    # GET rid of key
     if haskey(context, key)
-        # Apply the command to the existing element to get the new one
         existing_element = context[key]
         @debug "Modifying existing element '$existing_element' at key '$key' "
         @debug "PASSING ARGS '$args...'"
-        ret_value = command(existing_element, args...)
-        return ret_value
+        cmd_result = command(existing_element, args...)
+        
+        if !cmd_result.success
+            return ExecuteResult(ERROR, nothing, cmd_result.error)
+        end
+        return ExecuteResult(SUCCESS, cmd_result.value, nothing)
     end
     @warn "Element at key '$key' not found"
-    return nothing
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
 end
 
 function relement_to_element_consume_key2!(context::Dict, key, command::Function, args...)
@@ -123,17 +138,22 @@ function relement_to_element_consume_key2!(context::Dict, key, command::Function
         if haskey(context, keyright)
             eleft = context[keyleft]
             eright = context[keyright]
-            ret_value = command(eleft, eright, other_args...)
+            cmd_result = command(eleft, eright, other_args...)
             @debug "Eliminating keyright = '$keyright'"
             delete!(context, keyright)
-            return ret_value
+            
+            if !cmd_result.success
+                return ExecuteResult(ERROR, nothing, cmd_result.error)
+            end
+            return ExecuteResult(SUCCESS, cmd_result.value, nothing)
         else
             @warn "Element at key '$keyright' not found"
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
         end
     else 
         @warn "Element at '$keyleft' not found"
+        return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
     end
-    return nothing
 end
 
 # Base function to compare Radish elements of the same type !!!!
@@ -147,15 +167,20 @@ function relement_to_element(context::Dict, key, command::Function, args...)
         if haskey(context, keyright)
             eleft = context[keyleft]
             eright = context[keyright]
-            ret_value = command(eleft, eright, other_args...)
-            return ret_value
+            cmd_result = command(eleft, eright, other_args...)
+            
+            if !cmd_result.success
+                return ExecuteResult(ERROR, nothing, cmd_result.error)
+            end
+            return ExecuteResult(SUCCESS, cmd_result.value, nothing)
         else
             @warn "Element at key '$keyright' not found"
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
         end
     else 
         @warn "Element at '$keyleft' not found"
+        return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
     end
-    return nothing
 end
 
 function rlistkeys(context::Dict, args...)

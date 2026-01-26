@@ -27,6 +27,19 @@ struct ExecuteResult
     error::Union{Nothing, String}   # Error message (only for ERROR status)
 end
 
+# Struct for command-level results (returned by all command functions)
+struct CommandResult
+    success::Bool
+    value::Any                              # For operations: true/false/string/tuple/etc
+    error::Union{Nothing, String}           # Error message if success=false
+    element::Union{RadishElement, Nothing}  # For creators only
+end
+
+# Convenience constructors
+CommandSuccess(value) = CommandResult(true, value, nothing, nothing)
+CommandError(msg::String) = CommandResult(false, nothing, msg, nothing)
+CommandCreate(elem::RadishElement) = CommandResult(true, nothing, nothing, elem)
+
 # Struct to enable transaction mode
 # In_transaction mode works by creating a queue of commands and executing all of them locking all the keys at once
 # This is useful to combine more than a single command and be sure no other client can interfere with the keys you are 

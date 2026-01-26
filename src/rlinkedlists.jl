@@ -1,4 +1,4 @@
-""" LinkedList implementation for the Radish in-memory datatype"""
+# LinkedList implementation for the Radish in-memory datatype
 using .Radish
 using Dates
 using Logging
@@ -38,7 +38,8 @@ end
 """
 function ladd!(value::AbstractString)
     new_element =  DLinkedStartEnd(value)
-    return RadishElement(new_element, nothing, now(), :list)
+    elem = RadishElement(new_element, nothing, now(), :list)
+    return CommandCreate(elem)
 end
 
 """Function used to create a list of 1 element. It's the main command to create a list.
@@ -50,7 +51,8 @@ function ladd!(value::AbstractString, ttl::AbstractString)
         println("ttl not a valid integer - got '$ttl' tt forced to nothing")
     end
     new_element = DLinkedStartEnd(value)
-    return RadishElement(new_element, ttl_p, now(), :list)
+    elem = RadishElement(new_element, ttl_p, now(), :list)
+    return CommandCreate(elem)
 end 
 
 """There are 4 ways of dispatching prepend operations.
@@ -59,7 +61,7 @@ end
 function lprepend!(elem::RadishElement, value::AbstractString)
     @debug "Executing lprepend! with elements '$elem' , '$value' "
     push!(elem.value, value)
-    return true
+    return CommandSuccess(true)
 end
 
 """#2) lprepend! with radish element, value and ttl -> Push into the list ttl has no effect
@@ -70,7 +72,7 @@ function lprepend!(elem::RadishElement, value::AbstractString, ttl::AbstractStri
     @debug "Executing lprepend! with elements '$elem' , '$value' '$ttl"
     @warn "Received ttl while prepending, ttl will have no effect"
     push!(elem.value, value)
-    return true
+    return CommandSuccess(true)
 end
 
 """#3) lprepend! without RadishElement, with value -> create a list forwarded to method ladd!"""
@@ -88,7 +90,7 @@ end
 """Return value of the RadishElement (the actual list) 
 """
 function lget(elem::RadishElement)
-    return _lget(elem.value)
+    return CommandSuccess(_lget(elem.value))
 end
 
 """Main function to to add on top of the list 
@@ -137,7 +139,7 @@ end
 function lappend!(elem::RadishElement, value::AbstractString)
     @debug "Executing lappend! with elements '$elem' , '$value' "
     append!(elem.value, value)
-    return true
+    return CommandSuccess(true)
 end
 
 """#2) lappend! with radish element, value and ttl -> Append into the list ttl has no effect
@@ -148,7 +150,7 @@ function lappend!(elem::RadishElement, value::AbstractString, ttl::AbstractStrin
     @debug "Executing lappend! with elements '$elem' , '$value' '$ttl"
     @warn "Received ttl while appending, ttl will have no effect"
     append!(elem.value, value)
-    return true
+    return CommandSuccess(true)
 end
 
 """#3) lappend! without RadishElement, with value -> create a list forwarded to method ladd!"""
@@ -198,13 +200,11 @@ function ltrimr!(elem::RadishElement, value:: AbstractString)
     @debug "Executing ltrimr! with elements '$elem' '$value' "
     value_n = tryparse(Int, value)
     if isa(value_n, Nothing)
-        @warn "Error not parsable int '$value'"
-        return false
+        return CommandError("Value '$value' is not an integer")
     end
 
     _ltrimr!(elem.value, value_n)
-    return true
-
+    return CommandSuccess(true)
 end
 
 
@@ -241,13 +241,11 @@ function ltriml!(elem::RadishElement, value:: AbstractString)
     @debug "Executing ltriml! with elements '$elem' '$value' "
     value_n = tryparse(Int, value)
     if isa(value_n, Nothing)
-        @warn "Error not parsable int '$value'"
-        return false
+        return CommandError("Value '$value' is not an integer")
     end
 
     _ltriml!(elem.value, value_n)
-    return true
-
+    return CommandSuccess(true)
 end
 
 """Helper function to traverse DLinkedStartEnd backwards
@@ -322,7 +320,7 @@ end
 """Wrapper to the len of RadishElement by calling _llen on DLinkedStartEnd
 """
 function llen(elem::RadishElement)
-    return _llen(elem.value)
+    return CommandSuccess(_llen(elem.value))
 end
 
 """Compose a DLinkedStartEnd forward in order to execute the command lrange with start_s and end_s
@@ -330,19 +328,21 @@ end
 function _lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::AbstractString)
     start_s = tryparse(Int, start_s)
     end_s = tryparse(Int, end_s)
-    if isa(start_s, Nothing) || isa(start_s, Nothing)
-        @warn "start or end or both are not parsable integers"
+    if isa(start_s, Nothing) || isa(end_s, Nothing)
         return nothing
     end
     return_value = _compose_linked_list_forward(list, start_s, end_s)
     return return_value
-
 end
 
 """Wrapper for _lrange command on the RadishElement with start_s and end_s
 """
 function lrange(elem::RadishElement, start_s::AbstractString, end_s::AbstractString)
-    return _lrange(elem.value, start_s, end_s)
+    result = _lrange(elem.value, start_s, end_s)
+    if result === nothing
+        return CommandError("Invalid range indices")
+    end
+    return CommandSuccess(result)
 end
 
 """ Helper function to operate on DLinkedStartEnd and 
@@ -389,7 +389,7 @@ Move list 2 into list 1 and delete empty object.
 function lmove!(listl::RadishElement, listr::RadishElement)
     @debug "Calling _lmove! with args '$listl', '$listr' "
     _lmove!(listl.value, listr.value)
-    return true
+    return CommandSuccess(true)
 end
 
 # TODO CREATE WRAPPER AND EXPOSE COMMAND
@@ -467,13 +467,13 @@ end
 """Wrapper function for __dequeue! to operate on RadishElement"""
 function ldequeue!(element::RadishElement)
     res = _dequeue!(element.value)
-    return res
+    return CommandSuccess(res)
 end
 
 """Wrapper function for pop! and operate on RadishElement"""
 function lpop!(element::RadishElement)
     res = pop!(element.value)
-    return res
+    return CommandSuccess(res)
 end
 
 # TODO LCONCAT! 

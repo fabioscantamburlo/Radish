@@ -5,9 +5,9 @@ export RadishElement, S_PALETTE, LL_PALETTE
 
 const NOKEY_PALETTE = Dict{String, Function}(
     "KLIST" => rlistkeys,
-    "PING" => (ctx, args...) -> "PONG",
-    "QUIT" => (ctx, args...) -> "Goodbye",
-    "EXIT" => (ctx, args...) -> "Goodbye"
+    "PING" => (ctx, args...) -> ExecuteResult(SUCCESS, "PONG", nothing),
+    "QUIT" => (ctx, args...) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
+    "EXIT" => (ctx, args...) -> ExecuteResult(SUCCESS, "Goodbye", nothing)
 )
 
 const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE), ["MULTI", "EXEC", "DISCARD"])
@@ -96,8 +96,12 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
         if cmd_name in keys(NOKEY_PALETTE)
             if cmd_key === nothing
                 hypercommand = NOKEY_PALETTE[cmd_name]
-                ret_value = hypercommand(ctx, cmd_args...)
-                return ExecuteResult(SUCCESS, ret_value, nothing)
+                if cmd_name == "KLIST"
+                    ret_value = hypercommand(ctx, cmd_args...)
+                    return ExecuteResult(SUCCESS, ret_value, nothing)
+                else
+                    return hypercommand(ctx, cmd_args...)
+                end
             else
                 return ExecuteResult(ERROR, nothing, "Command $(cmd_name) does not accept a key")
             end
@@ -115,14 +119,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             end
             
             type_command, hypercommand = S_PALETTE[cmd_name]
-            ret_value = hypercommand(ctx, cmd_key, type_command, cmd_args...)
-            
-            # Check if key was not found
-            if ret_value === nothing
-                return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
-            else
-                return ExecuteResult(SUCCESS, ret_value, nothing)
-            end
+            return hypercommand(ctx, cmd_key, type_command, cmd_args...)
         
         # LINKEDLIST commands (key required)
         elseif cmd_name in keys(LL_PALETTE)
@@ -137,14 +134,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             end
             
             type_command, hypercommand = LL_PALETTE[cmd_name]
-            ret_value = hypercommand(ctx, cmd_key, type_command, cmd_args...)
-            
-            # Check if key was not found
-            if ret_value === nothing
-                return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
-            else
-                return ExecuteResult(SUCCESS, ret_value, nothing)
-            end
+            return hypercommand(ctx, cmd_key, type_command, cmd_args...)
         
         else
             return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
@@ -217,61 +207,55 @@ function execute_unlocked!(ctx::RadishContext, cmd::Command)
     cmd_key = cmd.key
     cmd_args = cmd.args
     
-    # NOKEY commands (no key required)
-    if cmd_name in keys(NOKEY_PALETTE)
-        if cmd_key === nothing
-            hypercommand = NOKEY_PALETTE[cmd_name]
-            ret_value = hypercommand(ctx, cmd_args...)
-            return ExecuteResult(SUCCESS, ret_value, nothing)
+    try
+        # NOKEY commands (no key required)
+        if cmd_name in keys(NOKEY_PALETTE)
+            if cmd_key === nothing
+                hypercommand = NOKEY_PALETTE[cmd_name]
+                if cmd_name == "KLIST"
+                    ret_value = hypercommand(ctx, cmd_args...)
+                    return ExecuteResult(SUCCESS, ret_value, nothing)
+                else
+                    return hypercommand(ctx, cmd_args...)
+                end
+            else
+                return ExecuteResult(ERROR, nothing, "Command $(cmd_name) does not accept a key")
+            end
+        
+        # STRING commands (key required)
+        elseif cmd_name in keys(S_PALETTE)
+            if cmd_key === nothing
+                return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
+            end
+            
+            # Type validation for existing keys
+            if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :string
+                return ExecuteResult(ERROR, nothing, 
+                    "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a string")
+            end
+            
+            type_command, hypercommand = S_PALETTE[cmd_name]
+            return hypercommand(ctx, cmd_key, type_command, cmd_args...)
+        
+        # LINKEDLIST commands (key required)
+        elseif cmd_name in keys(LL_PALETTE)
+            if cmd_key === nothing
+                return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
+            end
+            
+            # Type validation for existing keys
+            if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :list
+                return ExecuteResult(ERROR, nothing, 
+                    "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a list")
+            end
+            
+            type_command, hypercommand = LL_PALETTE[cmd_name]
+            return hypercommand(ctx, cmd_key, type_command, cmd_args...)
+        
         else
-            return ExecuteResult(ERROR, nothing, "Command $(cmd_name) does not accept a key")
+            return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
         end
-    
-    # STRING commands (key required)
-    elseif cmd_name in keys(S_PALETTE)
-        if cmd_key === nothing
-            return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
-        end
-        
-        # Type validation for existing keys
-        if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :string
-            return ExecuteResult(ERROR, nothing, 
-                "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a string")
-        end
-        
-        type_command, hypercommand = S_PALETTE[cmd_name]
-        ret_value = hypercommand(ctx, cmd_key, type_command, cmd_args...)
-        
-        # Check if key was not found
-        if ret_value === nothing
-            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
-        else
-            return ExecuteResult(SUCCESS, ret_value, nothing)
-        end
-    
-    # LINKEDLIST commands (key required)
-    elseif cmd_name in keys(LL_PALETTE)
-        if cmd_key === nothing
-            return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
-        end
-        
-        # Type validation for existing keys
-        if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :list
-            return ExecuteResult(ERROR, nothing, 
-                "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a list")
-        end
-        
-        type_command, hypercommand = LL_PALETTE[cmd_name]
-        ret_value = hypercommand(ctx, cmd_key, type_command, cmd_args...)
-        
-        # Check if key was not found
-        if ret_value === nothing
-            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
-        else
-            return ExecuteResult(SUCCESS, ret_value, nothing)
-        end
-    
-    else
-        return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
+    catch e
+        return ExecuteResult(ERROR, nothing, string(e))
     end
 end
