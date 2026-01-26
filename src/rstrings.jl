@@ -1,35 +1,32 @@
-# String implementation for the Radish in-memory datatype
+"""String implementation for the Radish in-memory datatype"""
 using .Radish
 using Dates
 
 
-# GET 
+"""Return value of the RadishElement (the actual string) 
+"""
 function sget(elem::RadishElement, args...)
     return elem.value
 end
 
-# SET
+"""There are 2 ways of dispatching sadd operations.
+#1) sadd with value and ttl -> adds a new element with parsed ttl
+if parsing is not successfull to Int128 it's forced to nothing
+"""
 function sadd(value::AbstractString, ttl::AbstractString)
     value_n = tryparse(Int, value)
     # If possible try to force integer ~ otherwise keep it as string
     if isa(value_n, Nothing)
         value_n = value
     end
-    ttl_p = tryparse(Int, ttl)
+    ttl_p = tryparse(Int128, ttl)
     if isa(ttl_p, Nothing)
         println("ttl not a valid integer - got '$ttl' tt forced to nothing")
     end
     return RadishElement(value_n, ttl_p, now(), :string)
 end
 
-function sadd(value::AbstractString, ttl::Nothing)
-    value_n = tryparse(Int, value)
-    if isa(value_n, Nothing)
-        value_n = value
-    end
-    return RadishElement(value_n, ttl, now(), :string)
-end
-
+"""#2) sadd with value and no ttl -> adds a new element with parsed ttl"""
 function sadd(value::AbstractString)
     value_n = tryparse(Int, value)
     if isa(value_n, Nothing)
@@ -38,7 +35,8 @@ function sadd(value::AbstractString)
     return RadishElement(value, nothing, now(), :string)
 end
 
-# INCREMENT
+"""Function to increment by 1 the value at RadishElement StringType
+It works only if the content of RadishElement is parsable to Integer"""
 function sincr!(elem::RadishElement)
     elem_n = tryparse(Int, string(elem.value))
     if isa(elem_n, Int)
@@ -46,10 +44,12 @@ function sincr!(elem::RadishElement)
         elem.value = string(elem_n)
         return true
     end
-    return false
+    return nothing
 end
 
-# GET INCREMENT: GET AND THEN INCREMENT
+"""Function to get and then increment by 1 the value at RadishElement StringType
+It works only if the content of RadishElement is parsable to Integer
+It returns the original element before incrementing it"""
 function sgincr!(elem::RadishElement)
     elem_n = tryparse(Int, string(elem.value))
     orig_elem = elem_n
@@ -61,7 +61,8 @@ function sgincr!(elem::RadishElement)
     return nothing
 end
 
-# INCRBY
+"""Function to get and increment by incr the value at RadishElement StringType
+It works only if the both RadishElement and incre are parsable to Integer"""
 function sgincr_by!(elem::RadishElement, incr::AbstractString)
     elem_n = tryparse(Int, string(elem.value))
     original_elem = elem_n
@@ -76,7 +77,8 @@ function sgincr_by!(elem::RadishElement, incr::AbstractString)
     return nothing
 end
 
-# INCRBY
+"""Function to increment by incr the value at RadishElement StringType
+It works only if the both RadishElement and incre are parsable to Integer"""
 function sincr_by!(elem::RadishElement, incr::AbstractString)
     elem_n = tryparse(Int, string(elem.value))
     incr_n = tryparse(Int, incr)
@@ -87,10 +89,11 @@ function sincr_by!(elem::RadishElement, incr::AbstractString)
         end
         return true
     end
-    return false
+    return nothing
 end
 
-#RPAD
+"""Function to rightpad RadishElement StringType with a given pad_value and a given desired len
+It works only if len is parsable to an Int """
 function srpad!(elem::RadishElement, len::AbstractString, pad_value::AbstractString)
     value_len = tryparse(Int, len)
     if isa(value_len, Nothing)
@@ -103,7 +106,8 @@ function srpad!(elem::RadishElement, len::AbstractString, pad_value::AbstractStr
     return false
 end
 
-#RPAD
+"""Function to leftpad RadishElement StringType with a given pad_value and a given desired len
+It works only if len is parsable to an Int """
 function slpad!(elem::RadishElement, len::AbstractString, pad_value::AbstractString)
     value_len = tryparse(Int, len)
     if isa(value_len, Nothing)
@@ -116,30 +120,31 @@ function slpad!(elem::RadishElement, len::AbstractString, pad_value::AbstractStr
     return false
 end
 
-#APPEND
+"""Function to append RadishElement StringType with a given value of stringtype"""
 function sappend!(elem::RadishElement, value::AbstractString)
     elem.value = elem.value * value
     return true
 end
 
-#GETRANGE
+"""Function to getrange of RadishElement StringType with start_s and end_s
+It returns the sublist if start_s and end_s are parsable Int"""
 function sgetrange(elem::RadishElement, start_s::AbstractString, end_s::AbstractString)
     start_s = tryparse(Int, start_s)
     end_s = tryparse(Int, end_s)
     
-    if isa(start_s, Nothing) or isa(end_s, Nothing)
+    if isa(start_s, Nothing) || isa(end_s, Nothing)
         return false
     end
     max_len = min(length(elem.value), end_s)
     return sget(elem)[start_s:max_len]
 end
 
-#LENGHT
+"""Function to get the len of RadishElement StringType"""
 function slen(elem::RadishElement)
     return length(sget(elem))
 end
 
-## HELPER function to find LCS
+"""Helper function used internally to find the LCS on two elements of type StringType"""
 function find_lcs(string1::AbstractString, string2::AbstractString)
     l1, l2 = length(string1), length(string2)
     dp = zeros(Int, l1 + 1, l2 + 1)
@@ -175,22 +180,21 @@ function find_lcs(string1::AbstractString, string2::AbstractString)
     return string(join(reverse(lcs_string), "")), lcs_length
 end
 
-# LCS Longest common subsequence
+"""Wrapper function to call find_lcs on two elements of type RadishElement and mapped to StringType"""
 function slcs(elemleft::RadishElement, elemright::RadishElement, args...)
     
     # IMPLEMENT LCS ALGORITHM IN JULIA USING DYNAMIC PROGRAMMING
     # LCS works only on string, implicit casting
     string1, string2 = string(elemleft.value), string(elemright.value)
-    # println(string1)
-    # println(string2)
     s_lcs, len_lcs = find_lcs(string1, string2)
     return s_lcs, len_lcs
 
 
 end
 
+"""Wrapper function to call complane function using slen on the two RadishElements """
 function sclen(elemleft::RadishElement, elemright::RadishElement, args...)
-    if length(elemleft.value) == length(elemright.value)
+    if slen(elemleft) == slen(elemright)
         return true
     end
     return false

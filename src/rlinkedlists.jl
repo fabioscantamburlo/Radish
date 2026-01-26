@@ -1,21 +1,22 @@
-# String implementation for the Radish in-memory datatype
+""" LinkedList implementation for the Radish in-memory datatype"""
 using .Radish
 using Dates
 using Logging
 
 
-# DoubleLinkedList element for RadishDb
+"""DoubleLinkedList element for RadishDb
 # The idea is to have a double linked list in which the first element has prev nothing
 # The last element has next nothing so it's gonna be easy to going up-down the the list.
+"""
 
-# Struct of the list
+"""Struct of the basic module, it's a simple double-linked-lists: easy access to next and prev."""
 mutable struct DLinkedListElement{T}
     data::T
     next::Union{DLinkedListElement{T}, Nothing}
     prev::Union{DLinkedListElement{T}, Nothing}
 end
 
-# Struct of the basic module
+"""Struct of the List element, easy access to head and tail as well as len."""
 mutable struct DLinkedStartEnd{T}
     head::Union{DLinkedListElement{T}, Nothing}
     tail::Union{DLinkedListElement{T}, Nothing}
@@ -25,42 +26,75 @@ mutable struct DLinkedStartEnd{T}
     DLinkedStartEnd{T}(h, t, l) where T = new{T}(h, t, l)
 end
 
-
+"""Create Basic Double linked list with value any
+"""
 function DLinkedStartEnd(value::T) where T
     new_element = DLinkedListElement(value, nothing, nothing)
     return DLinkedStartEnd{T}(new_element, new_element, 1)
 end
 
 
-# Add a list of 1 element
+"""Function used to create a list of 1 element. It's the main command to create a list.
+"""
 function ladd!(value::AbstractString)
     new_element =  DLinkedStartEnd(value)
     return RadishElement(new_element, nothing, now(), :list)
 end
 
-function ladd!(value::AbstractString, ttl::DateTime)
-    new_element =  DLinkedStartEnd(value)
-    return RadishElement(new_element, ttl, now(), :list)
+"""Function used to create a list of 1 element. It's the main command to create a list.
+In this version ttl is implemented, ladd! takes care of converting ttl to Int128
+"""
+function ladd!(value::AbstractString, ttl::AbstractString)
+    ttl_p = tryparse(Int128, ttl)
+    if isa(ttl_p, Nothing)
+        println("ttl not a valid integer - got '$ttl' tt forced to nothing")
+    end
+    new_element = DLinkedStartEnd(value)
+    return RadishElement(new_element, ttl_p, now(), :list)
 end 
 
-# Function to add on top of the list 
-# [1, 2, 3] 
-# prepend 3 => [3, 1, 2, 3]
+"""There are 4 ways of dispatching prepend operations.
+#1) lprepend! with radish element and value -> Push into the list
+"""
 function lprepend!(elem::RadishElement, value::AbstractString)
     @debug "Executing lprepend! with elements '$elem' , '$value' "
     push!(elem.value, value)
     return true
 end
 
-function lprepend!(value::AbstractString, args...)
-    @debug "Executing lprepend! with elements '$value' , '$value' "
-    return ladd!(value, args...)
+"""#2) lprepend! with radish element, value and ttl -> Push into the list ttl has no effect
+TTL is added to do not break code in case of the user does not know if list already exists
+and wants to create TTL in case does not exist the element.
+"""
+function lprepend!(elem::RadishElement, value::AbstractString, ttl::AbstractString)
+    @debug "Executing lprepend! with elements '$elem' , '$value' '$ttl"
+    @warn "Received ttl while prepending, ttl will have no effect"
+    push!(elem.value, value)
+    return true
 end
 
+"""#3) lprepend! without RadishElement, with value -> create a list forwarded to method ladd!"""
+function lprepend!(value::AbstractString)
+    @debug "Executing lprepend! with elements '$value' "
+    return ladd!(value)
+end
+
+"""#4) lprepend! without RadishElement, with value and ttl -> create a list forwarded to method ladd! with ttl."""
+function lprepend!(value::AbstractString, ttl::AbstractString)
+    @debug "Executing lprepend! with elements '$value' '$ttl"
+    return ladd!(value, ttl)
+end
+
+"""Return value of the RadishElement (the actual list) 
+"""
 function lget(elem::RadishElement)
     return _lget(elem.value)
 end
 
+"""Main function to to add on top of the list 
+l = [1, 2, 3], push 3 => [3, 1, 2, 3]
+
+"""
 function Base.push!(list::DLinkedStartEnd{T}, value::T) where T
     new_element = DLinkedListElement(value, nothing, nothing)
 
@@ -77,6 +111,9 @@ function Base.push!(list::DLinkedStartEnd{T}, value::T) where T
     return list
 end
 
+"""Main function to add at the end of the list
+[1, 2, 3], append 4 => [1, 2, 3, 4]
+"""
 function Base.append!(list::DLinkedStartEnd{T}, value::T) where T 
     new_element = DLinkedListElement(value, nothing, nothing)
 
@@ -93,18 +130,42 @@ function Base.append!(list::DLinkedStartEnd{T}, value::T) where T
     return list
 end
 
+
+"""# There are 4 ways of dispatching append operations.
+#1) lappend! with radish element and value -> append into the list
+"""
 function lappend!(elem::RadishElement, value::AbstractString)
     @debug "Executing lappend! with elements '$elem' , '$value' "
     append!(elem.value, value)
     return true
 end
 
+"""#2) lappend! with radish element, value and ttl -> Append into the list ttl has no effect
+TTL is added to do not break code in case of the user does not know if list already exists
+and wants to create TTL in case does not exist the element.
+"""
+function lappend!(elem::RadishElement, value::AbstractString, ttl::AbstractString)
+    @debug "Executing lappend! with elements '$elem' , '$value' '$ttl"
+    @warn "Received ttl while appending, ttl will have no effect"
+    append!(elem.value, value)
+    return true
+end
+
+"""#3) lappend! without RadishElement, with value -> create a list forwarded to method ladd!"""
 function lappend!(value::AbstractString)
     @debug "Executing lappend! with elements '$value' "
     return ladd!(value)
 end
 
-# Trim right
+"""#4) lappend! without RadishElement, with value and ttl -> create a list forwarded to method ladd! with ttl."""
+function lappend!(value::AbstractString, ttl::AbstractString)
+    @debug "Executing lappend! with elements '$value' '$ttl"
+    return ladd!(value, ttl)
+end
+
+"""Main function to trimright a DLinkedStartEnd.
+It returns the list trimmed on the right by value
+"""
 function _ltrimr!(list::DLinkedStartEnd, value::Int)
     
     if value == 0
@@ -131,6 +192,8 @@ function _ltrimr!(list::DLinkedStartEnd, value::Int)
     list.len = value
 end
 
+"""Function to execute trimming right operation on the Radishelement
+"""
 function ltrimr!(elem::RadishElement, value:: AbstractString)
     @debug "Executing ltrimr! with elements '$elem' '$value' "
     value_n = tryparse(Int, value)
@@ -145,7 +208,9 @@ function ltrimr!(elem::RadishElement, value:: AbstractString)
 end
 
 
-# Trim left
+"""Main function to trimleft a DLinkedStartEnd.
+It returns the list trimmed on the left by value
+"""
 function _ltriml!(list::DLinkedStartEnd, value::Int)
     
     if value == 0
@@ -170,6 +235,8 @@ function _ltriml!(list::DLinkedStartEnd, value::Int)
     list.len = value
 end
 
+"""Function to execute trimming left operation on the Radishelement
+"""
 function ltriml!(elem::RadishElement, value:: AbstractString)
     @debug "Executing ltriml! with elements '$elem' '$value' "
     value_n = tryparse(Int, value)
@@ -183,7 +250,8 @@ function ltriml!(elem::RadishElement, value:: AbstractString)
 
 end
 
-# Traversal function backward
+"""Helper function to traverse DLinkedStartEnd backwards
+"""
 function _traverse_linked_list_backward(list::DLinkedStartEnd)
     println("Traversing backward:")
     j = list.tail
@@ -193,7 +261,8 @@ function _traverse_linked_list_backward(list::DLinkedStartEnd)
     end
 end
 
-# compose list
+"""Helper function to compose a DLinkedStartEnd with limit and return it
+It compose the list materializing it into a julia standard list."""
 function _compose_linked_list_forward(list::DLinkedStartEnd, limit::Int)
 
     iterator = 1
@@ -207,6 +276,8 @@ function _compose_linked_list_forward(list::DLinkedStartEnd, limit::Int)
     return return_list
 end
 
+"""Helper function to compose a DLinkedStartEnd with start and end limits in term of elements
+It compose the list materializing it into a julia standard list."""
 function _compose_linked_list_forward(list::DLinkedStartEnd, start_s::Int, end_s::Int)
     iterator = 1
     return_list = []
@@ -222,7 +293,8 @@ function _compose_linked_list_forward(list::DLinkedStartEnd, start_s::Int, end_s
 end
 
 
-# Traversal function forward
+"""Helper function to traverse DLinkedStartEnd forward
+"""
 function _traverse_linked_list_forward(list::DLinkedStartEnd)
     @info "Traversing forward:"
     j = list.head
@@ -232,21 +304,29 @@ function _traverse_linked_list_forward(list::DLinkedStartEnd)
     end
 end
 
+#TODO Change limit to 0 for real usecases
+"""Get DLinkedStartEnd values by building it forward with a predetermined limit of 50 for vis reasons
+"""
 function _lget(list::DLinkedStartEnd)
     @info "Truncating to 50 elements..."
     return_value = _compose_linked_list_forward(list, 50)
     return return_value
 end
 
+"""Get DLinkedStartEnd len by accessing the attribute len
+"""
 function _llen(list::DLinkedStartEnd)
     return list.len
 end
 
+"""Wrapper to the len of RadishElement by calling _llen on DLinkedStartEnd
+"""
 function llen(elem::RadishElement)
     return _llen(elem.value)
 end
 
-
+"""Compose a DLinkedStartEnd forward in order to execute the command lrange with start_s and end_s
+"""
 function _lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::AbstractString)
     start_s = tryparse(Int, start_s)
     end_s = tryparse(Int, end_s)
@@ -259,12 +339,16 @@ function _lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::Abstract
 
 end
 
-
+"""Wrapper for _lrange command on the RadishElement with start_s and end_s
+"""
 function lrange(elem::RadishElement, start_s::AbstractString, end_s::AbstractString)
     return _lrange(elem.value, start_s, end_s)
 end
 
-# Consuming listr and listl is a completely new object
+""" Helper function to operate on DLinkedStartEnd and 
+consume listr and push into listl the consumed list
+_lmove! [1, 2, 3] [2, 3] => [1, 2, 3, 2, 3] [/] (deleted)
+"""
 function _lmove!(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     
     # listr empty
@@ -299,15 +383,20 @@ function _lmove!(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     return listl
 end
 
-# Move list 2 into list 1 and delete empty object.
-# lmove! [1, 2, 3] [2, 3] => [1, 2, 3, 2, 3] [/] (deleted)
+"""Wrapper function of lmove command to operate on Radishelement
+Move list 2 into list 1 and delete empty object.
+"""
 function lmove!(listl::RadishElement, listr::RadishElement)
     @debug "Calling _lmove! with args '$listl', '$listr' "
     _lmove!(listl.value, listr.value)
     return true
 end
-# Non MUTATING function
-# it keeps Listl and Listr
+
+# TODO CREATE WRAPPER AND EXPOSE COMMAND
+""" Function to operate on DLinkedStartEnd that concatenates the two lists
+This function is a non MUTATING function, it keeps listr and listl 
+
+"""
 function _lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
     new_list = DLinkedStartEnd{T}()
     
@@ -327,11 +416,12 @@ function _lconcat(listl::DLinkedStartEnd{T}, listr::DLinkedStartEnd{T}) where T
 end
 
 
-# Eliminate an element from the head
-# rget_on_modify_or_expire!
+"""Function to operate on DLinkedStartEnd and eliminates an element from the head
+Returns nothing if the list is empty.
+"""
 function _dequeue!(list::DLinkedStartEnd{T}) where T
     if list.len == 0
-        error("Cannot dequeue from empty list")
+        return nothing
     end
     
     value = list.head.data
@@ -350,11 +440,12 @@ function _dequeue!(list::DLinkedStartEnd{T}) where T
     return value
 end
 
-# Eliminate an element from the tail
-# rget_on_modify_or_expire!
+"""Function to operate on DLinkedStartEnd and eliminates an element from the tail
+Returns nothing if the list is empty.
+"""
 function Base.pop!(list::DLinkedStartEnd{T}) where T
     if list.len == 0
-        error("Cannot pop from empty list")
+        return nothing
     end
     
     value = list.tail.data
@@ -373,13 +464,13 @@ function Base.pop!(list::DLinkedStartEnd{T}) where T
     return value
 end
 
-
+"""Wrapper function for __dequeue! to operate on RadishElement"""
 function ldequeue!(element::RadishElement)
     res = _dequeue!(element.value)
     return res
 end
 
-
+"""Wrapper function for pop! and operate on RadishElement"""
 function lpop!(element::RadishElement)
     res = pop!(element.value)
     return res
@@ -388,17 +479,6 @@ end
 # TODO LCONCAT! 
 # THINK ABOUT DOING IT (ASSIGN NEW ELEMENT? )
 # SUBSTITUTE ELEMENT1 AND NOT CONSUME ELEMENT2?
-
-
-
-# LPUSH adds a new element to the head of a list; RPUSH adds to the tail.
-# LPOP removes and returns an element from the head of a list; RPOP does the same but from the tails of a list.
-# LLEN returns the length of a list.
-# LMOVE atomically moves elements from one list to another.
-# LRANGE extracts a range of elements from a list.
-# LTRIM reduces a list to the specified range of elements.
-
-
 
 
 const LL_PALETTE = Dict{String, Tuple}(

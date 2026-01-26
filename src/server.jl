@@ -138,9 +138,9 @@ function start_server(host="127.0.0.1", port=6379)
     db_lock = ShardedLock(256)
     
     # Seed test data
-    radd!(ctx, "user1", sadd, "ciao", nothing)
-    radd!(ctx, "user2", sadd, "ciao2", nothing)
-    radd!(ctx, "user3", sadd, "cioa3", nothing)
+    radd!(ctx, "user1", sadd, "ciao")
+    radd!(ctx, "user2", sadd, "ciao2")
+    radd!(ctx, "user3", sadd, "cioa3")
     
     # Start background cleaner
     @async async_cleaner(ctx, db_lock, 0.1)
