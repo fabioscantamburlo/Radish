@@ -11,7 +11,7 @@ include("Radish.jl")
 using .Radish
 
 # Parse command line arguments
-host = length(ARGS) >= 1 ? ARGS[1] : "127.0.0.1"
+host = length(ARGS) >= 1 ? ARGS[1] : "127.0.0.2"
 port = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 6379
 
 # Start server

@@ -11,7 +11,7 @@ end
 
 function setup_worker(worker_id::Int, start_key::Int, end_key::Int, total_keys::Int)
     try
-        sock = connect("127.0.0.1", 6379)
+        sock = connect("127.0.0.2", 6379)
         readline(sock)  # welcome
         
         for i in start_key:end_key
@@ -90,7 +90,7 @@ end
 function client_worker(client_id::Int, num_ops::Int, total_keys::Int, run_forever::Bool)
     try
         sleep(rand(1:3))  # Stagger client starts
-        sock = connect("127.0.0.1", 6379)
+        sock = connect("127.0.0.2", 6379)
         readline(sock)  # welcome message
         
         println("Client #$client_id started $(run_forever ? "(running forever)" : "")")
