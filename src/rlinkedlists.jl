@@ -306,7 +306,7 @@ end
 """Get DLinkedStartEnd values by building it forward with a predetermined limit of 50 for vis reasons
 """
 function _lget(list::DLinkedStartEnd)
-    @info "Truncating to 50 elements..."
+    #@info "Truncating to 50 elements..."
     return_value = _compose_linked_list_forward(list, 50)
     return return_value
 end
