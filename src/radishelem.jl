@@ -237,3 +237,28 @@ function rget_on_modify_or_expire_autodelete!(context::Dict{String, RadishElemen
     @warn "Element at key '$key' not found"
     return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
 end
+
+# Hypercommand: Modify and auto-delete if empty
+# Used for operations like TRIM that modify in-place and should remove key if empty
+function rmodify_autodelete!(context::Dict, key::AbstractString, command::Function, args...)
+    if haskey(context, key)
+        existing_element = context[key]
+        @debug "Modifying existing element '$existing_element' at key '$key' "
+        @debug "PASSING ARGS '$args...'"
+        cmd_result = command(existing_element, args...)
+        
+        if !cmd_result.success
+            return ExecuteResult(ERROR, nothing, cmd_result.error)
+        end
+        
+        # Auto-delete if empty (delegates to type-specific check)
+        if check_empty(existing_element)
+            @debug "Auto-deleting empty key '$key'"
+            delete!(context, key)
+        end
+        
+        return ExecuteResult(SUCCESS, cmd_result.value, nothing)
+    end
+    @warn "Element at key '$key' not found"
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+end
