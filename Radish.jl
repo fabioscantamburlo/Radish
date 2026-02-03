@@ -13,8 +13,9 @@ include(joinpath(@__DIR__, "src", "client.jl"))
 # Functions of the Radish
 (export RadishElement, rmodify!, relement_to_element, rget_or_expire!,
         relement_to_element_consume_key2!,
-        rget_on_modify_or_expire!, rdelete!, radd!,radd_or_modify!,
-        relement_to_element, rlistkeys )
+        rget_on_modify_or_expire!, rget_on_modify_or_expire_autodelete!,
+        rdelete!, radd!, radd_or_modify!,
+        relement_to_element, rlistkeys, check_empty)
 
 # Sharded lock exports
 export ShardedLock

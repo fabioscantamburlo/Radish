@@ -204,6 +204,14 @@ function sclen(elemleft::RadishElement, elemright::RadishElement, args...)
     return CommandSuccess(result)
 end
 
+"""Check if string element is empty.
+Strings are never considered structurally empty - even "" is a valid value.
+Redis doesn't auto-delete empty strings, so we follow the same behavior.
+"""
+function is_empty(::Val{:string}, elem::RadishElement)::Bool
+    return false
+end
+
 const S_PALETTE = Dict{String, Tuple}(
     "S_GET" => (sget, rget_or_expire!),
     "S_SET" => (sadd, radd!),

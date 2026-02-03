@@ -197,3 +197,43 @@ function rlistkeys(context::Dict, args...)
     
     return first(key_list, limit_s)
 end
+
+# Generic dispatcher for checking if an element is empty
+# Delegates to type-specific is_empty implementations using multiple dispatch
+function check_empty(elem::RadishElement)::Bool
+    return is_empty(Val(elem.datatype), elem)
+end
+
+# Hypercommand: Get, modify, and auto-delete if empty
+# Used for operations like POP/DEQUEUE that should remove the key when list becomes empty
+function rget_on_modify_or_expire_autodelete!(context::Dict{String, RadishElement}, 
+                                               key::AbstractString, 
+                                               command::Function, args...)
+    if haskey(context, key)
+        element = context[key]
+        
+        # Check if ttl exist and it is expired
+        if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
+            delete!(context, key)
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+        end
+        
+        @debug "Executing command '$command' with args '$args...'"
+        cmd_result = command(element, args...)
+        
+        if !cmd_result.success
+            return ExecuteResult(ERROR, nothing, cmd_result.error)
+        end
+        
+        # Auto-delete if empty (delegates to type-specific check)
+        if check_empty(element)
+            @debug "Auto-deleting empty key '$key'"
+            delete!(context, key)
+        end
+        
+        return ExecuteResult(SUCCESS, cmd_result.value, nothing)
+    end
+    
+    @warn "Element at key '$key' not found"
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+end

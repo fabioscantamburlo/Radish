@@ -476,6 +476,13 @@ function lpop!(element::RadishElement)
     return CommandSuccess(res)
 end
 
+"""Check if list element is empty.
+Lists with len == 0 are considered empty and should be auto-deleted.
+"""
+function is_empty(::Val{:list}, elem::RadishElement)::Bool
+    return elem.value.len == 0
+end
+
 # TODO LCONCAT! 
 # THINK ABOUT DOING IT (ASSIGN NEW ELEMENT? )
 # SUBSTITUTE ELEMENT1 AND NOT CONSUME ELEMENT2?
@@ -491,7 +498,7 @@ const LL_PALETTE = Dict{String, Tuple}(
     "L_GET" => (lget, rget_or_expire!),
     "L_RANGE" => (lrange, rget_or_expire!),
     "L_MOVE" => (lmove!, relement_to_element_consume_key2!),
-    "L_POP" => (lpop!, rget_on_modify_or_expire!),
-    "L_DEQUEUE" => (ldequeue!, rget_on_modify_or_expire!),
+    "L_POP" => (lpop!, rget_on_modify_or_expire_autodelete!),
+    "L_DEQUEUE" => (ldequeue!, rget_on_modify_or_expire_autodelete!),
     # "L_CONCAT" => (lconcat, radd!),
 )
