@@ -23,13 +23,6 @@ function ladd!(value::AbstractString, ttl::AbstractString)
 end
 ```
 
-### 3. ~~Race Condition in async_cleaner~~ ✅ RESOLVED
-**File:** `src/server.jl` line 20-85
-**Issue:** Cleaner snapshots keys without locks
-**Resolution:** Documented as acceptable behavior. System has two-layer TTL protection:
-- Lazy expiration on GET (always works)
-- Active expiration via cleaner (best-effort, periodic)
-**Status:** No code change needed, behavior is correct
 
 ### 4. **Error Handling in Pop/Dequeue on Empty List**
 **File:** `src/rlinkedlists.jl` lines 336, 358
