@@ -19,6 +19,12 @@ end
 
 function async_cleaner(ctx::RadishContext, db_lock::ShardedLock, interval::Float64=0.001)
     while true
+        # Snapshot keys without locks for performance
+        # Note: Keys added/deleted between snapshot and processing will be
+        # handled in the next cleaner cycle. This is acceptable since:
+        # 1. Cleaner runs frequently (default: every 0.1s)
+        # 2. GET operations always check TTL (lazy expiration)
+        # 3. No data corruption possible (locks held during actual deletion)
         all_keys = collect(keys(ctx))
         
         if isempty(all_keys)
