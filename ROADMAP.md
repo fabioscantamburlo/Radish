@@ -1,404 +1,261 @@
-# Radish Development Roadmap
+# Radish Development Roadmap v2.0
+
+> Updated February 2026
+
+---
 
 ## Current Status
+
 - ✅ Core in-memory database (strings, lists)
 - ✅ RESP protocol implementation
 - ✅ TCP server with concurrent clients
-- ✅ Sharded locking for concurrency
+- ✅ Sharded locking for concurrency (256 shards, ReadWriteLock)
 - ✅ Transactions (MULTI/EXEC/DISCARD)
 - ✅ TTL support with async cleaner
 - ✅ Julia client
 
-## Phase 1: Critical Bug Fixes (~1.5 hours)
-
-### 1.1 TTL Type Inconsistency
-**Priority**: HIGH  
-**Files**: `src/definitions.jl`, `src/rstrings.jl`, `src/rlinkedlists.jl`
-
-- [ ] Change `RadishElement.ttl` from `Int128` to `Union{Int, Nothing}`
-- [ ] Update all `tryparse(Int128, ttl)` to `tryparse(Int, ttl)`
-- [ ] Test TTL parsing and expiration
-
-### 1.2 List TTL Support
-**Priority**: HIGH  
-**Files**: `src/rlinkedlists.jl`
-
-- [ ] Fix `ladd!(value::AbstractString, ttl::AbstractString)` signature
-- [ ] Ensure lists support TTL consistently with strings
-- [ ] Test list creation with TTL
-
-### 1.3 Error Handling Improvements
-**Priority**: MEDIUM  
-**Files**: `src/rlinkedlists.jl`, `src/rstrings.jl`
-
-- [ ] Fix `lpop!` and `ldequeue!` to return proper errors on empty list
-- [ ] Fix `sincr!` family to return errors instead of silent failures
-- [ ] Add proper error messages for all edge cases
-
-### 1.4 KLIST TTL Filtering
-**Priority**: MEDIUM  
-**Files**: `src/radishelem.jl`
-
-- [ ] Filter out expired keys in `rlistkeys` function
-- [ ] Test that expired keys don't appear in KLIST output
-
-### 1.5 Syntax Bugs
-**Priority**: LOW  
-**Files**: `src/rstrings.jl`, `src/rlinkedlists.jl`
-
-- [ ] Fix `sgetrange` index validation
-- [ ] Fix `_lrange` type checking (checks `start_s` twice)
-
 ---
 
-## Phase 2: Incremental Persistence (~3 hours)
+## Phase 1: Data Durability (Priority: CRITICAL)
 
-### 2.1 Dirty Tracking Infrastructure
-**Files**: `src/definitions.jl`, `src/radishelem.jl`
+*Estimated time: 4-6 hours*
 
-- [ ] Add `dirty::Bool` field to `RadishElement`
-- [ ] Create `DirtyTracker` struct for deleted keys
-- [ ] Update `radd!` to mark elements as dirty
-- [ ] Update `rmodify!` to mark elements as dirty
-- [ ] Update `rdelete!` to track deletions
-
-### 2.2 Incremental Snapshot Writer
-**Files**: `src/persistence.jl` (new file)
-
-- [ ] Implement `save_incremental_snapshot()` function
-- [ ] Implement `serialize_value()` for strings and lists
-- [ ] Write to append-only `radish.incremental.log`
-- [ ] Clear dirty flags after successful save
-- [ ] Add logging for snapshot statistics
-
-### 2.3 Snapshot Loading
-**Files**: `src/persistence.jl`
-
-- [ ] Implement `load_snapshots()` function
-- [ ] Load base snapshot from `radish.snapshot`
-- [ ] Apply incremental logs from `radish.incremental.log`
-- [ ] Implement `deserialize_element()` for all data types
-- [ ] Handle missing files gracefully
-
-### 2.4 Snapshot Compaction
-**Files**: `src/persistence.jl`
-
-- [ ] Implement `save_full_snapshot()` function
-- [ ] Implement `compact_snapshots()` function
-- [ ] Merge incrementals into new base snapshot
-- [ ] Clear incremental log after compaction
-- [ ] Atomic file operations (temp + rename)
-
-### 2.5 Background Tasks Integration
+### 1.1 Graceful Shutdown Handler
 **Files**: `src/server.jl`
 
-- [ ] Create `async_incremental_snapshots()` task
-- [ ] Run incremental saves every 60 seconds
-- [ ] Trigger compaction every 50 incrementals (~1 hour)
-- [ ] Save incremental snapshot on server shutdown
-- [ ] Load snapshots on server startup
+- [ ] Catch SIGTERM/SIGINT signals
+- [ ] Save full snapshot before exit
+- [ ] Log shutdown progress
 
-### 2.6 Testing
-**Files**: `test_persistence.jl` (new file)
+### 1.2 Full Snapshot Implementation
+**Files**: `src/persistence.jl` (new)
 
-- [ ] Test incremental save with modifications
-- [ ] Test incremental save with deletions
-- [ ] Test load from base + incrementals
-- [ ] Test compaction process
-- [ ] Test crash recovery (kill server, restart, verify data)
+- [ ] Serialize to simple format: `KEY|TYPE|TTL|VALUE\n`
+- [ ] Lists: serialize as JSON array
+- [ ] Atomic writes (temp file + rename)
+- [ ] Handle missing snapshot gracefully
 
----
+### 1.3 Startup Recovery
+**Files**: `src/server.jl`
 
-## Phase 3: Python Client (~4 hours)
+- [ ] Load snapshot on `start_server()`
+- [ ] Log recovery statistics
+- [ ] Continue even if snapshot is corrupted (with warning)
 
-### 3.1 Core RESP Implementation
-**Files**: `clients/python/radish_client.py` (new file)
+### 1.4 Optional: Append-Only Log (AOF)
+**Files**: `src/persistence.jl`
 
-- [ ] Implement RESP encoder (`_encode_command()`)
-- [ ] Implement RESP decoder (`_decode_response()`)
-- [ ] Handle all RESP types: `+`, `-`, `:`, `$`, `*`
-- [ ] Handle null responses (`$-1`)
-- [ ] Handle nested arrays (transaction results)
-
-### 3.2 Connection Management
-**Files**: `clients/python/radish_client.py`
-
-- [ ] Implement `RadishClient` class
-- [ ] Implement `connect()` and `close()` methods
-- [ ] Implement `_send_command()` low-level method
-- [ ] Implement `_read_response()` low-level method
-- [ ] Add context manager support (`__enter__`, `__exit__`)
-- [ ] Add connection timeout handling
-- [ ] Add reconnection logic
-
-### 3.3 String Commands
-**Files**: `clients/python/radish_client.py`
-
-- [ ] `s_set(key, value, ttl=None)`
-- [ ] `s_get(key)`
-- [ ] `s_incr(key)`
-- [ ] `s_incrby(key, increment)`
-- [ ] `s_gincr(key)`
-- [ ] `s_gincrby(key, increment)`
-- [ ] `s_append(key, value)`
-- [ ] `s_len(key)`
-- [ ] `s_getrange(key, start, end)`
-- [ ] `s_rpad(key, length, char)`
-- [ ] `s_lpad(key, length, char)`
-- [ ] `s_lcs(key1, key2)`
-- [ ] `s_complen(key1, key2)`
-
-### 3.4 List Commands
-**Files**: `clients/python/radish_client.py`
-
-- [ ] `l_add(key, value, ttl=None)`
-- [ ] `l_prepend(key, value)`
-- [ ] `l_append(key, value)`
-- [ ] `l_get(key)`
-- [ ] `l_len(key)`
-- [ ] `l_range(key, start, end)`
-- [ ] `l_pop(key)`
-- [ ] `l_dequeue(key)`
-- [ ] `l_trimr(key, count)`
-- [ ] `l_triml(key, count)`
-- [ ] `l_move(key1, key2)`
-
-### 3.5 Transaction Commands
-**Files**: `clients/python/radish_client.py`
-
-- [ ] `multi()`
-- [ ] `exec()`
-- [ ] `discard()`
-- [ ] Add transaction context manager
-
-### 3.6 Context Commands
-**Files**: `clients/python/radish_client.py`
-
-- [ ] `klist(limit=None)`
-- [ ] `ping()`
-- [ ] `quit()`
-
-### 3.7 Error Handling
-**Files**: `clients/python/radish_client.py`
-
-- [ ] Create `RadishError` exception class
-- [ ] Create `RadishConnectionError` exception class
-- [ ] Create `RadishTimeoutError` exception class
-- [ ] Handle server errors gracefully
-- [ ] Handle connection failures
-
-### 3.8 Testing & Examples
-**Files**: `clients/python/test_client.py`, `clients/python/examples.py`
-
-- [ ] Test all string commands
-- [ ] Test all list commands
-- [ ] Test transactions
-- [ ] Test error cases
-- [ ] Create usage examples
-- [ ] Add docstrings to all methods
-
-### 3.9 Documentation
-**Files**: `clients/python/README.md`
-
-- [ ] Installation instructions
-- [ ] Quick start guide
-- [ ] API reference
-- [ ] Transaction examples
-- [ ] Error handling guide
-
-### 3.10 Packaging
-**Files**: `clients/python/setup.py`, `clients/python/requirements.txt`
-
-- [ ] Create `setup.py` for pip installation
-- [ ] Add `requirements.txt` (should be empty - stdlib only)
-- [ ] Add `__init__.py` for package structure
-- [ ] Add version info
+- [ ] Log every write command
+- [ ] Replay on startup after snapshot
+- [ ] Periodic rewrite to prevent unbounded growth
 
 ---
 
-## Phase 4: Docker Support (~2 hours)
+## Phase 2: Remaining Bug Fixes (Priority: HIGH)
 
-### 4.1 Dockerfile
-**Files**: `Dockerfile` (new file)
+*Estimated time: 2 hours*
 
-- [ ] Use official Julia base image
-- [ ] Copy Radish source code
-- [ ] Install dependencies from `Project.toml`
-- [ ] Expose port 6379
-- [ ] Set working directory
-- [ ] Define entrypoint to start server
-- [ ] Optimize image size (multi-stage build if needed)
+### 2.1 Pop/Dequeue Error Handling
+**Files**: `src/rlinkedlists.jl`
 
-### 4.2 Docker Compose
-**Files**: `docker-compose.yml` (new file)
+- [ ] Replace `error()` with `return nothing` or `CommandError`
+- [ ] Handle empty list gracefully in `_pop!` and `_dequeue!`
 
-- [ ] Define Radish service
-- [ ] Map port 6379:6379
-- [ ] Mount volume for persistence files
-- [ ] Set environment variables (host, port, intervals)
-- [ ] Add health check
-- [ ] Configure restart policy
+### 2.2 KLIST TTL Filtering
+**Files**: `src/radishelem.jl`
 
-### 4.3 Configuration
-**Files**: `config/radish.conf` (new file)
+- [ ] Filter expired keys in `rlistkeys` function
+- [ ] Check `elem.ttl !== nothing && now() > elem.tinit + Second(elem.ttl)`
 
-- [ ] Server host and port
-- [ ] Cleaner interval
-- [ ] Snapshot interval
-- [ ] Compaction threshold
-- [ ] Log level
-- [ ] Persistence file paths
+### 2.3 Bounds Checking
+**Files**: `src/rstrings.jl`
 
-### 4.4 Startup Script
-**Files**: `docker-entrypoint.sh` (new file)
+- [ ] Validate `start_s <= length(elem.value)` in `sgetrange`
+- [ ] Return error for out-of-bounds indices
 
-- [ ] Parse environment variables
-- [ ] Create data directories
-- [ ] Start Radish server with config
-- [ ] Handle signals (SIGTERM, SIGINT)
-- [ ] Graceful shutdown
+### 2.4 Reduce Cleaner Verbosity
+**Files**: `src/server.jl`
 
-### 4.5 Documentation
-**Files**: `DOCKER.md` (new file)
-
-- [ ] Build instructions
-- [ ] Run instructions
-- [ ] Docker Compose usage
-- [ ] Volume mounting for persistence
-- [ ] Environment variables reference
-- [ ] Networking setup
-- [ ] Multi-container examples (app + radish)
-
-### 4.6 Testing
-**Files**: `test_docker.sh` (new file)
-
-- [ ] Build Docker image
-- [ ] Start container
-- [ ] Test connectivity
-- [ ] Test persistence across restarts
-- [ ] Test with Python client
-- [ ] Clean up
-
-### 4.7 CI/CD (Optional)
-**Files**: `.github/workflows/docker.yml` (new file)
-
-- [ ] Build Docker image on push
-- [ ] Run tests in container
-- [ ] Push to Docker Hub (optional)
+- [ ] Change `@info` to `@debug` for routine cleaner logs
+- [ ] Keep `@info` only for actual cleanups (`total_cleaned > 0`)
 
 ---
 
-## Phase 5: Additional Features (Future)
+## Phase 3: Core Redis Commands (Priority: HIGH)
 
-### 5.1 Missing Commands
-- [ ] `DEL <key>` - Delete key
-- [ ] `EXISTS <key>` - Check if key exists
-- [ ] `TTL <key>` - Get remaining TTL
-- [ ] `EXPIRE <key> <seconds>` - Set TTL on existing key
-- [ ] `PERSIST <key>` - Remove TTL
-- [ ] `DBSIZE` - Get total key count
-- [ ] `FLUSHDB` - Clear all keys
-- [ ] `INFO` - Server statistics
+*Estimated time: 3 hours*
 
-### 5.2 New Data Types
-- [ ] Hash Maps (HSET, HGET, HGETALL, HDEL)
-- [ ] Sets (SADD, SREM, SMEMBERS, SINTER, SUNION)
-- [ ] Sorted Sets (ZADD, ZRANGE, ZRANK)
+### 3.1 Key Management Commands
+**Files**: `src/radishelem.jl`, `src/dispatcher.jl`
 
-### 5.3 Advanced Persistence
-- [ ] WAL/AOF for durability
-- [ ] Configurable fsync policies
-- [ ] Snapshot compression
-- [ ] Multiple snapshot retention
+| Command | Description |
+|---------|-------------|
+| `DEL <key>` | Delete a key |
+| `EXISTS <key>` | Check if key exists |
+| `TYPE <key>` | Get key's data type |
+| `RENAME <old> <new>` | Rename a key |
 
-### 5.4 Monitoring & Operations
-- [ ] Command statistics
-- [ ] Slow query logging
-- [ ] Memory usage tracking
-- [ ] Prometheus metrics endpoint
+### 3.2 TTL Management Commands
 
-### 5.5 Performance
-- [ ] Benchmark suite
-- [ ] Performance regression tests
-- [ ] Memory profiling
-- [ ] Optimization opportunities
+| Command | Description |
+|---------|-------------|
+| `TTL <key>` | Get remaining TTL in seconds |
+| `PTTL <key>` | Get remaining TTL in milliseconds |
+| `EXPIRE <key> <sec>` | Set TTL on existing key |
+| `PERSIST <key>` | Remove TTL from key |
+
+### 3.3 Server Commands
+
+| Command | Description |
+|---------|-------------|
+| `DBSIZE` | Return total number of keys |
+| `FLUSHDB` | Delete all keys |
+| `INFO` | Server statistics |
 
 ---
 
-## Testing Strategy
+## Phase 4: Enhanced Data Structures (Priority: MEDIUM)
 
-### Unit Tests
-- [ ] Test each data type independently
-- [ ] Test all hypercommands
-- [ ] Test TTL expiration
-- [ ] Test dirty tracking
-- [ ] Test persistence functions
+*Estimated time: 6-8 hours*
 
-### Integration Tests
-- [ ] Test client-server communication
-- [ ] Test concurrent clients
-- [ ] Test transactions under load
-- [ ] Test persistence across restarts
-- [ ] Test Docker deployment
+### 4.1 Hash Maps
+**Files**: `src/rhashes.jl` (new)
 
-### Performance Tests
-- [ ] Benchmark all commands
-- [ ] Test with 100K+ keys
-- [ ] Test with concurrent clients
-- [ ] Test snapshot performance
+- [ ] H_SET, H_GET, H_GETALL, H_DEL
+- [ ] H_EXISTS, H_LEN, H_KEYS, H_VALS
+- [ ] H_INCRBY
+
+### 4.2 Sets
+**Files**: `src/rsets.jl` (new)
+
+- [ ] S_ADD, S_REM, S_MEMBERS, S_ISMEMBER
+- [ ] S_CARD, S_INTER, S_UNION, S_DIFF
+
+### 4.3 Sorted Sets (Optional)
+**Files**: `src/rsortedsets.jl` (new)
+
+- [ ] Z_ADD, Z_RANGE, Z_RANK, Z_SCORE, Z_REM
+
+---
+
+## Phase 5: Python Client (Priority: MEDIUM)
+
+*Estimated time: 4 hours*
+
+### 5.1 Core Implementation
+**Files**: `clients/python/radish_client.py`
+
+- [ ] RESP encoder/decoder (stdlib only)
+- [ ] Connection management with context manager
+- [ ] All string and list commands
+- [ ] Transaction support
+
+### 5.2 Packaging
+
+- [ ] `pyproject.toml` for modern Python packaging
+- [ ] Type hints (PEP 484)
+- [ ] Docstrings and README
+
+---
+
+## Phase 6: Docker & Deployment (Priority: MEDIUM)
+
+*Estimated time: 2 hours*
+
+### 6.1 Dockerfile
+
+- [ ] Julia 1.10 base image
+- [ ] Volume mount for persistence
+- [ ] Health check using PING
+
+### 6.2 Docker Compose
+
+- [ ] Environment variables for host/port
+- [ ] Persistence volume configuration
+
+---
+
+## Phase 7: Observability (Priority: LOW)
+
+*Estimated time: 3 hours*
+
+### 7.1 Metrics
+
+- [ ] Total commands processed
+- [ ] Connected clients
+- [ ] Memory usage
+- [ ] Latency histograms
+
+### 7.2 Prometheus Endpoint
+
+- [ ] HTTP server on port 9100
+- [ ] `/metrics` endpoint
+
+### 7.3 Logging Improvements
+
+- [ ] Structured JSON logging
+- [ ] Slow query logging (commands > 100ms)
+
+---
+
+## Phase 8: Performance & Scale (Priority: LOW)
+
+*Estimated time: 4-6 hours*
+
+### 8.1 Benchmarking Suite
+
+- [ ] Synthetic benchmarks (SET/GET throughput)
+- [ ] Concurrent client stress test
 - [ ] Compare with Redis
 
----
+### 8.2 Optimizations
 
-## Documentation Improvements
-
-- [ ] Complete API reference for all commands
-- [ ] Architecture documentation (sharded locking, transactions)
-- [ ] Performance tuning guide
-- [ ] Deployment best practices
-- [ ] Troubleshooting guide
-- [ ] Contributing guidelines
+- [ ] Connection pooling on client
+- [ ] Batch command processing
+- [ ] Memory-mapped persistence files
 
 ---
 
-## Timeline Estimate
+## Implementation Priority Matrix
 
-| Phase | Estimated Time | Priority |
-|-------|---------------|----------|
-| Phase 1: Bug Fixes | 1.5 hours | HIGH |
-| Phase 2: Persistence | 3 hours | HIGH |
-| Phase 3: Python Client | 4 hours | MEDIUM |
-| Phase 4: Docker | 2 hours | MEDIUM |
-| Phase 5: Future Features | TBD | LOW |
-
-**Total for Phases 1-4**: ~10.5 hours
-
----
-
-## Notes
-
-- Phases 1-2 should be completed before Phase 3-4
-- Python client can be developed in parallel with Docker support
-- Phase 5 is optional and can be prioritized based on needs
-- All changes should include tests and documentation
-- Follow existing code style and patterns
+| Phase | Priority | Effort | Impact |
+|-------|----------|--------|--------|
+| 1. Persistence | CRITICAL | 4-6h | ⭐⭐⭐⭐⭐ |
+| 2. Bug Fixes | HIGH | 2h | ⭐⭐⭐⭐ |
+| 3. Core Commands | HIGH | 3h | ⭐⭐⭐⭐ |
+| 4. Data Structures | MEDIUM | 6-8h | ⭐⭐⭐ |
+| 5. Python Client | MEDIUM | 4h | ⭐⭐⭐ |
+| 6. Docker | MEDIUM | 2h | ⭐⭐⭐ |
+| 7. Observability | LOW | 3h | ⭐⭐ |
+| 8. Performance | LOW | 4-6h | ⭐⭐ |
 
 ---
 
-## Quick Start After Completion
+## Suggested Sprint Plan
 
-```bash
-# Build Docker image
-docker build -t radish:latest .
+### Sprint 1: Foundation
+- Phase 1: Persistence (CRITICAL)
+- Phase 2: Bug Fixes
 
-# Run Radish server
-docker-compose up -d
+### Sprint 2: Functionality
+- Phase 3: Core Commands
+- Phase 5: Python Client
 
-# Use Python client
-pip install ./clients/python
-python -c "from radish_client import RadishClient; \
-           client = RadishClient(); \
-           client.connect(); \
-           client.s_set('hello', 'world'); \
-           print(client.s_get('hello'))"
-```
+### Sprint 3: Deployment
+- Phase 6: Docker
+- Phase 4.1: Hash Maps
+
+### Sprint 4+: Polish
+- Remaining data structures
+- Observability
+- Performance optimization
+
+---
+
+## Success Criteria
+
+1. **Durability**: Server restart preserves all data
+2. **Stability**: No crashes on edge cases
+3. **Usability**: Python developers can use Radish easily
+4. **Deployability**: One-command Docker deployment
+5. **Observability**: Know what's happening inside
