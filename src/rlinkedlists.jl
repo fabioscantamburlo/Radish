@@ -43,10 +43,10 @@ function ladd!(value::AbstractString)
 end
 
 """Function used to create a list of 1 element. It's the main command to create a list.
-In this version ttl is implemented, ladd! takes care of converting ttl to Int128
+In this version ttl is implemented, ladd! takes care of converting ttl to Int
 """
 function ladd!(value::AbstractString, ttl::AbstractString)
-    ttl_p = tryparse(Int128, ttl)
+    ttl_p = tryparse(Int, ttl)
     if isa(ttl_p, Nothing)
         println("ttl not a valid integer - got '$ttl' tt forced to nothing")
     end

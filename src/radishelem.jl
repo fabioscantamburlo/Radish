@@ -6,7 +6,7 @@ using Logging
 # Base struct of the RadishElement
 mutable struct RadishElement
     value::Any
-    ttl::Union{Int128, Nothing}
+    ttl::Union{Int, Nothing}
     tinit::DateTime
     datatype::Symbol
 end
