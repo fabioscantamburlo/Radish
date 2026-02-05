@@ -136,7 +136,7 @@ function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::ShardedLock
 end
 
 # Start TCP server
-function start_server(host="127.0.0.1", port=6379)
+function start_server(host="127.0.0.1", port=9000)
     println("🌱 Initializing Radish Server...")
     
     # Initialize context and lock
