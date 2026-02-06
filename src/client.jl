@@ -20,6 +20,10 @@ function show_help()
     Context Commands:
       KLIST [limit]           - List all keys (optional: limit results)
     
+    Persistence Commands:
+      BGSAVE                  - Trigger a background snapshot to disk
+      DUMP                    - Check status/reminder for snapshots
+    
     String Commands:
       S_SET <key> <value> [ttl]  - Set string value with optional TTL
       S_GET <key>                - Get string value

@@ -32,11 +32,16 @@ function async_syncer(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyTr
         try
             sleep(SYNC_INTERVAL)
             cycle_count += 1
+
+            # @info "Tracker State : "
+            # @info "Tracker modified : $(tracker.modified)"
+            # @info "Tracker deleted : $(tracker.deleted)"
             
             # 1. Handle Incremental Sync (only if changes exist)
             if has_changes(tracker)
-                # Acquire read locks on all shards for consistency during save
-                shard_ids = acquire_all_read!(db_lock)
+                # Acquire reads only on keys present in tracker
+                key_list = collect(union(tracker.modified , tracker.deleted))
+                shard_ids = acquire_read!(db_lock, key_list)
                 try
                     count = save_incremental!(ctx, tracker)
                     @info "💾 Syncer: Saved $count entries"
