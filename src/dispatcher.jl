@@ -5,12 +5,13 @@ export RadishElement, S_PALETTE, LL_PALETTE
 
 const NOKEY_PALETTE = Dict{String, Function}(
     "KLIST" => rlistkeys,
-    "PING" => (ctx, args...) -> ExecuteResult(SUCCESS, "PONG", nothing),
-    "QUIT" => (ctx, args...) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
-    "EXIT" => (ctx, args...) -> ExecuteResult(SUCCESS, "Goodbye", nothing)
+    "PING" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "PONG", nothing),
+    "QUIT" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
+    "EXIT" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
+    "DUMP" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Use BGSAVE for snapshots", nothing)
 )
 
-const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE), ["MULTI", "EXEC", "DISCARD"])
+const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE), ["MULTI", "EXEC", "DISCARD", "BGSAVE"])
 
 # Read operations (can run concurrently)
 const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET", "L_LEN", "L_RANGE", "KLIST"])
@@ -18,7 +19,8 @@ const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET", "L_LEN", "L_RANGE
 # Multi-key operations
 const MULTI_KEY_OPS = Set(["S_LCS", "S_COMPLEN", "L_MOVE"])
 
-function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, session::ClientSession)
+function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, session::ClientSession;
+                  tracker::Union{DirtyTracker, Nothing}=nothing)
     cmd_name = cmd.name
     cmd_key = cmd.key
     cmd_args = cmd.args
@@ -48,10 +50,27 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
         if !session.in_transaction
             return ExecuteResult(ERROR, nothing, "EXEC without MULTI")
         end
-        return execute_transaction!(ctx, db_lock, session)
+        return execute_transaction!(ctx, db_lock, session; tracker=tracker)
     end
     
-    # 4. If in transaction, queue command instead of executing
+    # 4. Handle BGSAVE command (full snapshot)
+    if cmd.name == "BGSAVE"
+        if tracker !== nothing
+            @async begin
+                shard_ids = acquire_all_read!(db_lock)
+                try
+                    save_full_snapshot!(ctx, tracker)
+                finally
+                    release_read!(db_lock, shard_ids)
+                end
+            end
+            return ExecuteResult(SUCCESS, "Background saving started", nothing)
+        else
+            return ExecuteResult(ERROR, nothing, "Persistence not enabled")
+        end
+    end
+    
+    # 5. If in transaction, queue command instead of executing
     if session.in_transaction
         # Validate command exists before queuing
         if cmd_name in keys(NOKEY_PALETTE) || cmd_name in keys(S_PALETTE) || cmd_name in keys(LL_PALETTE)
@@ -97,10 +116,10 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             if cmd_key === nothing
                 hypercommand = NOKEY_PALETTE[cmd_name]
                 if cmd_name == "KLIST"
-                    ret_value = hypercommand(ctx, cmd_args...)
+                    ret_value = hypercommand(ctx, cmd_args...; tracker=tracker)
                     return ExecuteResult(SUCCESS, ret_value, nothing)
                 else
-                    return hypercommand(ctx, cmd_args...)
+                    return hypercommand(ctx, cmd_args...; tracker=tracker)
                 end
             else
                 return ExecuteResult(ERROR, nothing, "Command $(cmd_name) does not accept a key")
@@ -119,7 +138,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             end
             
             type_command, hypercommand = S_PALETTE[cmd_name]
-            return hypercommand(ctx, cmd_key, type_command, cmd_args...)
+            return hypercommand(ctx, cmd_key, type_command, cmd_args...; tracker=tracker)
         
         # LINKEDLIST commands (key required)
         elseif cmd_name in keys(LL_PALETTE)
@@ -134,7 +153,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             end
             
             type_command, hypercommand = LL_PALETTE[cmd_name]
-            return hypercommand(ctx, cmd_key, type_command, cmd_args...)
+            return hypercommand(ctx, cmd_key, type_command, cmd_args...; tracker=tracker)
         
         else
             return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
@@ -171,7 +190,8 @@ function extract_all_keys(commands::Vector{Command})
 end
 
 # Execute transaction: lock all keys and execute commands sequentially
-function execute_transaction!(ctx::RadishContext, db_lock::ShardedLock, session::ClientSession)
+function execute_transaction!(ctx::RadishContext, db_lock::ShardedLock, session::ClientSession;
+                              tracker::Union{DirtyTracker, Nothing}=nothing)
     # Extract all keys from queued commands
     all_keys = extract_all_keys(session.queued_commands)
     
@@ -186,7 +206,7 @@ function execute_transaction!(ctx::RadishContext, db_lock::ShardedLock, session:
     try
         # Execute each command without re-locking
         for cmd in session.queued_commands
-            result = execute_unlocked!(ctx, cmd)
+            result = execute_unlocked!(ctx, cmd; tracker=tracker)
             push!(results, result)
         end
     finally
@@ -202,7 +222,8 @@ function execute_transaction!(ctx::RadishContext, db_lock::ShardedLock, session:
 end
 
 # Execute command without acquiring locks (locks already held by transaction)
-function execute_unlocked!(ctx::RadishContext, cmd::Command)
+function execute_unlocked!(ctx::RadishContext, cmd::Command;
+                           tracker::Union{DirtyTracker, Nothing}=nothing)
     cmd_name = cmd.name
     cmd_key = cmd.key
     cmd_args = cmd.args
@@ -213,10 +234,10 @@ function execute_unlocked!(ctx::RadishContext, cmd::Command)
             if cmd_key === nothing
                 hypercommand = NOKEY_PALETTE[cmd_name]
                 if cmd_name == "KLIST"
-                    ret_value = hypercommand(ctx, cmd_args...)
+                    ret_value = hypercommand(ctx, cmd_args...; tracker=tracker)
                     return ExecuteResult(SUCCESS, ret_value, nothing)
                 else
-                    return hypercommand(ctx, cmd_args...)
+                    return hypercommand(ctx, cmd_args...; tracker=tracker)
                 end
             else
                 return ExecuteResult(ERROR, nothing, "Command $(cmd_name) does not accept a key")
@@ -235,7 +256,7 @@ function execute_unlocked!(ctx::RadishContext, cmd::Command)
             end
             
             type_command, hypercommand = S_PALETTE[cmd_name]
-            return hypercommand(ctx, cmd_key, type_command, cmd_args...)
+            return hypercommand(ctx, cmd_key, type_command, cmd_args...; tracker=tracker)
         
         # LINKEDLIST commands (key required)
         elseif cmd_name in keys(LL_PALETTE)
@@ -250,7 +271,7 @@ function execute_unlocked!(ctx::RadishContext, cmd::Command)
             end
             
             type_command, hypercommand = LL_PALETTE[cmd_name]
-            return hypercommand(ctx, cmd_key, type_command, cmd_args...)
+            return hypercommand(ctx, cmd_key, type_command, cmd_args...; tracker=tracker)
         
         else
             return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")

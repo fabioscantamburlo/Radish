@@ -1,14 +1,37 @@
 module Radish
 
+# Load order matters - break circular dependencies
+
+# 1. DirtyTracker first (needed by hypercommands, no dependencies)
+include(joinpath(@__DIR__, "src", "dirty_tracker.jl"))
+
+# 2. RadishElement struct (needs DirtyTracker for function signatures)
 include(joinpath(@__DIR__, "src", "radishelem.jl"))
+
+# 3. Core definitions (depends on RadishElement)
 include(joinpath(@__DIR__, "src", "definitions.jl"))
+
+# 4. Type implementations (defines DLinkedStartEnd)
 include(joinpath(@__DIR__, "src", "rstrings.jl"))
 include(joinpath(@__DIR__, "src", "rlinkedlists.jl"))
+
+# 5. Infrastructure
 include(joinpath(@__DIR__, "src", "sharded_lock.jl"))
+
+# 6. Persistence serialization (depends on RadishElement, DLinkedStartEnd)
+include(joinpath(@__DIR__, "src", "persistence.jl"))
+
+# 7. Dispatcher and networking
 include(joinpath(@__DIR__, "src", "dispatcher.jl"))
 include(joinpath(@__DIR__, "src", "resp.jl"))
+
+# 8. Server and client
 include(joinpath(@__DIR__, "src", "server.jl"))
 include(joinpath(@__DIR__, "src", "client.jl"))
+
+# Persistence exports
+export DirtyTracker, mark_dirty!, mark_deleted!, save_incremental!, 
+       save_full_snapshot!, load_snapshot!, compact_snapshot!, has_changes, clear!
 
 # Functions of the Radish
 (export RadishElement, rmodify!, rmodify_autodelete!, relement_to_element, rget_or_expire!,
