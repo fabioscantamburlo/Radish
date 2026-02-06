@@ -11,7 +11,7 @@ export start_server
 # Configuration
 # ============================================================================
 
-const SYNC_INTERVAL = 5.0           # seconds between fast syncs
+const SYNC_INTERVAL = 0.1          # seconds between fast syncs
 const COMPACTION_CYCLES = 50        # compact every N syncs (~4 min at 5s interval)
 const CLEANER_INTERVAL = 0.1        # seconds between cleaner runs
 
@@ -31,29 +31,21 @@ function async_syncer(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyTr
     while true
         try
             sleep(SYNC_INTERVAL)
-            
-            if !has_changes(tracker)
-                cycle_count += 1
-                # Still count cycles for compaction timing
-                if cycle_count >= COMPACTION_CYCLES
-                    @debug "💾 Syncer: No changes, skipping compaction"
-                    cycle_count = 0
-                end
-                continue
-            end
-            
-            # Acquire read locks on all shards for consistency during save
-            shard_ids = acquire_all_read!(db_lock)
-            try
-                count = save_incremental!(ctx, tracker)
-                @debug "💾 Syncer: Saved $count entries"
-            finally
-                release_read!(db_lock, shard_ids)
-            end
-            
             cycle_count += 1
             
-            # Time to compact?
+            # 1. Handle Incremental Sync (only if changes exist)
+            if has_changes(tracker)
+                # Acquire read locks on all shards for consistency during save
+                shard_ids = acquire_all_read!(db_lock)
+                try
+                    count = save_incremental!(ctx, tracker)
+                    @info "💾 Syncer: Saved $count entries"
+                finally
+                    release_read!(db_lock, shard_ids)
+                end
+            end
+            
+            # 2. Handle Periodic Compaction (based on cycles)
             if cycle_count >= COMPACTION_CYCLES
                 @info "💾 Syncer: Starting compaction (cycle $cycle_count)"
                 compact_snapshot!()
