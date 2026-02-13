@@ -1,7 +1,7 @@
 # Core type definitions for Radish
 using Dates
 
-export RadishContext, ExecutionStatus, ExecuteResult, Command, ClientSession
+export RadishContext, ExecutionStatus, ExecuteResult, Command, ClientSession, AOFState
 
 # RadishContext type alias
 const RadishContext = Dict{String, RadishElement}
@@ -47,6 +47,18 @@ CommandCreate(elem::RadishElement) = CommandResult(true, nothing, nothing, elem)
 mutable struct ClientSession
     in_transaction::Bool
     queued_commands::Vector{Command}
-    
+
     ClientSession() = new(false, Command[])
+end
+
+"""
+State for the Append-Only File (AOF) write-ahead log.
+Thread-safe via ReentrantLock for concurrent client writes.
+"""
+mutable struct AOFState
+    path::String
+    io::Union{IOStream, Nothing}
+    lock::ReentrantLock
+
+    AOFState(path::String) = new(path, nothing, ReentrantLock())
 end

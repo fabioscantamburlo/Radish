@@ -1,235 +1,196 @@
 using Sockets
 
+# ============================================================================
+# RESP Protocol
+# ============================================================================
+
+"""Read a complete RESP response from the socket, draining all lines."""
+function read_resp(sock::TCPSocket)::String
+    line = readline(sock)
+    isempty(line) && return ""
+
+    prefix = line[1]
+
+    if prefix in ('+', '-', ':')
+        # Simple string / error / integer: single line
+        return line
+    elseif prefix == '$'
+        # Bulk string
+        len = parse(Int, line[2:end])
+        if len == -1
+            return "\$-1"
+        end
+        return readline(sock)
+    elseif prefix == '*'
+        # Array: recursively drain each element
+        count = parse(Int, line[2:end])
+        if count <= 0
+            return "*$count"
+        end
+        results = [read_resp(sock) for _ in 1:count]
+        return join(results, ", ")
+    else
+        return line
+    end
+end
+
+"""Send a RESP array command and read the full response."""
 function send_command(sock::TCPSocket, parts::Vector{String})
     cmd = "*$(length(parts))\r\n"
     for part in parts
         cmd *= "\$$(length(part))\r\n$part\r\n"
     end
     write(sock, cmd)
-    return readline(sock)
+    return read_resp(sock)
 end
+
+# ============================================================================
+# Setup: Initial Data Population
+# ============================================================================
 
 function setup_worker(worker_id::Int, start_key::Int, end_key::Int, total_keys::Int)
     try
         sock = connect("127.0.0.1", 9000)
-        readline(sock)  # welcome
-        
+        read_resp(sock)  # drain welcome
+
+        half = total_keys ÷ 2
+        total = end_key - start_key + 1
+
         for i in start_key:end_key
-            if i % 5_000 == 0
-                println("  Worker #$worker_id: inserted $(i - start_key + 1) keys...")
+            if (i - start_key + 1) % 5_000 == 0
+                println("  Worker #$worker_id: $((i - start_key + 1))/$total keys")
             end
-            
-            # 50% of keys have TTL, 50% don't
-            has_ttl = rand() < 0.5
-            ttl = has_ttl ? string(rand(60:3600)) : nothing
-            
-            if i <= total_keys ÷ 2
-                # String keys (50%)
+
+            ttl = rand() < 0.5 ? string(rand(60:3600)) : nothing
+
+            if i <= half
                 key = "str_$i"
                 value = "value_$i"
-                if has_ttl
+                if ttl !== nothing
                     send_command(sock, ["S_SET", key, value, ttl])
                 else
                     send_command(sock, ["S_SET", key, value])
                 end
             else
-                # List keys (50%) with random length 1-20
-                # Note: Lists don't support TTL in current implementation
-                len_list = rand(1:20)
                 key = "list_$i"
-                if has_ttl 
+                len_list = rand(1:20)
+                if ttl !== nothing
                     send_command(sock, ["L_ADD", key, "item_1", ttl])
-                    for j in 2:len_list
-                        send_command(sock, ["L_APPEND", key, "item_$j"])
-                    end
                 else
                     send_command(sock, ["L_ADD", key, "item_1"])
-                    for j in 2:len_list
-                        send_command(sock, ["L_APPEND", key, "item_$j"])
-                    end
+                end
+                for j in 2:len_list
+                    send_command(sock, ["L_APPEND", key, "item_$j"])
                 end
             end
         end
-        
+
         send_command(sock, ["QUIT"])
         close(sock)
-        println("  Worker #$worker_id: completed $(end_key - start_key + 1) keys")
+        println("  Worker #$worker_id: done ($total keys)")
     catch e
         println("  Worker #$worker_id error: $e")
     end
 end
 
-function setup_initial_data(num_keys::Int=100_000, num_workers::Int=10)
-    println("📦 Setting up $num_keys initial keys using $num_workers workers...")
-    println("   50% strings (50% with TTL 60-3600s), 50% lists (length 1-20 each with TTL 60-3600s)")
-    
+function setup_initial_data(num_keys::Int, num_workers::Int)
+    println("Setting up $num_keys initial keys with $num_workers workers...")
+    println("  50% strings, 50% lists (1-20 items), 50% with TTL 60-3600s")
+
     start_time = time()
-    
-    # Divide work among workers
     keys_per_worker = num_keys ÷ num_workers
+
     tasks = []
-    
     for i in 1:num_workers
         start_key = (i - 1) * keys_per_worker + 1
         end_key = i == num_workers ? num_keys : i * keys_per_worker
-        task = @async setup_worker(i, start_key, end_key, num_keys)
-        push!(tasks, task)
+        push!(tasks, @async setup_worker(i, start_key, end_key, num_keys))
     end
-    
-    # Wait for all workers
+
     for task in tasks
         wait(task)
     end
-    
+
     elapsed = time() - start_time
-    println("✅ Setup complete in $(round(elapsed, digits=2))s")
-    println("   $(num_keys ÷ 2) string keys + $(num_keys ÷ 2) list keys")
-    println()
+    rate = round(num_keys / elapsed, digits=0)
+    println("Setup complete: $num_keys keys in $(round(elapsed, digits=2))s ($rate keys/s)\n")
 end
 
-function client_worker(client_id::Int, num_ops::Int, total_keys::Int, run_forever::Bool)
-    try
-        sleep(rand(1:3))  # Stagger client starts
-        sock = connect("127.0.0.1", 9000)
-        readline(sock)  # welcome message
-        
-        println("Client #$client_id started $(run_forever ? "(running forever)" : "")")
-        
-        ops_count = 0
-        while true
-            # Stop if not running forever and reached num_ops
-            if !run_forever && ops_count >= num_ops
-                break
-            end
-            
-            ops_count += 1
-            
-            # 10% chance to use a transaction
-            if rand() < 0.1
-                execute_transaction(sock, total_keys)
-                ops_count += rand(3:10)  # Count transaction ops
-            else
-                execute_single_operation(sock, total_keys)
-            end
-            
-            if ops_count % 1000 == 0
-                println("Client #$client_id: completed $ops_count ops")
-            end
-        end
-        
-        # Final stats (only if not running forever)
-        if !run_forever
-            send_command(sock, ["KLIST", "3"])
-        end
-        
-        # QUIT
-        send_command(sock, ["QUIT"])
-        sleep(0.01)
-        close(sock)
-        
-        println("Client #$client_id finished")
-    catch e
-        println("Client #$client_id error: $e")
+# ============================================================================
+# Workload: Single Operations
+# ============================================================================
+
+function execute_string_op(sock::TCPSocket, key::String, total_keys::Int)
+    r = rand()
+    if r < 0.35
+        send_command(sock, ["S_GET", key])
+    elseif r < 0.55
+        send_command(sock, ["S_APPEND", key, "_x"])
+    elseif r < 0.70
+        send_command(sock, ["S_LEN", key])
+    elseif r < 0.80
+        send_command(sock, ["S_INCR", key])
+    elseif r < 0.90
+        send_command(sock, ["S_GETRANGE", key, "0", "3"])
+    else
+        key2 = "str_$(rand(1:(total_keys ÷ 2)))"
+        send_command(sock, ["S_LCS", key, key2])
+    end
+end
+
+function execute_list_op(sock::TCPSocket, key::String)
+    r = rand()
+    if r < 0.25
+        send_command(sock, ["L_PREPEND", key, "new_item"])
+    elseif r < 0.50
+        send_command(sock, ["L_APPEND", key, "tail_item"])
+    elseif r < 0.70
+        send_command(sock, ["L_LEN", key])
+    elseif r < 0.90
+        send_command(sock, ["L_RANGE", key, "0", "10"])
+    else
+        send_command(sock, ["L_POP", key])
     end
 end
 
 function execute_single_operation(sock::TCPSocket, total_keys::Int)
-    # Pick random existing key
     key_id = rand(1:total_keys)
-    is_string = key_id <= (total_keys ÷ 2)
-    
-    if is_string
-        # STRING OPERATIONS on existing keys
-        key = "str_$key_id"
-        
-        # S_GET (read)
-        if rand() < 0.4
-            send_command(sock, ["S_GET", key])
-        end
-        
-        # S_APPEND (write)
-        if rand() < 0.2
-            send_command(sock, ["S_APPEND", key, "_x"])
-        end
-        
-        # S_LEN (read)
-        if rand() < 0.2
-            send_command(sock, ["S_LEN", key])
-        end
-        
-        # S_GETRANGE (read)
-        if rand() < 0.1
-            send_command(sock, ["S_GETRANGE", key, "0", "3"])
-        end
-        
-        # S_LCS (multi-key read)
-        if rand() < 0.1
-            key2_id = rand(1:(total_keys ÷ 2))
-            key2 = "str_$key2_id"
-            send_command(sock, ["S_LCS", key, key2])
-        end
-        
+    half = total_keys ÷ 2
+
+    if key_id <= half
+        execute_string_op(sock, "str_$key_id", total_keys)
     else
-        # LIST OPERATIONS on existing keys
-        key = "list_$key_id"
-        
-        # L_PREPEND (write)
-        if rand() < 0.3
-            send_command(sock, ["L_PREPEND", key, "new_item"])
-        end
-        
-        # L_APPEND (write)
-        if rand() < 0.3
-            send_command(sock, ["L_APPEND", key, "tail_item"])
-        end
-        
-        # L_LEN (read)
-        if rand() < 0.2
-            send_command(sock, ["L_LEN", key])
-        end
-        
-        # L_RANGE (read)
-        if rand() < 0.2
-            send_command(sock, ["L_RANGE", key, "0", "10"])
-        end
-        
-        # L_POP (write)
-        if rand() < 0.05
-            send_command(sock, ["L_POP", key])
-        end
+        execute_list_op(sock, "list_$key_id")
     end
 end
 
-function execute_transaction(sock::TCPSocket, total_keys::Int)
-    # Start transaction
+# ============================================================================
+# Workload: Transactions
+# ============================================================================
+
+function execute_transaction(sock::TCPSocket, total_keys::Int)::Int
     send_command(sock, ["MULTI"])
-    
-    # Queue 3-100 operations
-    num_ops = rand(3:100)
-    
+
+    num_ops = rand(3:10)
+    half = total_keys ÷ 2
+
     for _ in 1:num_ops
         key_id = rand(1:total_keys)
-        is_string = key_id <= (total_keys ÷ 2)
-        
-        if is_string
+        if key_id <= half
             key = "str_$key_id"
-            op = rand(1:5)
-            
+            op = rand(1:4)
             if op == 1
                 send_command(sock, ["S_GET", key])
             elseif op == 2
                 send_command(sock, ["S_APPEND", key, "_tx"])
             elseif op == 3
                 send_command(sock, ["S_LEN", key])
-            elseif op == 4
-                send_command(sock, ["S_INCR", key])
             else
                 send_command(sock, ["S_GETRANGE", key, "0", "5"])
             end
         else
             key = "list_$key_id"
             op = rand(1:4)
-            
             if op == 1
                 send_command(sock, ["L_GET", key])
             elseif op == 2
@@ -241,92 +202,127 @@ function execute_transaction(sock::TCPSocket, total_keys::Int)
             end
         end
     end
-    
-    # Execute transaction
+
     send_command(sock, ["EXEC"])
+    return num_ops
 end
 
-function run_heavy_test(num_clients::Int, ops_per_client::Int, initial_keys::Int,
- 
-                        setup_only::Bool=false, run_forever::Bool=false)
-    println("🔥 Starting HEAVY test")
-    println("   Mode: $(setup_only ? "SETUP ONLY" : run_forever ? "CONTINUOUS LOAD" : "TIMED TEST")")
-    println("   Initial keys: $initial_keys (50% strings, 50% lists)")
-    println("   Clients: $num_clients")
-    if !setup_only
-        println("   Operations per client: $(run_forever ? "∞" : ops_per_client)")
-    end
-    println()
-    
-    # Wait for server
-    println("Waiting for server...")
-    sleep(2)
-    
-    # Setup initial data
-    setup_initial_data(initial_keys, num_clients)
-    
-    # If setup_only, exit here
-    if setup_only
-        println("✅ Setup complete. Exiting (setup_only mode).")
-        return
-    end
-    
-    println("🚀 Starting client workload...")
-    if run_forever
-        println("   Press Ctrl+C to stop")
-    end
-    
-    # Spawn clients
-    start_time = time()
-    tasks = []
-    
-    for i in 1:num_clients
-        task = @async client_worker(i, ops_per_client, initial_keys, run_forever)
-        push!(tasks, task)
-    end
-    
-    # Wait for all clients (or run forever)
-    if run_forever
-        try
-            for task in tasks
-                wait(task)
-            end
-        catch e
-            if isa(e, InterruptException)
-                println("\n⚠️  Interrupted. Stopping clients...")
+# ============================================================================
+# Client Worker
+# ============================================================================
+
+function client_worker(client_id::Int, num_ops::Int, total_keys::Int, run_forever::Bool)
+    try
+        sleep(rand() * 2.0)  # stagger starts 0-2s
+        sock = connect("127.0.0.1", 9000)
+        read_resp(sock)  # drain welcome
+
+        ops_count = 0
+
+        while run_forever || ops_count < num_ops
+            ops_count += 1
+
+            if rand() < 0.1
+                tx_ops = execute_transaction(sock, total_keys)
+                ops_count += tx_ops
             else
-                rethrow(e)
+                execute_single_operation(sock, total_keys)
+            end
+
+            if ops_count % 5_000 == 0
+                println("  Client #$client_id: $ops_count ops")
             end
         end
-    else
+
+        send_command(sock, ["QUIT"])
+        close(sock)
+        println("  Client #$client_id: finished ($ops_count ops)")
+    catch e
+        println("  Client #$client_id error: $e")
+    end
+end
+
+# ============================================================================
+# Main
+# ============================================================================
+
+function run_heavy_test(; mode::String="test", num_clients::Int=10,
+                         ops_per_client::Int=10_000, initial_keys::Int=100_000)
+    setup_only = mode == "setup"
+    run_forever = mode == "forever"
+
+    println("=== Radish Heavy Test ===")
+    println("  Mode:         $(setup_only ? "SETUP ONLY" : run_forever ? "CONTINUOUS" : "TIMED")")
+    println("  Initial keys: $initial_keys")
+    println("  Clients:      $num_clients")
+    if !setup_only
+        println("  Ops/client:   $(run_forever ? "unlimited" : string(ops_per_client))")
+    end
+    println()
+
+    # Wait for server
+    println("Connecting to server...")
+    sleep(1)
+
+    # Phase 1: Setup
+    setup_initial_data(initial_keys, num_clients)
+
+    if setup_only
+        println("Setup complete. Exiting.")
+        return
+    end
+
+    # Phase 2: Workload
+    println("Starting $num_clients clients...")
+    if run_forever
+        println("  Press Ctrl+C to stop\n")
+    end
+
+    start_time = time()
+    tasks = [@async client_worker(i, ops_per_client, initial_keys, run_forever)
+             for i in 1:num_clients]
+
+    try
         for task in tasks
             wait(task)
         end
-        
-        elapsed = time() - start_time
-        total_ops = num_clients * ops_per_client
-        
-        println("\n✅ Heavy test completed in $(round(elapsed, digits=2))s")
-        println("   Throughput: $(round(total_ops / elapsed, digits=2)) ops/sec")
+    catch e
+        if isa(e, InterruptException)
+            println("\nInterrupted. Stopping...")
+        else
+            rethrow(e)
+        end
     end
-    
-    println("\n✅ Test finished!")
+
+    elapsed = time() - start_time
+    if !run_forever
+        total_ops = num_clients * ops_per_client
+        println("\n=== Results ===")
+        println("  Duration:   $(round(elapsed, digits=2))s")
+        println("  Throughput: $(round(total_ops / elapsed, digits=0)) ops/s")
+    end
+
+    println("Done.")
 end
+
+# ============================================================================
+# CLI
+# ============================================================================
 
 function show_usage()
     println("""
     Usage: julia heavy_test.jl [mode] [num_clients] [ops_per_client] [initial_keys]
-    
+
     Modes:
-      setup       - Only setup initial data, don't run workload
-      test        - Setup + run timed test (default)
-      forever     - Setup + run continuous load (Ctrl+C to stop)
-    
-    Arguments:
-      num_clients      - Number of concurrent clients (default: 10)
-      ops_per_client   - Operations per client (default: 10000, ignored in forever mode)
-      initial_keys     - Initial keys to setup (default: 100000)
-    
+      setup    - Populate initial data only
+      test     - Setup + timed workload (default)
+      forever  - Setup + continuous load (Ctrl+C to stop)
+
+    Defaults:
+      num_clients    = 10
+      ops_per_client = 10000
+      initial_keys   = 100000
+
     Examples:
       julia heavy_test.jl setup 10 0 50000
       julia heavy_test.jl test 25 10000 100000
@@ -334,8 +330,7 @@ function show_usage()
     """)
 end
 
-# Parse command line arguments
-if length(ARGS) > 0 && (ARGS[1] == "--help" || ARGS[1] == "-h")
+if length(ARGS) > 0 && ARGS[1] in ("--help", "-h")
     show_usage()
     exit(0)
 end
@@ -345,14 +340,10 @@ num_clients = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 10
 ops_per_client = length(ARGS) >= 3 ? parse(Int, ARGS[3]) : 10_000
 initial_keys = length(ARGS) >= 4 ? parse(Int, ARGS[4]) : 100_000
 
-setup_only = (mode == "setup")
-run_forever = (mode == "forever")
-
 if !(mode in ["setup", "test", "forever"])
-    println("❌ Invalid mode: $mode")
+    println("Invalid mode: $mode")
     show_usage()
     exit(1)
 end
 
-# Run the heavy test
-run_heavy_test(num_clients, ops_per_client, initial_keys, setup_only, run_forever)
+run_heavy_test(; mode, num_clients, ops_per_client, initial_keys)

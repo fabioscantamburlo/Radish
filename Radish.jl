@@ -18,20 +18,22 @@ include(joinpath(@__DIR__, "src", "rlinkedlists.jl"))
 # 5. Infrastructure
 include(joinpath(@__DIR__, "src", "sharded_lock.jl"))
 
-# 6. Persistence serialization (depends on RadishElement, DLinkedStartEnd)
-include(joinpath(@__DIR__, "src", "persistence.jl"))
-
-# 7. Dispatcher and networking
+# 6. Dispatcher and networking (before persistence since replay_aof! uses execute!)
 include(joinpath(@__DIR__, "src", "dispatcher.jl"))
 include(joinpath(@__DIR__, "src", "resp.jl"))
+
+# 7. Persistence (depends on RadishElement, DLinkedStartEnd, ShardedLock, execute!)
+include(joinpath(@__DIR__, "src", "persistence.jl"))
 
 # 8. Server and client
 include(joinpath(@__DIR__, "src", "server.jl"))
 include(joinpath(@__DIR__, "src", "client.jl"))
 
 # Persistence exports
-export DirtyTracker, mark_dirty!, mark_deleted!, save_incremental!, 
-       save_full_snapshot!, load_snapshot!, compact_snapshot!, has_changes, clear!
+export DirtyTracker, mark_dirty!, mark_deleted!, save_snapshot!, save_snapshot_shards!,
+       save_full_snapshot!, load_snapshot!, has_changes, clear!, pop_changes!,
+       ensure_persistence_dirs!, snapshot_shard_id, NUM_SNAPSHOT_SHARDS,
+       AOFState, aof_open!, aof_append!, aof_append_batch!, aof_truncate!, aof_close!, replay_aof!
 
 # Functions of the Radish
 (export RadishElement, rmodify!, rmodify_autodelete!, relement_to_element, rget_or_expire!,
@@ -44,7 +46,7 @@ export DirtyTracker, mark_dirty!, mark_deleted!, save_incremental!,
 export ShardedLock
 
 # Core definitions exports
-export RadishContext, ExecutionStatus, ExecuteResult, Command, ClientSession
+export RadishContext, ExecutionStatus, ExecuteResult, Command, ClientSession, AOFState
 
 # Functions for the stringtype
 (export sincr!, sincr_by!, sget, sadd, slpad!, srpad!,
