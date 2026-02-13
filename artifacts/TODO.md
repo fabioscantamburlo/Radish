@@ -1,6 +1,6 @@
 # Radish TODO - Remaining Items
 
-> Last updated: Core key management commands implemented
+> Last updated: Key management and TTL commands completed
 
 ---
 
@@ -32,6 +32,9 @@
 - ✅ `TYPE <key>` - Get key's data type
 - ✅ `TTL <key>` - Get remaining TTL in seconds
 - ✅ `DBSIZE` - Return total number of keys
+- ✅ `PERSIST <key>` - Remove TTL from key
+- ✅ `EXPIRE <key> <sec>` - Set TTL on existing key
+- ✅ `FLUSHDB` - Delete all keys from database
 
 ---
 
@@ -40,12 +43,7 @@
 ### Key Management
 - [ ] `RENAME <old> <new>` - Rename a key
 
-### TTL Management
-- [ ] `EXPIRE <key> <sec>` - Set TTL on existing key
-- [ ] `PERSIST <key>` - Remove TTL from key
-
 ### Server Commands
-- [ ] `FLUSHDB` - Delete all keys
 - [ ] `INFO` - Server statistics
 
 ---
@@ -92,9 +90,8 @@
 
 ---
 
-## 🎯 NEXT SPRINT: TTL & Server Commands (2 hours)
+## 🎯 NEXT SPRINT: Advanced Commands (2 hours)
 
-1. Implement EXPIRE, PERSIST
-2. Implement RENAME
-3. Implement FLUSHDB, INFO
-4. Update tests
+1. Implement RENAME (two-key locking)
+2. Implement INFO (server statistics)
+3. Add comprehensive tests
