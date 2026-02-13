@@ -24,13 +24,13 @@ const META_PALETTE = Dict{String, Function}(
     "EXPIRE" => rexpire,
 )
 
-const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE), keys(META_PALETTE), ["MULTI", "EXEC", "DISCARD", "BGSAVE"])
+const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE), keys(META_PALETTE), ["MULTI", "EXEC", "DISCARD", "BGSAVE", "RENAME"])
 
 # Read operations (can run concurrently)
 const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET", "L_LEN", "L_RANGE", "KLIST", "EXISTS", "TYPE", "TTL", "DBSIZE"])
 
 # Multi-key operations
-const MULTI_KEY_OPS = Set(["S_LCS", "S_COMPLEN", "L_MOVE"])
+const MULTI_KEY_OPS = Set(["S_LCS", "S_COMPLEN", "L_MOVE", "RENAME"])
 
 function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, session::ClientSession;
                   tracker::Union{DirtyTracker, Nothing}=nothing)
@@ -86,7 +86,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
     # 5. If in transaction, queue command instead of executing
     if session.in_transaction
         # Validate command exists before queuing
-        if cmd_name in keys(NOKEY_PALETTE) || cmd_name in keys(S_PALETTE) || cmd_name in keys(LL_PALETTE) || cmd_name in keys(META_PALETTE)
+        if cmd_name in keys(NOKEY_PALETTE) || cmd_name in keys(S_PALETTE) || cmd_name in keys(LL_PALETTE) || cmd_name in keys(META_PALETTE) || cmd_name == "RENAME"
             push!(session.queued_commands, cmd)
             return ExecuteResult(SUCCESS, "QUEUED", nothing)
         else
@@ -181,6 +181,13 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             type_command, hypercommand = LL_PALETTE[cmd_name]
             return hypercommand(ctx, cmd_key, type_command, cmd_args...; tracker=tracker)
         
+        # RENAME (two-key meta command)
+        elseif cmd_name == "RENAME"
+            if cmd_key === nothing || isempty(cmd_args)
+                return ExecuteResult(ERROR, nothing, "RENAME requires two keys: RENAME <old> <new>")
+            end
+            return rrename!(ctx, cmd_key, cmd_args[1]; tracker=tracker)
+
         # META commands (key required, any datatype)
         elseif cmd_name in keys(META_PALETTE)
             hypercommand = META_PALETTE[cmd_name]
@@ -193,7 +200,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             else
                 return hypercommand(ctx, cmd_key; tracker=tracker)
             end
-        
+
         else
             return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
         end
@@ -311,6 +318,13 @@ function execute_unlocked!(ctx::RadishContext, cmd::Command;
             type_command, hypercommand = LL_PALETTE[cmd_name]
             return hypercommand(ctx, cmd_key, type_command, cmd_args...; tracker=tracker)
         
+        # RENAME (two-key meta command)
+        elseif cmd_name == "RENAME"
+            if cmd_key === nothing || isempty(cmd_args)
+                return ExecuteResult(ERROR, nothing, "RENAME requires two keys: RENAME <old> <new>")
+            end
+            return rrename!(ctx, cmd_key, cmd_args[1]; tracker=tracker)
+
         # META commands (key required, any datatype)
         elseif cmd_name in keys(META_PALETTE)
             hypercommand = META_PALETTE[cmd_name]
@@ -323,7 +337,7 @@ function execute_unlocked!(ctx::RadishContext, cmd::Command;
             else
                 return hypercommand(ctx, cmd_key; tracker=tracker)
             end
-        
+
         else
             return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
         end

@@ -414,6 +414,45 @@ function rexpire(context::Dict{String, RadishElement}, key::AbstractString, ttl_
     return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
 end
 
+"""Rename a key atomically.
+Moves the element from old_key to new_key, overwriting new_key if it exists.
+Returns OK if successful, KEY_NOT_FOUND if old_key doesn't exist or is expired.
+"""
+function rrename!(context::Dict{String, RadishElement}, old_key::AbstractString, new_key::AbstractString;
+                  tracker::Union{DirtyTracker, Nothing}=nothing)
+    if !haskey(context, old_key)
+        return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+    end
+
+    element = context[old_key]
+
+    # Check if old key is expired
+    if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
+        delete!(context, old_key)
+        if tracker !== nothing
+            mark_deleted!(tracker, old_key)
+        end
+        return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+    end
+
+    # Same key - no-op
+    if old_key == new_key
+        return ExecuteResult(SUCCESS, "OK", nothing)
+    end
+
+    # Move element from old to new (overwrites new if it exists)
+    context[new_key] = element
+    delete!(context, old_key)
+
+    # Mark dirty: new key is modified, old key is deleted
+    if tracker !== nothing
+        mark_dirty!(tracker, new_key)
+        mark_deleted!(tracker, old_key)
+    end
+
+    return ExecuteResult(SUCCESS, "OK", nothing)
+end
+
 """Delete all keys from the database.
 Returns OK.
 """

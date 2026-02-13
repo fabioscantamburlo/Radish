@@ -50,7 +50,7 @@ function read_resp_command(sock::TCPSocket)
     # Multi-word: could be "KLIST 10" (no key, just arg) or "S_GET mykey" (has key)
     # Heuristic: if command starts with S_ or L_, second part is key
     # Meta commands (EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE) also take a key
-    if startswith(cmd_name, "S_") || startswith(cmd_name, "L_") || cmd_name in ["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE"]
+    if startswith(cmd_name, "S_") || startswith(cmd_name, "L_") || cmd_name in ["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME"]
         key = parts[2]
         args = length(parts) > 2 ? parts[3:end] : String[]
         return Command(cmd_name, key, args)
