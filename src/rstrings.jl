@@ -11,7 +11,7 @@ end
 
 """There are 2 ways of dispatching sadd operations.
 #1) sadd with value and ttl -> adds a new element with parsed ttl
-if parsing is not successfull to Int128 it's forced to nothing
+if parsing is not successful to Int128 it's forced to nothing
 """
 function sadd(value::AbstractString, ttl::AbstractString)
     value_n = tryparse(Int, value)
@@ -64,7 +64,7 @@ function sgincr!(elem::RadishElement)
 end
 
 """Function to get and increment by incr the value at RadishElement StringType
-It works only if the both RadishElement and incre are parsable to Integer"""
+It works only if both RadishElement and incr are parsable to Integer"""
 function sgincr_by!(elem::RadishElement, incr::AbstractString)
     elem_n = tryparse(Int, string(elem.value))
     if isa(elem_n, Nothing)
@@ -83,7 +83,7 @@ function sgincr_by!(elem::RadishElement, incr::AbstractString)
 end
 
 """Function to increment by incr the value at RadishElement StringType
-It works only if the both RadishElement and incre are parsable to Integer"""
+It works only if both RadishElement and incr are parsable to Integer"""
 function sincr_by!(elem::RadishElement, incr::AbstractString)
     elem_n = tryparse(Int, string(elem.value))
     if isa(elem_n, Nothing)

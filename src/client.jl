@@ -3,6 +3,11 @@ using Sockets
 
 export start_client
 
+"""
+    show_help()
+
+Display the help message with available commands and examples.
+"""
 function show_help()
     println("""
     --- Radish Client Help ---
@@ -66,6 +71,12 @@ function show_help()
     """)
 end
 
+"""
+    start_client(host="127.0.0.1", port=6379)
+
+Start the Radish TCP client, connecting to the specified host and port.
+Enters an interactive loop to send commands and receive responses.
+"""
 function start_client(host="127.0.0.1", port=6379)
     println("🌱 Connecting to Radish server at $host:$port...")
     

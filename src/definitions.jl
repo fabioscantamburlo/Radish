@@ -40,10 +40,13 @@ CommandSuccess(value) = CommandResult(true, value, nothing, nothing)
 CommandError(msg::String) = CommandResult(false, nothing, msg, nothing)
 CommandCreate(elem::RadishElement) = CommandResult(true, nothing, nothing, elem)
 
-# Struct to enable transaction mode
-# In_transaction mode works by creating a queue of commands and executing all of them locking all the keys at once
-# This is useful to combine more than a single command and be sure no other client can interfere with the keys you are 
-# interested, resulting in atomicity
+"""
+Struct to enable transaction mode.
+
+In_transaction mode works by creating a queue of commands and executing all of them locking all the keys at once.
+This is useful to combine more than a single command and be sure no other client can interfere with the keys you are 
+interested, resulting in atomicity.
+"""
 mutable struct ClientSession
     in_transaction::Bool
     queued_commands::Vector{Command}

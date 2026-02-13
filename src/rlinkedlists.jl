@@ -5,8 +5,8 @@ using Logging
 
 
 """DoubleLinkedList element for RadishDb
-# The idea is to have a double linked list in which the first element has prev nothing
-# The last element has next nothing so it's gonna be easy to going up-down the the list.
+The idea is to have a double linked list in which the first element has prev nothing.
+The last element has next nothing so it's gonna be easy to going up-down the list.
 """
 
 """Struct of the basic module, it's a simple double-linked-lists: easy access to next and prev."""
@@ -55,8 +55,10 @@ function ladd!(value::AbstractString, ttl::AbstractString)
     return CommandCreate(elem)
 end 
 
-"""There are 4 ways of dispatching prepend operations.
-#1) lprepend! with radish element and value -> Push into the list
+"""
+    lprepend!(elem::RadishElement, value::AbstractString)
+
+Prepend a value to the list.
 """
 function lprepend!(elem::RadishElement, value::AbstractString)
     @debug "Executing lprepend! with elements '$elem' , '$value' "
@@ -133,8 +135,12 @@ function Base.append!(list::DLinkedStartEnd{T}, value::T) where T
 end
 
 
-"""# There are 4 ways of dispatching append operations.
-#1) lappend! with radish element and value -> append into the list
+"""
+# There are 4 ways of dispatching append operations
+
+lappend!(elem::RadishElement, value::AbstractString)
+
+Append a value to the list.
 """
 function lappend!(elem::RadishElement, value::AbstractString)
     @debug "Executing lappend! with elements '$elem' , '$value' "
@@ -302,8 +308,8 @@ function _traverse_linked_list_forward(list::DLinkedStartEnd)
     end
 end
 
-#TODO Change limit to 0 for real usecases
-"""Get DLinkedStartEnd values by building it forward with a predetermined limit of 50 for vis reasons
+# TODO: Change limit to 0 for real usecases
+"""get DLinkedStartEnd values by building it forward with a predetermined limit of 50 for vis reasons
 """
 function _lget(list::DLinkedStartEnd)
     #@info "Truncating to 50 elements..."
@@ -392,7 +398,7 @@ function lmove!(listl::RadishElement, listr::RadishElement)
     return CommandSuccess(true)
 end
 
-# TODO CREATE WRAPPER AND EXPOSE COMMAND
+# TODO: CREATE WRAPPER AND EXPOSE COMMAND
 """ Function to operate on DLinkedStartEnd that concatenates the two lists
 This function is a non MUTATING function, it keeps listr and listl 
 

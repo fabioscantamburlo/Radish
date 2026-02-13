@@ -23,7 +23,7 @@ function rget_or_expire!(context::Dict{String, RadishElement}, key::AbstractStri
                          tracker::Union{DirtyTracker, Nothing}=nothing)
     if haskey(context, key)
         element = context[key]
-        # Check if ttl exist and it is expired
+        # Check if ttl exists and it is expired
         if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
             delete!(context, key)
             # Mark as deleted for persistence
@@ -44,14 +44,14 @@ function rget_or_expire!(context::Dict{String, RadishElement}, key::AbstractStri
     return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
 end
 
-# Basic function to get Radishelement from the context and modify it right after
+# Basic function to get RadishElement from the context and modify it right after
 # This function can be used to for instance do commands like POP element from a list (GET + DELETE) operations combined 
 function rget_on_modify_or_expire!(context::Dict{String, RadishElement}, key::AbstractString, 
                                    command::Function, args...;
                                    tracker::Union{DirtyTracker, Nothing}=nothing)
     if haskey(context, key)
         element = context[key]
-        # Check if ttl exist and it is expired
+        # Check if ttl exists and it is expired
         if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
             delete!(context, key)
             # Mark as deleted for persistence
@@ -140,7 +140,7 @@ end
 
 # Base function to add_or_modify an element. If not present add otherwise modify
 # This is useful to define two behaviors for commands that should modify in place a key or create a new key if is not
-# present, this hypercommand allows the existance of functions like lpush -> push el to list otherwise create a list with that element
+# present, this hypercommand allows the existence of functions like lpush -> push el to list otherwise create a list with that element
 function radd_or_modify!(context::Dict, key::AbstractString, command::Function, args...;
                          tracker::Union{DirtyTracker, Nothing}=nothing)
     if haskey(context, key)
@@ -210,7 +210,7 @@ function relement_to_element_consume_key2!(context::Dict, key, command::Function
     end
 end
 
-# Base function to compare Radish elements of the same type !!!!
+# Base function to compare Radish elements of the same type
 # Note: This is read-only, no dirty tracking needed
 function relement_to_element(context::Dict, key, command::Function, args...;
                              tracker::Union{DirtyTracker, Nothing}=nothing)
@@ -269,7 +269,7 @@ function rget_on_modify_or_expire_autodelete!(context::Dict{String, RadishElemen
     if haskey(context, key)
         element = context[key]
         
-        # Check if ttl exist and it is expired
+        # Check if ttl exists and it is expired
         if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
             delete!(context, key)
             # Mark as deleted for persistence
