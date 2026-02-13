@@ -1,0 +1,47 @@
+// Additional radish-themed customizations beyond color variables
+
+// Sidebar navigation: bigger font, high contrast, no gradients
+.site-nav {
+    font-size: 1.05rem !important;
+
+    .nav-list-item {
+        font-size: 1.05rem;
+    }
+
+    .nav-list-link {
+        color: #2d0a10 !important;
+        font-weight: 600;
+        text-rendering: optimizeLegibility;
+        -webkit-font-smoothing: none; // Disables anti-aliasing for a crisper/pixel look
+        -moz-osx-font-smoothing: unset;
+
+        &:hover {
+            color: #c0334d !important;
+            background: #fce8ec !important;
+            background-image: none !important;
+        }
+
+        &.active {
+            color: #c0334d !important;
+            font-weight: 800;
+            background: #fce0e5 !important;
+            background-image: none !important;
+        }
+    }
+}
+
+// Sidebar itself: flat color, no gradient
+.side-bar {
+    background: #f5dce0 !important;
+    background-image: none !important;
+    image-rendering: pixelated;
+}
+
+// Site title in sidebar: extra bold, high contrast
+.site-title {
+    color: #5a0f1e !important;
+    font-weight: 900;
+    font-size: 1.6rem !important;
+    letter-spacing: 0.02em;
+    -webkit-font-smoothing: none;
+}
