@@ -1,6 +1,6 @@
 # Radish
 
-![Radish](radish_image.jpeg)
+![Radish](artifacts/radish_image.jpeg)
 
 Radish is a didactical exercise to replicate an in-memory Database, we decided to use Redis as the case study so we are trying to implement some of the redis functionalities with different interfaces.
 Radish is fully developed in Julia with minor external dependencies.
