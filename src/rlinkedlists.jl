@@ -48,7 +48,7 @@ In this version ttl is implemented, ladd! takes care of converting ttl to Int
 function ladd!(value::AbstractString, ttl::AbstractString)
     ttl_p = tryparse(Int, ttl)
     if isa(ttl_p, Nothing)
-        println("ttl not a valid integer - got '$ttl' tt forced to nothing")
+        return CommandError("TTL must be a valid integer, got '$ttl'")
     end
     new_element = DLinkedStartEnd(value)
     elem = RadishElement(new_element, ttl_p, now(), :list)
@@ -337,6 +337,12 @@ function _lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::Abstract
     if isa(start_s, Nothing) || isa(end_s, Nothing)
         return nothing
     end
+    
+    # Bounds checking
+    if start_s < 1 || start_s > list.len
+        return []
+    end
+    
     return_value = _compose_linked_list_forward(list, start_s, end_s)
     return return_value
 end

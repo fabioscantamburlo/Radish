@@ -11,7 +11,7 @@ end
 
 """There are 2 ways of dispatching sadd operations.
 #1) sadd with value and ttl -> adds a new element with parsed ttl
-if parsing is not successful to Int128 it's forced to nothing
+if parsing is not successful, return error
 """
 function sadd(value::AbstractString, ttl::AbstractString)
     value_n = tryparse(Int, value)
@@ -21,7 +21,7 @@ function sadd(value::AbstractString, ttl::AbstractString)
     end
     ttl_p = tryparse(Int, ttl)
     if isa(ttl_p, Nothing)
-        println("ttl not a valid integer - got '$ttl' tt forced to nothing")
+        return CommandError("TTL must be a valid integer, got '$ttl'")
     end
     elem = RadishElement(value_n, ttl_p, now(), :string)
     return CommandCreate(elem)
@@ -143,6 +143,12 @@ function sgetrange(elem::RadishElement, start_s::AbstractString, end_s::Abstract
     if isa(start_s, Nothing) || isa(end_s, Nothing)
         return CommandError("Invalid range indices")
     end
+    
+    # Bounds checking
+    if start_s < 1 || start_s > length(elem.value)
+        return CommandSuccess("")
+    end
+    
     max_len = min(length(elem.value), end_s)
     result = elem.value[start_s:max_len]
     return CommandSuccess(result)

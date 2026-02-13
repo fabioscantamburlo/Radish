@@ -240,7 +240,10 @@ function relement_to_element(context::Dict, key, command::Function, args...;
 end
 
 function rlistkeys(context::Dict, args...; tracker::Union{DirtyTracker, Nothing}=nothing)
-    key_list = [(k, context[k].datatype) for k in keys(context)]
+    # Filter out expired keys
+    key_list = [(k, context[k].datatype) for k in keys(context) 
+                if context[k].ttl === nothing || 
+                   now() <= context[k].tinit + Second(context[k].ttl)]
     
     if isempty(args)
         return key_list
@@ -252,6 +255,178 @@ function rlistkeys(context::Dict, args...; tracker::Union{DirtyTracker, Nothing}
     end
     
     return first(key_list, limit_s)
+end
+
+# ============================================================================
+# Meta Commands - Work on any key type (string, list, hash, etc.)
+# ============================================================================
+
+"""Check if a key exists in the context (and is not expired).
+Returns 1 if key exists, 0 if not found or expired.
+Redis-compatible behavior.
+"""
+function rexists(context::Dict{String, RadishElement}, key::AbstractString;
+                 tracker::Union{DirtyTracker, Nothing}=nothing)
+    if haskey(context, key)
+        element = context[key]
+        # Check if expired
+        if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
+            delete!(context, key)
+            if tracker !== nothing
+                mark_deleted!(tracker, key)
+            end
+            return ExecuteResult(SUCCESS, 0, nothing)
+        end
+        return ExecuteResult(SUCCESS, 1, nothing)
+    end
+    return ExecuteResult(SUCCESS, 0, nothing)
+end
+
+"""Delete a key from the context.
+Returns 1 if key was deleted, nil if key didn't exist.
+"""
+function rdel(context::Dict{String, RadishElement}, key::AbstractString;
+              tracker::Union{DirtyTracker, Nothing}=nothing)
+    if haskey(context, key)
+        delete!(context, key)
+        if tracker !== nothing
+            mark_deleted!(tracker, key)
+        end
+        return ExecuteResult(SUCCESS, 1, nothing)
+    end
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+end
+
+"""Get the datatype of a key.
+Returns the type as a string, or nil if key doesn't exist.
+"""
+function rtype(context::Dict{String, RadishElement}, key::AbstractString;
+               tracker::Union{DirtyTracker, Nothing}=nothing)
+    if haskey(context, key)
+        element = context[key]
+        # Check if expired
+        if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
+            delete!(context, key)
+            if tracker !== nothing
+                mark_deleted!(tracker, key)
+            end
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+        end
+        return ExecuteResult(SUCCESS, string(element.datatype), nothing)
+    end
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+end
+
+"""Get remaining TTL in seconds for a key.
+Returns:
+  - TTL in seconds if key exists and has TTL
+  - -1 if key exists but has no TTL
+  - nil if key doesn't exist
+"""
+function rttl(context::Dict{String, RadishElement}, key::AbstractString;
+              tracker::Union{DirtyTracker, Nothing}=nothing)
+    if haskey(context, key)
+        element = context[key]
+        # Check if expired
+        if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
+            delete!(context, key)
+            if tracker !== nothing
+                mark_deleted!(tracker, key)
+            end
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+        end
+        # Key exists
+        if element.ttl === nothing
+            return ExecuteResult(SUCCESS, -1, nothing)
+        else
+            elapsed = Dates.value(now() - element.tinit) / 1000
+            remaining = max(0, element.ttl - round(Int, elapsed))
+            return ExecuteResult(SUCCESS, remaining, nothing)
+        end
+    end
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+end
+
+"""Return the total number of keys in the database.
+"""
+function rdbsize(context::Dict{String, RadishElement};
+                 tracker::Union{DirtyTracker, Nothing}=nothing)
+    return ExecuteResult(SUCCESS, length(context), nothing)
+end
+
+"""Remove TTL from a key (make it persistent).
+Returns 1 if TTL was removed, 0 if key has no TTL, nil if key doesn't exist.
+"""
+function rpersist(context::Dict{String, RadishElement}, key::AbstractString;
+                  tracker::Union{DirtyTracker, Nothing}=nothing)
+    if haskey(context, key)
+        element = context[key]
+        # Check if expired
+        if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
+            delete!(context, key)
+            if tracker !== nothing
+                mark_deleted!(tracker, key)
+            end
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+        end
+        # Key exists - check if it has TTL
+        if element.ttl === nothing
+            return ExecuteResult(SUCCESS, 0, nothing)
+        else
+            element.ttl = nothing
+            if tracker !== nothing
+                mark_dirty!(tracker, key)
+            end
+            return ExecuteResult(SUCCESS, 1, nothing)
+        end
+    end
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+end
+
+"""Set TTL on an existing key.
+Returns 1 if TTL was set, nil if key doesn't exist.
+"""
+function rexpire(context::Dict{String, RadishElement}, key::AbstractString, ttl_str::AbstractString;
+                 tracker::Union{DirtyTracker, Nothing}=nothing)
+    if haskey(context, key)
+        element = context[key]
+        # Check if expired
+        if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
+            delete!(context, key)
+            if tracker !== nothing
+                mark_deleted!(tracker, key)
+            end
+            return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+        end
+        # Parse TTL
+        ttl_val = tryparse(Int, ttl_str)
+        if ttl_val === nothing || ttl_val <= 0
+            return ExecuteResult(ERROR, nothing, "TTL must be a positive integer")
+        end
+        # Set new TTL and reset tinit
+        element.ttl = ttl_val
+        element.tinit = now()
+        if tracker !== nothing
+            mark_dirty!(tracker, key)
+        end
+        return ExecuteResult(SUCCESS, 1, nothing)
+    end
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+end
+
+"""Delete all keys from the database.
+Returns OK.
+"""
+function rflushdb(context::Dict{String, RadishElement};
+                  tracker::Union{DirtyTracker, Nothing}=nothing)
+    # Mark all keys as deleted before clearing
+    if tracker !== nothing
+        for key in keys(context)
+            mark_deleted!(tracker, key)
+        end
+    end
+    empty!(context)
+    return ExecuteResult(SUCCESS, "OK", nothing)
 end
 
 # Generic dispatcher for checking if an element is empty

@@ -1,20 +1,33 @@
 using Dates
 using Logging 
 
-export RadishElement, S_PALETTE, LL_PALETTE
+export RadishElement, S_PALETTE, LL_PALETTE, META_PALETTE
 
 const NOKEY_PALETTE = Dict{String, Function}(
     "KLIST" => rlistkeys,
     "PING" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "PONG", nothing),
     "QUIT" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
     "EXIT" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
-    "DUMP" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Use BGSAVE for snapshots", nothing)
+    "DUMP" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Use BGSAVE for snapshots", nothing),
+    "DBSIZE" => rdbsize,
+    "FLUSHDB" => rflushdb
 )
 
-const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE), ["MULTI", "EXEC", "DISCARD", "BGSAVE"])
+# Meta commands - Work on any key type (string, list, hash, etc.)
+# These commands require a key but are datatype-agnostic
+const META_PALETTE = Dict{String, Function}(
+    "EXISTS" => rexists,
+    "DEL" => rdel,
+    "TYPE" => rtype,
+    "TTL" => rttl,
+    "PERSIST" => rpersist,
+    "EXPIRE" => rexpire,
+)
+
+const OP_ALLOWED = union(keys(NOKEY_PALETTE), keys(LL_PALETTE), keys(S_PALETTE), keys(META_PALETTE), ["MULTI", "EXEC", "DISCARD", "BGSAVE"])
 
 # Read operations (can run concurrently)
-const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET", "L_LEN", "L_RANGE", "KLIST"])
+const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET", "L_LEN", "L_RANGE", "KLIST", "EXISTS", "TYPE", "TTL", "DBSIZE"])
 
 # Multi-key operations
 const MULTI_KEY_OPS = Set(["S_LCS", "S_COMPLEN", "L_MOVE"])
@@ -73,7 +86,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
     # 5. If in transaction, queue command instead of executing
     if session.in_transaction
         # Validate command exists before queuing
-        if cmd_name in keys(NOKEY_PALETTE) || cmd_name in keys(S_PALETTE) || cmd_name in keys(LL_PALETTE)
+        if cmd_name in keys(NOKEY_PALETTE) || cmd_name in keys(S_PALETTE) || cmd_name in keys(LL_PALETTE) || cmd_name in keys(META_PALETTE)
             push!(session.queued_commands, cmd)
             return ExecuteResult(SUCCESS, "QUEUED", nothing)
         else
@@ -88,8 +101,21 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
     shard_ids = if cmd_name in keys(NOKEY_PALETTE)
         if cmd_name == "KLIST"
             acquire_all_read!(db_lock)
+        elseif cmd_name == "FLUSHDB"
+            acquire_all_write!(db_lock)
         else
-            Int[]  # PING, QUIT, EXIT - no lock needed
+            Int[]  # PING, QUIT, EXIT, DBSIZE - no lock needed
+        end
+    elseif cmd_name in keys(META_PALETTE)
+        # Meta commands: require key, work on any type
+        # DEL, PERSIST, EXPIRE are write operations, others are reads
+        if cmd_key === nothing
+            return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
+        end
+        if cmd_name in ["DEL", "PERSIST", "EXPIRE"]
+            acquire_write!(db_lock, cmd_key)
+        else
+            acquire_read!(db_lock, cmd_key)
         end
     elseif is_multi && cmd_key !== nothing && !isempty(cmd_args)
         # Multi-key: lock both keys
@@ -155,16 +181,28 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             type_command, hypercommand = LL_PALETTE[cmd_name]
             return hypercommand(ctx, cmd_key, type_command, cmd_args...; tracker=tracker)
         
+        # META commands (key required, any datatype)
+        elseif cmd_name in keys(META_PALETTE)
+            hypercommand = META_PALETTE[cmd_name]
+            # EXPIRE needs the TTL argument
+            if cmd_name == "EXPIRE"
+                if isempty(cmd_args)
+                    return ExecuteResult(ERROR, nothing, "EXPIRE requires TTL argument")
+                end
+                return hypercommand(ctx, cmd_key, cmd_args[1]; tracker=tracker)
+            else
+                return hypercommand(ctx, cmd_key; tracker=tracker)
+            end
+        
         else
             return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
         end
-
     catch e
         return ExecuteResult(ERROR, nothing, string(e))
     finally
         # Release locks
         if !isempty(shard_ids)
-            if is_read || cmd_name == "KLIST"
+            if is_read || cmd_name == "KLIST" || (cmd_name in keys(META_PALETTE) && !(cmd_name in ["DEL", "PERSIST", "EXPIRE"]))
                 release_read!(db_lock, shard_ids)
             else
                 release_write!(db_lock, shard_ids)
@@ -272,6 +310,19 @@ function execute_unlocked!(ctx::RadishContext, cmd::Command;
             
             type_command, hypercommand = LL_PALETTE[cmd_name]
             return hypercommand(ctx, cmd_key, type_command, cmd_args...; tracker=tracker)
+        
+        # META commands (key required, any datatype)
+        elseif cmd_name in keys(META_PALETTE)
+            hypercommand = META_PALETTE[cmd_name]
+            # EXPIRE needs the TTL argument
+            if cmd_name == "EXPIRE"
+                if isempty(cmd_args)
+                    return ExecuteResult(ERROR, nothing, "EXPIRE requires TTL argument")
+                end
+                return hypercommand(ctx, cmd_key, cmd_args[1]; tracker=tracker)
+            else
+                return hypercommand(ctx, cmd_key; tracker=tracker)
+            end
         
         else
             return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")

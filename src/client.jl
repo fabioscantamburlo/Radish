@@ -24,6 +24,18 @@ function show_help()
     
     Context Commands:
       KLIST [limit]           - List all keys (optional: limit results)
+      DBSIZE                  - Return total number of keys
+    
+    Key Management Commands:
+      EXISTS <key>            - Check if key exists (returns 1 or 0)
+      DEL <key>               - Delete a key (returns 1 or nil)
+      TYPE <key>              - Get key's data type (string, list, etc.)
+      TTL <key>               - Get remaining TTL in seconds (-1=no TTL, nil=not found)
+      PERSIST <key>           - Remove TTL from key (returns 1 or 0)
+      EXPIRE <key> <sec>      - Set TTL on existing key (returns 1 or nil)
+    
+    Server Commands:
+      FLUSHDB                 - Delete all keys from database
     
     Persistence Commands:
       BGSAVE                  - Trigger a background snapshot to disk
