@@ -35,13 +35,11 @@
 - ✅ `PERSIST <key>` - Remove TTL from key
 - ✅ `EXPIRE <key> <sec>` - Set TTL on existing key
 - ✅ `FLUSHDB` - Delete all keys from database
+- ✅ `RENAME <old> <new>` - Rename a key atomically
 
 ---
 
 ## 🟡 MEDIUM PRIORITY - Remaining Redis Commands
-
-### Key Management
-- [ ] `RENAME <old> <new>` - Rename a key
 
 ### Server Commands
 - [ ] `INFO` - Server statistics
@@ -90,8 +88,8 @@
 
 ---
 
-## 🎯 NEXT SPRINT: Advanced Commands (2 hours)
+## 🎯 NEXT SPRINT: Server Observability (1 hour)
 
-1. Implement RENAME (two-key locking)
-2. Implement INFO (server statistics)
-3. Add comprehensive tests
+1. Implement INFO (server statistics)
+2. Add comprehensive tests for all commands
+3. Performance benchmarking
