@@ -1,0 +1,24 @@
+# Git
+.git
+.gitignore
+
+# Persistence data (container starts fresh or uses volumes)
+persistence/
+
+# Julia manifest (regenerated inside container for correct Julia version)
+Manifest.toml
+
+# Docker files
+Dockerfile
+docker-compose.yml
+.dockerignore
+
+# Documentation and artifacts
+artifacts/
+*.md
+
+# Test and benchmark files
+test_*.jl
+bench.jl
+heavy_test.jl
+behavioural_tester.jl

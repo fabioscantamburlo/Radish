@@ -208,8 +208,8 @@ function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::ShardedLock
     catch e
         if isa(e, EOFError)
             @info "Client #$client_id disconnected"
-        elseif isa(e, Base.IOError) && e.code == -32
-            # Broken pipe - client disconnected, this is normal
+        elseif isa(e, Base.IOError) && (e.code == -32 || e.code == -104)
+            # Broken pipe (-32) or connection reset (-104) - client disconnected, this is normal
             @info "Client #$client_id disconnected (broken pipe)"
         else
             @warn "Client #$client_id error: $e"

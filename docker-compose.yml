@@ -1,0 +1,39 @@
+services:
+  radish-server:
+    build: .
+    image: radish
+    container_name: radish-server
+    ports:
+      - "9000:9000"
+    networks:
+      - radish-net
+    volumes:
+      - radish-data:/app/persistence
+    healthcheck:
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 9000"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
+
+  radish-client:
+    image: radish
+    # Override the default command to run the client instead of the server
+    # Connect to the server service name 'radish-server' on port 9000
+    command: julia --project=. client_runner.jl radish-server 9000
+    depends_on:
+      radish-server:
+        condition: service_healthy
+    networks:
+      - radish-net
+    stdin_open: true  # docker run -i
+    tty: true         # docker run -t
+    profiles:
+      - client
+
+networks:
+  radish-net:
+    driver: bridge
+
+volumes:
+  radish-data:

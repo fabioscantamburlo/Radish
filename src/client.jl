@@ -85,12 +85,12 @@ function show_help()
 end
 
 """
-    start_client(host="127.0.0.1", port=6379)
+    start_client(host="127.0.0.1", port=9000)
 
 Start the Radish TCP client, connecting to the specified host and port.
 Enters an interactive loop to send commands and receive responses.
 """
-function start_client(host="127.0.0.1", port=6379)
+function start_client(host="127.0.0.1", port=9000)
     println("🌱 Connecting to Radish server at $host:$port...")
     
     try
