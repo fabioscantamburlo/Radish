@@ -60,9 +60,13 @@
 - [ ] Transaction support
 
 ### Docker & Deployment
-- [ ] Dockerfile (Julia 1.10 base)
-- [ ] Docker Compose with volumes
-- [ ] Health check using PING
+- [x] Dockerfile (Julia 1.11 base, netcat for healthcheck)
+- [x] Docker Compose with named volume for persistence
+- [x] Health check using `nc -z` (lightweight TCP probe)
+- [x] `.dockerignore` (excludes .git, persistence, Manifest.toml)
+- [x] Client runs via `docker compose run --rm radish-client`
+- [x] Server handles ECONNRESET from healthcheck probes gracefully
+- [x] `DOCKER.md` usage guide
 
 ### Observability
 - [ ] Metrics (commands processed, clients, memory)
