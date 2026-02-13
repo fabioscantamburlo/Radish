@@ -1,144 +1,201 @@
-# Radish TODO List - Critical Bugs & Improvements
+# Radish TODO - Remaining Items
 
-## 🔴 CRITICAL BUGS
-
-### 1. **TTL Type Inconsistency (HIGH PRIORITY)**
-**File:** `src/radishelem.jl`, `src/rstrings.jl`, `src/rlinkedlists.jl`
-**Issue:** TTL is defined as `Int128` in RadishElement but parsed/used as `Int` everywhere
-**Impact:** Type mismatch, potential overflow issues
-**Fix:**
-- Change `RadishElement.ttl` from `Int128` to `Union{Int, Nothing}`
-- Or consistently use `Int128` everywhere (overkill for TTL in seconds)
-
-### 2. **List TTL Not Supported**
-**File:** `src/rlinkedlists.jl` line 42
-**Issue:** `ladd!(value::AbstractString, ttl::DateTime)` takes DateTime but should take Int/String
-**Impact:** Lists can't have TTL properly set, inconsistent with strings
-**Fix:**
-```julia
-function ladd!(value::AbstractString, ttl::AbstractString)
-    ttl_p = tryparse(Int, ttl)
-    new_element = DLinkedStartEnd(value)
-    return RadishElement(new_element, ttl_p, now(), :list)
-end
-```
-
-
-### 4. **Error Handling in Pop/Dequeue on Empty List**
-**File:** `src/rlinkedlists.jl` lines 336, 358
-**Issue:** `error()` throws exception instead of returning graceful error
-**Impact:** Crashes client connection instead of returning error message
-**Fix:**
-```julia
-function _dequeue!(list::DLinkedStartEnd{T}) where T
-    if list.len == 0
-        return nothing  # Or return error tuple
-    end
-    # ... rest
-end
-```
-
-### 5. **INCR Commands Don't Handle Non-Integer Strings**
-**File:** `src/rstrings.jl` lines 44-90
-**Issue:** `S_INCR` on non-integer string returns `false` instead of error
-**Impact:** Silent failure, inconsistent with Redis (should error)
-**Fix:** Return error message instead of false, or throw proper error
+> Consolidated from previous TODO.md and ROADMAP.md
+> Last updated: Current analysis
 
 ---
 
-## 🟡 MEDIUM PRIORITY BUGS
+## ✅ COMPLETED ITEMS
 
-### 6. **sgetrange Index Bug**
-**File:** `src/rstrings.jl` line 130
-**Issue:** Uses `or` instead of `||` (Julia syntax error waiting to happen)
-**Fix:** Change `or` to `||`
+### Phase 1: Data Durability
+- ✅ Sharded RDB snapshots (256 shards)
+- ✅ AOF (Append-Only File) implementation
+- ✅ Graceful shutdown with final snapshot
+- ✅ Startup recovery (snapshot + AOF replay)
+- ✅ Background syncer (5s interval)
+- ✅ Dirty tracking for incremental saves
 
-### 7. **_lrange Type Check Bug**
-**File:** `src/rlinkedlists.jl` line 267
-**Issue:** Checks `isa(start_s, Nothing)` twice instead of checking `end_s`
-**Fix:**
-```julia
-if isa(start_s, Nothing) || isa(end_s, Nothing)
-```
+### Core Fixes
+- ✅ TTL type fixed (now `Union{Int, Nothing}`)
+- ✅ List TTL support implemented
+- ✅ Pop/Dequeue return `nothing` on empty (no errors)
+- ✅ INCR commands return proper errors
+- ✅ Transactions (MULTI/EXEC/DISCARD)
+- ✅ Sharded locking (256 shards)
+- ✅ Auto-delete empty lists
 
-### 8. **Missing TTL Validation**
-**File:** `src/rstrings.jl` line 18
-**Issue:** Invalid TTL prints warning but still creates element with `nothing`
-**Impact:** Confusing behavior, should reject command
-**Fix:** Return error instead of creating element
+---
 
-### 9. **Transaction Doesn't Validate Key Types**
-**File:** `src/dispatcher.jl` line 217-280
-**Issue:** `execute_unlocked!` doesn't check TTL expiration
-**Impact:** Transactions can operate on expired keys
-**Fix:** Add TTL check in execute_unlocked! or accept this as transaction semantics
+## 🔴 CRITICAL BUGS (Priority: HIGH)
 
-### 10. **KLIST Not Respecting TTL**
+### 1. KLIST Returns Expired Keys
 **File:** `src/radishelem.jl` line 165
-**Issue:** Returns expired keys (they'll be cleaned eventually but shouldn't be listed)
+**Issue:** `rlistkeys` doesn't filter out expired keys
 **Impact:** Client sees keys that are technically expired
-**Fix:** Filter out expired keys in rlistkeys
+**Fix:**
+```julia
+function rlistkeys(context::Dict, args...; tracker::Union{DirtyTracker, Nothing}=nothing)
+    # Filter out expired keys
+    key_list = [(k, context[k].datatype) for k in keys(context) 
+                if context[k].ttl === nothing || 
+                   now() <= context[k].tinit + Second(context[k].ttl)]
+    
+    if isempty(args)
+        return key_list
+    end
+    
+    limit_s = tryparse(Int, args[1])
+    if isa(limit_s, Nothing)
+        return key_list
+    end
+    
+    return first(key_list, limit_s)
+end
+```
+
+### 2. Invalid TTL Creates Element Anyway
+**File:** `src/rstrings.jl` line 23
+**Issue:** Prints warning but still creates element with `nothing` TTL
+**Impact:** Confusing behavior, should reject command
+**Fix:** Return `CommandError` instead of creating element
+
+### 3. Bounds Checking in GETRANGE
+**File:** `src/rstrings.jl` line 147
+**Issue:** `elem.value[start_s:max_len]` can fail if `start_s > length(elem.value)`
+**Impact:** Crashes on out-of-bounds access
+**Fix:** Add validation before slicing
 
 ---
 
-## 🟢 LOW PRIORITY / IMPROVEMENTS
+## 🟡 MEDIUM PRIORITY
 
-### 11. **Inconsistent Logging**
-**Files:** Multiple
-**Issue:** Mix of `println`, `@warn`, `@info`, `@debug`
-**Fix:** Standardize logging levels and remove println statements
+### 4. Cleaner Logging Too Verbose
+**File:** `src/server.jl` line 127
+**Issue:** `@debug` message runs every 0.1s
+**Recommendation:** Keep as `@debug` (only visible with debug logging)
 
-### 12. **No Bounds Checking on GETRANGE**
-**File:** `src/rstrings.jl` line 133
-**Issue:** `sget(elem)[start_s:max_len]` can fail if start_s > length
-**Fix:** Add bounds validation
+### 5. Missing Core Redis Commands
+**Files:** `src/radishelem.jl`, `src/dispatcher.jl`
 
-### 13. **L_MOVE Doesn't Check Type Compatibility**
-**File:** `src/rlinkedlists.jl` line 313
-**Issue:** Assumes both lists have same type T, no runtime check
-**Impact:** Could cause type errors if lists have different element types
-**Fix:** Add type validation or document assumption
+#### Key Management
+- [ ] `DEL <key>` - Delete a key
+- [ ] `EXISTS <key>` - Check if key exists
+- [ ] `TYPE <key>` - Get key's data type
+- [ ] `RENAME <old> <new>` - Rename a key
 
-### 14. **No Maximum Key/Value Size Limits**
-**Files:** All
-**Issue:** No protection against huge keys/values causing memory issues
-**Fix:** Add configurable limits (e.g., max key size 512MB, max value 512MB)
+#### TTL Management
+- [ ] `TTL <key>` - Get remaining TTL in seconds
+- [ ] `EXPIRE <key> <sec>` - Set TTL on existing key
+- [ ] `PERSIST <key>` - Remove TTL from key
 
-### 15. **Cleaner Interval Too Aggressive**
-**File:** `src/server.jl` line 157
-**Issue:** 0.1s interval with @info logging is noisy
-**Fix:** Increase interval to 1-5s, reduce logging to @debug
+#### Server Commands
+- [ ] `DBSIZE` - Return total number of keys
+- [ ] `FLUSHDB` - Delete all keys
+- [ ] `INFO` - Server statistics
+
+---
+
+## 🟢 LOW PRIORITY / ENHANCEMENTS
+
+### 6. Enhanced Data Structures
+
+#### Hash Maps (`src/rhashes.jl` - new file)
+- [ ] H_SET, H_GET, H_GETALL, H_DEL
+- [ ] H_EXISTS, H_LEN, H_KEYS, H_VALS
+- [ ] H_INCRBY
+
+#### Sets (`src/rsets.jl` - new file)
+- [ ] S_ADD, S_REM, S_MEMBERS, S_ISMEMBER
+- [ ] S_CARD, S_INTER, S_UNION, S_DIFF
+
+#### Sorted Sets (`src/rsortedsets.jl` - new file)
+- [ ] Z_ADD, Z_RANGE, Z_RANK, Z_SCORE, Z_REM
+
+### 7. Python Client
+**Files:** `clients/python/radish_client.py` (new)
+- [ ] RESP encoder/decoder
+- [ ] Connection management
+- [ ] All string and list commands
+- [ ] Transaction support
+- [ ] Type hints and docstrings
+
+### 8. Docker & Deployment
+- [ ] Dockerfile (Julia 1.10 base)
+- [ ] Docker Compose with volumes
+- [ ] Health check using PING
+- [ ] Environment variables for config
+
+### 9. Observability
+- [ ] Metrics (commands processed, clients, memory)
+- [ ] Prometheus endpoint on port 9100
+- [ ] Structured JSON logging
+- [ ] Slow query logging (>100ms)
+
+### 10. Performance
+- [ ] Benchmarking suite vs Redis
+- [ ] Connection pooling on client
+- [ ] Batch command processing
+- [ ] Memory-mapped persistence files
 
 ---
 
 ## 📋 TESTING GAPS
 
-### 16. **No Tests for Edge Cases**
-- Empty string operations
-- Very long strings (>1MB)
-- Lists with 100k+ elements
-- Concurrent transactions on same keys
-- TTL edge cases (0, negative, very large)
+### Edge Cases
+- [ ] Empty string operations
+- [ ] Very long strings (>1MB)
+- [ ] Lists with 100k+ elements
+- [ ] Concurrent transactions on same keys
+- [ ] TTL edge cases (0, negative, very large)
 
-### 17. **No Tests for Error Conditions**
-- Pop/dequeue on empty list
-- INCR on non-integer
-- Type mismatches in transactions
-- Invalid TTL values
+### Error Conditions
+- [ ] Pop/dequeue on empty list (✅ fixed)
+- [ ] INCR on non-integer (✅ fixed)
+- [ ] Type mismatches in transactions
+- [ ] Invalid TTL values
 
 ---
 
-## 🎯 PRIORITY ORDER FOR TOMORROW
+## 🎯 RECOMMENDED SPRINT PLAN
 
-1. **Fix #1 (TTL type)** - 15 min
-2. **Fix #2 (List TTL)** - 10 min  
-3. **Fix #4 (Pop/Dequeue errors)** - 15 min
-4. **Fix #5 (INCR error handling)** - 10 min
-5. **Fix #6 & #7 (Syntax bugs)** - 5 min
-6. **Fix #10 (KLIST TTL)** - 10 min
-7. **Add tests for #16 & #17** - 30 min
+### Sprint 1: Critical Fixes (2 hours)
+1. Fix KLIST TTL filtering (#1)
+2. Fix invalid TTL handling (#2)
+3. Fix GETRANGE bounds checking (#3)
+4. Add tests for edge cases
 
-**Total estimated time: ~1.5 hours**
+### Sprint 2: Core Commands (3 hours)
+1. Implement DEL, EXISTS, TYPE, RENAME
+2. Implement TTL, EXPIRE, PERSIST
+3. Implement DBSIZE, FLUSHDB, INFO
+4. Update client help menu
+
+### Sprint 3: Python Client (4 hours)
+1. RESP protocol implementation
+2. Connection management
+3. Command methods
+4. Documentation and examples
+
+### Sprint 4: Deployment (2 hours)
+1. Dockerfile
+2. Docker Compose
+3. Deployment documentation
+
+### Sprint 5+: Enhancements
+1. Hash maps
+2. Sets
+3. Observability
+4. Performance optimization
+
+---
+
+## 📝 NOTES
+
+- Persistence is production-ready (sharded RDB + AOF)
+- Transactions are solid and tested
+- Sharded locking prevents deadlocks
+- Main gaps are missing Redis commands and client libraries
+- Architecture is extensible for new data types
 
 ---
 
@@ -148,12 +205,3 @@ if isa(start_s, Nothing) || isa(end_s, Nothing)
 - Create error response helpers (reduce duplication)
 - Separate validation logic from execution logic
 - Add type assertions for better error messages
-
----
-
-## 📝 NOTES
-
-- Most bugs are edge cases that won't affect normal usage
-- Transaction implementation is solid
-- Sharded locking is well-designed
-- Main issues are around error handling and type consistency
