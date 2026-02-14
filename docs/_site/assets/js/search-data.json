@@ -202,643 +202,636 @@
     
     "relUrl": "/data-contracts.html#the-complete-contract-flow"
   },"29": {
-    "doc": "Data Structures",
-    "title": "Data Structures",
-    "content": "Radish currently supports two data types: strings and linked lists. Each has its own set of type commands that are called through the hypercommand delegation pattern. ",
-    "url": "/Radish/data-structures.html",
-    
-    "relUrl": "/data-structures.html"
-  },"30": {
-    "doc": "Data Structures",
-    "title": "Strings",
-    "content": "Strings are the simplest data type — they store a single value as a Julia String. But “simple” doesn’t mean limited. Radish strings support a rich set of operations. ",
-    "url": "/Radish/data-structures.html#strings",
-    
-    "relUrl": "/data-structures.html#strings"
-  },"31": {
-    "doc": "Data Structures",
-    "title": "Basic Operations",
-    "content": "RADISH-CLI&gt; S_SET greeting \"hello\" 60 # Set with 60s TTL OK RADISH-CLI&gt; S_GET greeting ✅ hello RADISH-CLI&gt; S_LEN greeting ✅ 5 . ",
-    "url": "/Radish/data-structures.html#basic-operations",
-    
-    "relUrl": "/data-structures.html#basic-operations"
-  },"32": {
-    "doc": "Data Structures",
-    "title": "Numeric Operations",
-    "content": "String values that represent integers can be incremented atomically — a pattern Redis uses heavily for counters: . RADISH-CLI&gt; S_SET counter 100 OK RADISH-CLI&gt; S_INCR counter # +1 ✅ true RADISH-CLI&gt; S_INCRBY counter 50 # +50 ✅ true RADISH-CLI&gt; S_GINCR counter # Get, THEN increment ✅ 151 RADISH-CLI&gt; S_GET counter ✅ 152 . The GINCR variants (get-then-increment) are useful when you need the value before the increment — a common pattern in ID generation. If you try to S_INCR a string that isn’t a valid integer, Radish returns an error — matching Redis’s behavior. ",
-    "url": "/Radish/data-structures.html#numeric-operations",
-    
-    "relUrl": "/data-structures.html#numeric-operations"
-  },"33": {
-    "doc": "Data Structures",
-    "title": "String Manipulation",
-    "content": "RADISH-CLI&gt; S_SET name \"Radish\" OK RADISH-CLI&gt; S_APPEND name \" DB\" # Append in place ✅ true RADISH-CLI&gt; S_GET name ✅ Radish DB RADISH-CLI&gt; S_GETRANGE name 1 6 # Substring (1-indexed) ✅ Radish RADISH-CLI&gt; S_RPAD name 15 . # Right-pad to length 15 ✅ true RADISH-CLI&gt; S_GET name ✅ Radish DB...... ",
-    "url": "/Radish/data-structures.html#string-manipulation",
-    
-    "relUrl": "/data-structures.html#string-manipulation"
-  },"34": {
-    "doc": "Data Structures",
-    "title": "Longest Common Subsequence (LCS)",
-    "content": "One of the more interesting operations is S_LCS, which computes the longest common subsequence between two string values: . RADISH-CLI&gt; S_SET a \"ABCBDAB\" OK RADISH-CLI&gt; S_SET b \"BDCAB\" OK RADISH-CLI&gt; S_LCS a b ✅ [BCAB, 4] . This is implemented using dynamic programming and returns both the subsequence and its length. Redis added LCS support in version 7.0 — Radish implements the same algorithm. ",
-    "url": "/Radish/data-structures.html#longest-common-subsequence-lcs",
-    
-    "relUrl": "/data-structures.html#longest-common-subsequence-lcs"
-  },"35": {
-    "doc": "Data Structures",
-    "title": "Implementation Detail",
-    "content": "All string type commands operate on the raw String value extracted from the RadishElement. They follow a consistent pattern: . # Read-only: return a derived value function sget(value::String, args...)::String return value end # Mutating: modify the element in place and return a result function sincr!(elem::RadishElement, args...) n = tryparse(Int, elem.value) if n === nothing throw(ErrorException(\"Value is not an integer\")) end elem.value = string(n + 1) return true end . ",
-    "url": "/Radish/data-structures.html#implementation-detail",
-    
-    "relUrl": "/data-structures.html#implementation-detail"
-  },"36": {
-    "doc": "Data Structures",
-    "title": "Linked Lists",
-    "content": "Radish implements a custom doubly-linked list rather than using Julia’s built-in Vector. This is a deliberate design choice with important performance implications. ",
-    "url": "/Radish/data-structures.html#linked-lists",
-    
-    "relUrl": "/data-structures.html#linked-lists"
-  },"37": {
-    "doc": "Data Structures",
-    "title": "Why Not Use Arrays?",
-    "content": "| Operation | Array (Vector) | Doubly-Linked List | . | Push to tail | O(1) amortized | O(1) | . | Push to head | O(n) — shifts all elements | O(1) | . | Pop from tail | O(1) | O(1) | . | Pop from head | O(n) — shifts all elements | O(1) | . | Random access | O(1) | O(n) | . | Memory overhead | Lower | Higher (prev/next pointers) | . Redis uses linked lists (or more precisely, quicklists) for its List type because the primary use case is queue/stack operations — push and pop from either end. Random access (LRANGE) is less common and can tolerate O(n). Radish follows the same reasoning: L_PREPEND, L_APPEND, L_POP, and L_DEQUEUE are all O(1). ",
-    "url": "/Radish/data-structures.html#why-not-use-arrays",
-    
-    "relUrl": "/data-structures.html#why-not-use-arrays"
-  },"38": {
-    "doc": "Data Structures",
-    "title": "The DLinkedStartEnd Structure",
-    "content": "mutable struct DLinkedNode value::String prev::Union{DLinkedNode, Nothing} next::Union{DLinkedNode, Nothing} end mutable struct DLinkedStartEnd start::Union{DLinkedNode, Nothing} # Head pointer finish::Union{DLinkedNode, Nothing} # Tail pointer len::Int # Cached length end . The structure maintains pointers to both the head (start) and tail (finish), plus a cached length so that L_LEN is O(1) without traversal. ",
-    "url": "/Radish/data-structures.html#the-dlinkedstartend-structure",
-    
-    "relUrl": "/data-structures.html#the-dlinkedstartend-structure"
-  },"39": {
-    "doc": "Data Structures",
-    "title": "Basic Operations",
-    "content": "RADISH-CLI&gt; L_ADD tasks \"first task\" # Create a list OK RADISH-CLI&gt; L_APPEND tasks \"second task\" # Add to tail OK RADISH-CLI&gt; L_PREPEND tasks \"urgent task\" # Add to head OK RADISH-CLI&gt; L_GET tasks # View all ✅ [urgent task, first task, second task] RADISH-CLI&gt; L_LEN tasks ✅ 3 . ",
-    "url": "/Radish/data-structures.html#basic-operations-1",
-    
-    "relUrl": "/data-structures.html#basic-operations-1"
-  },"40": {
-    "doc": "Data Structures",
-    "title": "Queue / Stack Patterns",
-    "content": "The list supports both queue (FIFO) and stack (LIFO) patterns: . # Queue (FIFO): push to tail, dequeue from head RADISH-CLI&gt; L_APPEND queue \"job1\" RADISH-CLI&gt; L_APPEND queue \"job2\" RADISH-CLI&gt; L_DEQUEUE queue # → job1 (first in, first out) # Stack (LIFO): push to tail, pop from tail RADISH-CLI&gt; L_APPEND stack \"frame1\" RADISH-CLI&gt; L_APPEND stack \"frame2\" RADISH-CLI&gt; L_POP stack # → frame2 (last in, first out) . ",
-    "url": "/Radish/data-structures.html#queue--stack-patterns",
-    
-    "relUrl": "/data-structures.html#queue--stack-patterns"
-  },"41": {
-    "doc": "Data Structures",
-    "title": "List Merging",
-    "content": "L_MOVE is a powerful operation that moves one list to the end of another, consuming the source list: . RADISH-CLI&gt; L_MOVE list1 list2 . This is an O(1) operation — it just relinks the tail of list1 to the head of list2. The key for list2 is deleted after the operation. ",
-    "url": "/Radish/data-structures.html#list-merging",
-    
-    "relUrl": "/data-structures.html#list-merging"
-  },"42": {
-    "doc": "Data Structures",
-    "title": "Trimming",
-    "content": "Lists can be trimmed from either end: . RADISH-CLI&gt; L_TRIMR tasks 2 # Keep only first 2 elements RADISH-CLI&gt; L_TRIML tasks 1 # Keep only last 1 element . ",
-    "url": "/Radish/data-structures.html#trimming",
-    
-    "relUrl": "/data-structures.html#trimming"
-  },"43": {
-    "doc": "Data Structures",
-    "title": "Auto-Cleanup",
-    "content": "When a list becomes empty (e.g., after popping the last element), Radish automatically deletes the key from the context. This prevents “ghost keys” — empty lists taking up space in the dictionary. Redis does the same thing. ",
-    "url": "/Radish/data-structures.html#auto-cleanup",
-    
-    "relUrl": "/data-structures.html#auto-cleanup"
-  },"44": {
     "doc": "Dispatcher",
     "title": "The Dispatcher",
     "content": "The dispatcher is the central router of Radish — it receives every command from every client and decides what to do with it. It handles command parsing, lock acquisition, palette lookup, type validation, transaction management, and error handling. Think of it as the traffic controller between the RESP protocol layer and the hypercommand layer. ",
     "url": "/Radish/dispatcher.html#the-dispatcher",
     
     "relUrl": "/dispatcher.html#the-dispatcher"
-  },"45": {
+  },"30": {
     "doc": "Dispatcher",
     "title": "Command Lifecycle",
     "content": "Every command goes through these steps: . graph TD A[\"Client sends RESP command\"] --&gt; B[\"Dispatcher receives Command struct\"] B --&gt; C{Transaction mode?} C --&gt;|\"Yes + not EXEC/DISCARD\"| D[\"Queue command, return QUEUED\"] C --&gt;|\"No (or EXEC/DISCARD)\"| E{Special command?} E --&gt;|\"MULTI\"| F[\"Enter transaction mode\"] E --&gt;|\"EXEC\"| G[\"Execute transaction atomically\"] E --&gt;|\"DISCARD\"| H[\"Clear queue, exit transaction mode\"] E --&gt;|\"BGSAVE\"| I[\"Trigger background snapshot\"] E --&gt;|\"Regular command\"| J[\"Look up in palettes\"] J --&gt; K[\"Acquire shard locks\"] K --&gt; L[\"Execute via hypercommand\"] L --&gt; M[\"Release shard locks\"] M --&gt; N[\"Return ExecuteResult\"] . ",
     "url": "/Radish/dispatcher.html#command-lifecycle",
     
     "relUrl": "/dispatcher.html#command-lifecycle"
-  },"46": {
+  },"31": {
     "doc": "Dispatcher",
     "title": "Palette Lookup",
     "content": "The dispatcher checks four palettes in order: . # 1. No-key commands (PING, KLIST, DBSIZE, FLUSHDB, DUMP) NOKEY_PALETTE = Dict{String, Function}(...) # 2. String commands (S_GET, S_SET, S_INCR, ...) S_PALETTE = Dict{String, Tuple}(...) # 3. Linked list commands (L_ADD, L_POP, L_APPEND, ...) LL_PALETTE = Dict{String, Tuple}(...) # 4. Meta commands (EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE) META_PALETTE = Dict{String, Function}(...) . The NOKEY_PALETTE maps directly to functions (no key needed). The S_PALETTE and LL_PALETTE map to (type_command, hypercommand) tuples — the delegation pattern. The META_PALETTE maps to functions that work on any key type. ",
     "url": "/Radish/dispatcher.html#palette-lookup",
     
     "relUrl": "/dispatcher.html#palette-lookup"
-  },"47": {
+  },"32": {
     "doc": "Dispatcher",
     "title": "Adding a New Command",
     "content": "To add a command like S_REVERSE: . | Write the type command in rstrings.jl: function sreverse!(elem::RadishElement) elem.value = reverse(elem.value) return CommandSuccess(true) end . | Add it to the palette: \"S_REVERSE\" =&gt; (sreverse!, rmodify!) . | . That’s it — the dispatcher, locking, RESP encoding, and type validation all work automatically. ",
     "url": "/Radish/dispatcher.html#adding-a-new-command",
     
     "relUrl": "/dispatcher.html#adding-a-new-command"
-  },"48": {
+  },"33": {
     "doc": "Dispatcher",
     "title": "Lock Acquisition Strategy",
     "content": "The dispatcher determines the lock type based on the command: . const READ_OPS = Set([\"S_GET\", \"S_LEN\", \"S_GETRANGE\", \"L_GET\", \"L_LEN\", \"L_RANGE\", \"KLIST\", \"EXISTS\", \"TYPE\", \"TTL\", \"DBSIZE\"]) const MULTI_KEY_OPS = Set([\"S_LCS\", \"S_COMPLEN\", \"L_MOVE\", \"RENAME\"]) . | Command Type | Lock Strategy | . | Read operations | Read lock on key’s shard | . | Write operations | Write lock on key’s shard | . | Multi-key operations | Write locks on both keys’ shards (sorted) | . | KLIST | Read locks on all 256 shards | . | FLUSHDB | Write locks on all 256 shards | . | PING, DUMP | No locks needed | . Locks are always released in the finally block, ensuring cleanup even on exceptions. ",
     "url": "/Radish/dispatcher.html#lock-acquisition-strategy",
     
     "relUrl": "/dispatcher.html#lock-acquisition-strategy"
-  },"49": {
+  },"34": {
     "doc": "Dispatcher",
     "title": "Type Validation",
     "content": "Before executing a string command on an existing key, the dispatcher checks the key’s type: . if haskey(ctx, cmd_key) &amp;&amp; ctx[cmd_key].datatype != :string return ExecuteResult(false, nothing, \"WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a string\") end . The same check applies for list commands (:list). This prevents operations like S_INCR on a list key — the error is returned immediately without calling the hypercommand. Redis returns WRONGTYPE Operation against a key holding the wrong kind of value — Radish follows the same pattern with a more descriptive message. ",
     "url": "/Radish/dispatcher.html#type-validation",
     
     "relUrl": "/dispatcher.html#type-validation"
-  },"50": {
+  },"35": {
     "doc": "Dispatcher",
     "title": "The execute! Function",
     "content": "The main entry point is execute!, which handles the full lifecycle: . function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, session::ClientSession; tracker::Union{DirtyTracker, Nothing}=nothing) # 1. Transaction handling (MULTI/EXEC/DISCARD/QUEUING) # 2. Special commands (BGSAVE) # 3. Unknown command detection # 4. Lock acquisition (read/write, single/multi-key) # 5. Palette dispatch # 6. Lock release (in finally block) end . ",
     "url": "/Radish/dispatcher.html#the-execute-function",
     
     "relUrl": "/dispatcher.html#the-execute-function"
-  },"51": {
+  },"36": {
     "doc": "Dispatcher",
     "title": "The execute_unlocked! Variant",
     "content": "During transaction execution, all locks are already held. The dispatcher provides execute_unlocked! — a version that skips lock acquisition: . function execute_unlocked!(ctx::RadishContext, cmd::Command; tracker::Union{DirtyTracker, Nothing}=nothing) # Same dispatch logic as execute!, but no locking end . This is called in a loop by execute_transaction!, which handles the lock acquisition once for all commands in the transaction. ",
     "url": "/Radish/dispatcher.html#the-execute_unlocked-variant",
     
     "relUrl": "/dispatcher.html#the-execute_unlocked-variant"
-  },"52": {
+  },"37": {
     "doc": "Dispatcher",
     "title": "Error Handling",
     "content": "The dispatcher uses a layered error strategy: . | Error Source | Handling | . | Unknown command | ExecuteResult(ERROR, nothing, \"Unknown command: ...\") | . | Missing key argument | ExecuteResult(ERROR, nothing, \"Command X requires a key\") | . | Type mismatch | ExecuteResult(ERROR, nothing, \"WRONGTYPE: ...\") | . | Command logic error | Propagated from CommandError via hypercommand | . | Unexpected exception | Caught in try/catch, returned as ExecuteResult(ERROR, ...) | . All errors eventually reach the RESP layer, which formats them as -ERR message\\r\\n for the client. ",
     "url": "/Radish/dispatcher.html#error-handling",
     
     "relUrl": "/dispatcher.html#error-handling"
-  },"53": {
+  },"38": {
     "doc": "Dispatcher",
     "title": "Dispatcher",
     "content": " ",
     "url": "/Radish/dispatcher.html",
     
     "relUrl": "/dispatcher.html"
-  },"54": {
+  },"39": {
     "doc": "Docker",
     "title": "Docker &amp; Deployment",
     "content": "Radish can run entirely in Docker — no Julia installation needed. This makes it easy to demo, test, and deploy. ",
     "url": "/Radish/docker.html#docker--deployment",
     
     "relUrl": "/docker.html#docker--deployment"
-  },"55": {
+  },"40": {
     "doc": "Docker",
     "title": "Quick Start",
     "content": "# Build the image docker compose build # Start the server docker compose up # Connect a client (separate terminal) docker compose run --rm radish-client . That’s it. The server starts on port 9000 and the client connects automatically. ",
     "url": "/Radish/docker.html#quick-start",
     
     "relUrl": "/docker.html#quick-start"
-  },"56": {
+  },"41": {
     "doc": "Docker",
     "title": "Architecture",
     "content": "The Docker setup uses a single image for both server and client, with Docker Compose orchestrating the roles: . graph LR subgraph Docker Network S[\"radish-server&lt;br/&gt;Port 9000\"] C1[\"radish-client 1\"] C2[\"radish-client 2\"] end V[\"radish-data&lt;br/&gt;(named volume)\"] C1 --&gt;|TCP| S C2 --&gt;|TCP| S S --&gt;|persistence| V . ",
     "url": "/Radish/docker.html#architecture",
     
     "relUrl": "/docker.html#architecture"
-  },"57": {
+  },"42": {
     "doc": "Docker",
     "title": "Dockerfile",
     "content": "The Dockerfile uses Julia 1.11 as the base image and installs dependencies: . FROM julia:1.11 WORKDIR /app COPY . RUN julia --project=. -e 'using Pkg; Pkg.instantiate()' . ",
     "url": "/Radish/docker.html#dockerfile",
     
     "relUrl": "/docker.html#dockerfile"
-  },"58": {
+  },"43": {
     "doc": "Docker",
     "title": "Docker Compose",
     "content": "services: radish-server: build: . command: julia --project=. server_runner.jl 0.0.0.0 9000 ports: - \"9000:9000\" volumes: - radish-data:/app/persistence healthcheck: test: [\"CMD\", \"nc\", \"-z\", \"localhost\", \"9000\"] interval: 10s radish-client: build: . command: julia --project=. client_runner.jl radish-server 9000 stdin_open: true tty: true volumes: radish-data: . ",
     "url": "/Radish/docker.html#docker-compose",
     
     "relUrl": "/docker.html#docker-compose"
-  },"59": {
+  },"44": {
     "doc": "Docker",
     "title": "Key Design Decisions",
     "content": " ",
     "url": "/Radish/docker.html#key-design-decisions",
     
     "relUrl": "/docker.html#key-design-decisions"
-  },"60": {
+  },"45": {
     "doc": "Docker",
     "title": "Health Checks",
     "content": "The health check uses nc -z (netcat zero-I/O mode) — a lightweight TCP probe that just checks if the port is open: . healthcheck: test: [\"CMD\", \"nc\", \"-z\", \"localhost\", \"9000\"] interval: 10s timeout: 3s retries: 3 . This avoids sending actual RESP commands for health checks. The server handles these connection-and-immediate-disconnect probes gracefully — the ECONNRESET from health check probes is caught and logged silently. ",
     "url": "/Radish/docker.html#health-checks",
     
     "relUrl": "/docker.html#health-checks"
-  },"61": {
+  },"46": {
     "doc": "Docker",
     "title": "Data Persistence",
     "content": "Data is stored in a Docker named volume (radish-data), which means: . | Data survives docker compose down → docker compose up | Data is isolated from any local Radish instance running outside Docker | To wipe the database: docker compose down -v (the -v flag removes volumes) | . ",
     "url": "/Radish/docker.html#data-persistence",
     
     "relUrl": "/docker.html#data-persistence"
-  },"62": {
+  },"47": {
     "doc": "Docker",
     "title": "The .dockerignore",
     "content": "The .dockerignore file keeps the image lean: .git persistence/ Manifest.toml . persistence/ is excluded because the container uses its own volume. Manifest.toml is regenerated during the build by Pkg.instantiate(). ",
     "url": "/Radish/docker.html#the-dockerignore",
     
     "relUrl": "/docker.html#the-dockerignore"
-  },"63": {
+  },"48": {
     "doc": "Docker",
     "title": "Common Operations",
     "content": "| Action | Command | . | Build the image | docker compose build | . | Start server (foreground) | docker compose up | . | Start server (background) | docker compose up -d | . | Connect a client | docker compose run --rm radish-client | . | View server logs | docker compose logs -f radish-server | . | Stop everything | docker compose down | . | Stop and wipe data | docker compose down -v | . | Rebuild after code changes | docker compose build --no-cache | . ",
     "url": "/Radish/docker.html#common-operations",
     
     "relUrl": "/docker.html#common-operations"
-  },"64": {
+  },"49": {
     "doc": "Docker",
     "title": "Connecting from the Host",
     "content": "The server port is exposed on localhost:9000, so you can also connect from outside Docker: . # Using a local Julia client julia client_runner.jl 127.0.0.1 9000 # Or any TCP tool nc localhost 9000 . ",
     "url": "/Radish/docker.html#connecting-from-the-host",
     
     "relUrl": "/docker.html#connecting-from-the-host"
-  },"65": {
+  },"50": {
     "doc": "Docker",
     "title": "Docker",
     "content": " ",
     "url": "/Radish/docker.html",
     
     "relUrl": "/docker.html"
-  },"66": {
+  },"51": {
     "doc": "Home",
     "title": "🌱 Radish",
     "content": ". Radish is a didactical in-memory database inspired by Redis, built entirely in Julia with minor dependencies. It started as a learning exercise to understand how key-value stores work under the hood — and grew into an almost fully functional server with persistence, transactions, concurrent access, and a wire protocol. ",
     "url": "/Radish/#-radish",
     
     "relUrl": "/#-radish"
-  },"67": {
+  },"52": {
     "doc": "Home",
     "title": "Dependencies",
     "content": "Radish deliberately keeps its dependency footprint small — most of the heavy lifting is done with Julia’s standard library. Here’s every dependency and why it’s needed: . | Package | Type | Purpose | . | Dates | stdlib | Timestamps for RadishElement.tinit and TTL expiration calculations | . | Sockets | stdlib | TCP server and client — listen(), accept(), connect() for all network I/O | . | Logging | stdlib | Structured @info, @warn, @debug logging throughout the server | . | JSON3 | external | Serialization of snapshot data to sharded .rdb files (one JSON object per key) | . | StatsBase | external | sample() function used by the background TTL cleaner to randomly sample keys for expiration checks | . | ConcurrentUtilities | external | Provides ReadWriteLock — the foundation of the sharded locking system (256 independent RW locks) | . | JuliaFormatter | dev only | Code formatting for development — not used at runtime | . Only 3 external packages are used at runtime. Everything else — the data structures, the RESP protocol, the dispatcher, persistence — is built from scratch. ",
     "url": "/Radish/#dependencies",
     
     "relUrl": "/#dependencies"
-  },"68": {
+  },"53": {
     "doc": "Home",
     "title": "Why Build an In-Memory Database?",
     "content": "At the beginning of this journey I was fascinated by Redis and its story, I was eager to revisit some computer science concepts I never deeply studied and I thought that building a Redis inspired database could satisfy my curiosity. In particular, I wanted to deeply understand: . | Data structure design — how strings, lists, and hashes are stored and manipulated efficiently | Client-server architecture — TCP sockets, wire protocols, request-response cycles | Persistence strategies — trading off durability vs. performance (RDB snapshots, AOF logs) | Concurrency — handling multiple clients safely without corrupting shared state | Systems thinking — how all these pieces fit together into a coherent system | . But more importantly why having such data structures available in a shared memory database is a powerful tool for software development. Radish is in the first place a: . | learning tool — a way to explore these concepts by building them from scratch, challenging real world problems and use cases. | fun tool — a way to have fun implementing ideas, and systems. Combine them to reach a sort of maturity of the platform and try to use them for other projects. | . ",
     "url": "/Radish/#why-build-an-in-memory-database",
     
     "relUrl": "/#why-build-an-in-memory-database"
-  },"69": {
+  },"54": {
     "doc": "Home",
     "title": "Why Julia? (Why not?)",
     "content": "Honestly it was a random choice, Julia is a programming language I always heard about but never studied, so my thought was: why not? . With today’s LLMs it’s easy to pick up a new language and write something useful even if you are not proficient in it, knowledge will come at some point. Eventually, Julia turned out to be an interesting choice for a project like this because it has: . | High-level expressiveness — Julia’s multiple dispatch system makes the delegation pattern feel natural (This was not known by me in the first place, so it was luck I guess) | Performance — Julia compiles to native code, making it viable for a server handling many concurrent connections | Async I/O — Julia’s @async and task model work well for background processes, a lot of extra functionalities were developed in this way. Just to name a few: TTL cleanup and snapshot syncing. | . ",
     "url": "/Radish/#why-julia-why-not",
     
     "relUrl": "/#why-julia-why-not"
-  },"70": {
+  },"55": {
     "doc": "Home",
     "title": "What Radish Implements",
     "content": "| Feature | Status | Description | . | String Operations | ✅ | GET, SET, INCR, APPEND, LCS, padding, and more | . | Linked Lists | ✅ | Custom doubly-linked list with O(1) push/pop | . | RESP Protocol | ✅ | Redis Serialization Protocol for wire communication | . | Persistence | ✅ | Sharded RDB snapshots + AOF with crash recovery | . | Transactions | ✅ | MULTI/EXEC/DISCARD with atomic execution | . | Sharded Locking | ✅ | 256 ReadWriteLocks for concurrent access | . | TTL &amp; Expiry | ✅ | Background cleaner with probabilistic sampling | . | Docker Support | ✅ | Full Docker Compose setup with health checks | . | Key Management | ✅ | EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE, RENAME, FLUSHDB | . More data-structures are coming at some point, I had the feeling that resolving other issues was more valuable than adding overstudied data-types. Still I think that implementing those from scratch is quite fun. ",
     "url": "/Radish/#what-radish-implements",
     
     "relUrl": "/#what-radish-implements"
-  },"71": {
+  },"56": {
     "doc": "Home",
     "title": "A quick look to the Architecture",
     "content": "At its core, Radish stores everything in a single dictionary: . RadishContext = Dict{String, RadishElement} . Every value is wrapped in a RadishElement that carries metadata: . classDiagram class RadishContext { Dict~String, RadishElement~ } class RadishElement { +Any value -&gt; Real value +Union~Int128, Nothing~ ttl +DateTime tinit +Symbol datatype } RadishContext *-- RadishElement : contains . Commands flow through a delegation pattern with two layers: . | Hypercommands — generic operations like get, add, or remove that work across all data types | Type commands — concrete implementations of each hypercommand for a specific data type (e.g. get for strings vs. get for lists) | . Then we have a dispatcher component, that receives a client request, resolves the matching hypercommand, and routes it to the correct type command based on the value’s data type. This makes adding new data types straightforward — the first interface stays the same, no matter what types we are interacting with. Read on to explore each component in detail → . This documentation is itself a learning resource, or at least, it tries to be a good read. Each page wants to explain not just what Radish does, but why it was designed that way, which compromises were taken. Hopefully the reader can take something home from this guide (that would be very fulfilling for me) . ",
     "url": "/Radish/#a-quick-look-to-the-architecture",
     
     "relUrl": "/#a-quick-look-to-the-architecture"
-  },"72": {
+  },"57": {
     "doc": "Home",
     "title": "Home",
     "content": " ",
     "url": "/Radish/",
     
     "relUrl": "/"
-  },"73": {
+  },"58": {
+    "doc": "Linked Lists",
+    "title": "Linked Lists",
+    "content": "Radish implements a custom doubly-linked list rather than using Julia’s built-in Vector. This is a deliberate design choice with important performance implications. ",
+    "url": "/Radish/linked-lists.html",
+    
+    "relUrl": "/linked-lists.html"
+  },"59": {
+    "doc": "Linked Lists",
+    "title": "Why Not Use Arrays?",
+    "content": "| Operation | Array (Vector) | Doubly-Linked List | . | Push to tail | O(1) amortized | O(1) | . | Push to head | O(n) — shifts all elements | O(1) | . | Pop from tail | O(1) | O(1) | . | Pop from head | O(n) — shifts all elements | O(1) | . | Random access | O(1) | O(n) | . | Memory overhead | Lower | Higher (prev/next pointers) | . Redis uses linked lists (or more precisely, quicklists) for its List type because the primary use case is queue/stack operations — push and pop from either end. Random access (LRANGE) is less common and can tolerate O(n). Radish follows the same reasoning: L_PREPEND, L_APPEND, L_POP, and L_DEQUEUE are all O(1). ",
+    "url": "/Radish/linked-lists.html#why-not-use-arrays",
+    
+    "relUrl": "/linked-lists.html#why-not-use-arrays"
+  },"60": {
+    "doc": "Linked Lists",
+    "title": "The DLinkedStartEnd Structure",
+    "content": "mutable struct DLinkedNode value::String prev::Union{DLinkedNode, Nothing} next::Union{DLinkedNode, Nothing} end mutable struct DLinkedStartEnd start::Union{DLinkedNode, Nothing} # Head pointer finish::Union{DLinkedNode, Nothing} # Tail pointer len::Int # Cached length end . The structure maintains pointers to both the head (start) and tail (finish), plus a cached length so that L_LEN is O(1) without traversal. ",
+    "url": "/Radish/linked-lists.html#the-dlinkedstartend-structure",
+    
+    "relUrl": "/linked-lists.html#the-dlinkedstartend-structure"
+  },"61": {
+    "doc": "Linked Lists",
+    "title": "Basic Operations",
+    "content": "RADISH-CLI&gt; L_ADD tasks \"first task\" # Create a list OK RADISH-CLI&gt; L_APPEND tasks \"second task\" # Add to tail OK RADISH-CLI&gt; L_PREPEND tasks \"urgent task\" # Add to head OK RADISH-CLI&gt; L_GET tasks # View all ✅ [urgent task, first task, second task] RADISH-CLI&gt; L_LEN tasks ✅ 3 . ",
+    "url": "/Radish/linked-lists.html#basic-operations",
+    
+    "relUrl": "/linked-lists.html#basic-operations"
+  },"62": {
+    "doc": "Linked Lists",
+    "title": "Queue / Stack Patterns",
+    "content": "The list supports both queue (FIFO) and stack (LIFO) patterns: . # Queue (FIFO): push to tail, dequeue from head RADISH-CLI&gt; L_APPEND queue \"job1\" RADISH-CLI&gt; L_APPEND queue \"job2\" RADISH-CLI&gt; L_DEQUEUE queue # → job1 (first in, first out) # Stack (LIFO): push to tail, pop from tail RADISH-CLI&gt; L_APPEND stack \"frame1\" RADISH-CLI&gt; L_APPEND stack \"frame2\" RADISH-CLI&gt; L_POP stack # → frame2 (last in, first out) . ",
+    "url": "/Radish/linked-lists.html#queue--stack-patterns",
+    
+    "relUrl": "/linked-lists.html#queue--stack-patterns"
+  },"63": {
+    "doc": "Linked Lists",
+    "title": "List Merging",
+    "content": "L_MOVE is a powerful operation that moves one list to the end of another, consuming the source list: . RADISH-CLI&gt; L_MOVE list1 list2 . This is an O(1) operation — it just relinks the tail of list1 to the head of list2. The key for list2 is deleted after the operation. ",
+    "url": "/Radish/linked-lists.html#list-merging",
+    
+    "relUrl": "/linked-lists.html#list-merging"
+  },"64": {
+    "doc": "Linked Lists",
+    "title": "Trimming",
+    "content": "Lists can be trimmed from either end: . RADISH-CLI&gt; L_TRIMR tasks 2 # Keep only first 2 elements RADISH-CLI&gt; L_TRIML tasks 1 # Keep only last 1 element . ",
+    "url": "/Radish/linked-lists.html#trimming",
+    
+    "relUrl": "/linked-lists.html#trimming"
+  },"65": {
+    "doc": "Linked Lists",
+    "title": "Auto-Cleanup",
+    "content": "When a list becomes empty (e.g., after popping the last element), Radish automatically deletes the key from the context. This prevents “ghost keys” — empty lists taking up space in the dictionary. Redis does the same thing. ",
+    "url": "/Radish/linked-lists.html#auto-cleanup",
+    
+    "relUrl": "/linked-lists.html#auto-cleanup"
+  },"66": {
     "doc": "Persistence",
     "title": "Persistence",
     "content": "One of the core challenges of any in-memory database is durability — what happens when the server crashes or restarts? Radish implements a dual-strategy persistence model inspired by Redis: RDB snapshots for periodic full-state captures and AOF (Append-Only File) for real-time write logging. ",
     "url": "/Radish/persistence.html",
     
     "relUrl": "/persistence.html"
-  },"74": {
+  },"67": {
     "doc": "Persistence",
     "title": "The Durability Problem",
     "content": "An in-memory database is fast because it stores everything in RAM. But RAM is volatile — if the process dies, everything is gone. There are two fundamental approaches to solving this: . | Snapshotting — periodically dump the entire database state to disk | Write-ahead logging — log every write operation as it happens | . Each has trade-offs: . | Approach | Pros | Cons | . | RDB Snapshots | Compact, fast to load | Last few seconds of writes can be lost | . | AOF Log | No data loss (every write logged) | File grows unbounded, slower recovery | . Radish uses both — just like Redis. Snapshots provide the baseline, and AOF fills the gap between snapshots. ",
     "url": "/Radish/persistence.html#the-durability-problem",
     
     "relUrl": "/persistence.html#the-durability-problem"
-  },"75": {
+  },"68": {
     "doc": "Persistence",
     "title": "Sharded RDB Snapshots",
     "content": "Instead of writing a single monolithic snapshot file, Radish partitions the database into 256 shards and writes each shard to its own file: . persistence/snapshots/ ├── shard_001.rdb ├── shard_002.rdb ├── ... └── shard_256.rdb . Each key is assigned to a shard using a hash function: . snapshot_shard_id(key::String) = (hash(key) % NUM_SNAPSHOT_SHARDS) + 1 . ",
     "url": "/Radish/persistence.html#sharded-rdb-snapshots",
     
     "relUrl": "/persistence.html#sharded-rdb-snapshots"
-  },"76": {
+  },"69": {
     "doc": "Persistence",
     "title": "Why Shard the Snapshots?",
     "content": "When only a few keys change, there’s no reason to rewrite the entire database. Sharded snapshots enable incremental saves — only the shard files containing dirty keys are touched. For example, if 10 keys change across 3 shards, Radish only rewrites those 3 shard files. The other 253 remain untouched. ",
     "url": "/Radish/persistence.html#why-shard-the-snapshots",
     
     "relUrl": "/persistence.html#why-shard-the-snapshots"
-  },"77": {
+  },"70": {
     "doc": "Persistence",
     "title": "Snapshot Format",
     "content": "Each line in a shard file is a JSON object: . {\"key\": \"user:1\", \"value\": \"Alice\", \"ttl\": 3600, \"datatype\": \"string\"} {\"key\": \"user:2\", \"value\": \"Bob\", \"ttl\": null, \"datatype\": \"string\"} . This is simple but effective — easy to debug, easy to parse, and human-readable. ",
     "url": "/Radish/persistence.html#snapshot-format",
     
     "relUrl": "/persistence.html#snapshot-format"
-  },"78": {
+  },"71": {
     "doc": "Persistence",
     "title": "Atomic Writes",
     "content": "Snapshots are written atomically using a temp file + rename pattern: . temp_path = path * \".tmp\" open(temp_path, \"w\") do f for line in values(snapshot_lines) println(f, line) end flush(f) end mv(temp_path, path, force=true) . If the server crashes mid-write, the original shard file remains intact. The temp file is cleaned up on next startup. Redis uses the same temp-file-and-rename pattern for its RDB files, guaranteeing that a snapshot is either fully written or not written at all. ",
     "url": "/Radish/persistence.html#atomic-writes",
     
     "relUrl": "/persistence.html#atomic-writes"
-  },"79": {
+  },"72": {
     "doc": "Persistence",
     "title": "Dirty Tracking",
     "content": "To know which shards need updating, Radish maintains a DirtyTracker: . mutable struct DirtyTracker modified::Set{String} # Keys that were added/modified deleted::Set{String} # Keys that were deleted lock::ReentrantLock # Thread safety end . Every hypercommand that modifies state calls mark_dirty!(tracker, key) or mark_deleted!(tracker, key). The background syncer then pops these changes atomically and applies them to the snapshot files. This design means the server never blocks waiting for disk I/O during normal operation — dirty tracking is just a Set insertion. ",
     "url": "/Radish/persistence.html#dirty-tracking",
     
     "relUrl": "/persistence.html#dirty-tracking"
-  },"80": {
+  },"73": {
     "doc": "Persistence",
     "title": "AOF (Append-Only File)",
     "content": "Between snapshots, every write command is logged to an append-only file: . persistence/aof.radish/appendonly.aof . Each line records the full command: . S_SET user:1 Alice 3600 S_INCR counter L_PREPEND queue job42 . ",
     "url": "/Radish/persistence.html#aof-append-only-file",
     
     "relUrl": "/persistence.html#aof-append-only-file"
-  },"81": {
+  },"74": {
     "doc": "Persistence",
     "title": "Thread Safety",
     "content": "Multiple clients can write concurrently, so the AOF uses a ReentrantLock: . mutable struct AOFState path::String io::Union{IOStream, Nothing} lock::ReentrantLock end . Every write is wrapped in lock(aof.lock) do ... end, ensuring commands are logged atomically. Transactions use aof_append_batch! to write all commands in a single locked section. ",
     "url": "/Radish/persistence.html#thread-safety",
     
     "relUrl": "/persistence.html#thread-safety"
-  },"82": {
+  },"75": {
     "doc": "Persistence",
     "title": "AOF Truncation",
     "content": "After each successful snapshot sync, the AOF is truncated (emptied). This prevents unbounded growth — the snapshot already contains all the data, so the AOF only needs to capture writes since the last snapshot. ",
     "url": "/Radish/persistence.html#aof-truncation",
     
     "relUrl": "/persistence.html#aof-truncation"
-  },"83": {
+  },"76": {
     "doc": "Persistence",
     "title": "Background Syncer",
     "content": "A background task runs every 5 seconds (configurable via SYNC_INTERVAL): . graph TD A[\"Syncer wakes up (every 5s)\"] --&gt; B{Has dirty changes?} B --&gt;|No| A B --&gt;|Yes| C[\"Pop dirty sets atomically\"] C --&gt; D[\"Acquire read locks on affected shards\"] D --&gt; E[\"Save dirty shards to RDB\"] E --&gt; F[\"Release locks\"] F --&gt; G[\"Truncate AOF\"] G --&gt; A . Key design decisions: . | Read locks only — the syncer reads the current state without blocking writes (the data just needs to be consistent at snapshot time) | Affected shards only — if 3 out of 256 shards are dirty, only those 3 shards’ locks are acquired | Non-blocking — the syncer runs in its own @async task, never blocking client operations | . ",
     "url": "/Radish/persistence.html#background-syncer",
     
     "relUrl": "/persistence.html#background-syncer"
-  },"84": {
+  },"77": {
     "doc": "Persistence",
     "title": "Crash Recovery",
     "content": "On startup, Radish recovers in two steps: . | Load RDB snapshots — reads all shard files and populates the RadishContext | Replay AOF — re-executes any commands logged since the last snapshot | . count = load_snapshot!(ctx) # Step 1 aof_count = replay_aof!(ctx, db_lock) # Step 2 . This guarantees that the database state after recovery is identical to what it was before the crash (up to the last AOF-logged command). ",
     "url": "/Radish/persistence.html#crash-recovery",
     
     "relUrl": "/persistence.html#crash-recovery"
-  },"85": {
+  },"78": {
     "doc": "Persistence",
     "title": "Graceful Shutdown",
     "content": "When the server receives Ctrl+C, it performs a full snapshot before exiting: . save_full_snapshot!(ctx, tracker) . This is a full snapshot (not incremental), ensuring that all data is captured. The AOF is then deleted since it’s no longer needed. ",
     "url": "/Radish/persistence.html#graceful-shutdown",
     
     "relUrl": "/persistence.html#graceful-shutdown"
-  },"86": {
+  },"79": {
     "doc": "RESP Protocol",
     "title": "RESP Protocol",
     "content": "Radish uses the RESP (Redis Serialization Protocol) for client-server communication — the same wire protocol that real Redis uses. This means you could, in theory, connect a Redis client to Radish (with some command name adjustments). ",
     "url": "/Radish/resp-protocol.html",
     
     "relUrl": "/resp-protocol.html"
-  },"87": {
+  },"80": {
     "doc": "RESP Protocol",
     "title": "Why RESP?",
     "content": "Instead of inventing a custom protocol, Radish implements RESP because: . | It’s well-documented — the Redis protocol specification is clear and thorough | It’s simple — human-readable for debugging, yet efficient to parse | It’s type-aware — different prefixes for strings, integers, errors, arrays, and nulls | It’s a learning opportunity — implementing a real protocol teaches serialization, framing, and type encoding | . ",
     "url": "/Radish/resp-protocol.html#why-resp",
     
     "relUrl": "/resp-protocol.html#why-resp"
-  },"88": {
+  },"81": {
     "doc": "RESP Protocol",
     "title": "Wire Format",
     "content": "RESP is a text-based protocol where every message starts with a type prefix character followed by data and terminated with \\r\\n: . | Prefix | Type | Example | Meaning | . | + | Simple String | +OK\\r\\n | Success message | . | - | Error | -ERR unknown command\\r\\n | Error message | . | : | Integer | :42\\r\\n | Numeric value | . | $ | Bulk String | $5\\r\\nhello\\r\\n | Length-prefixed string | . | $-1 | Null | $-1\\r\\n | Key not found (nil) | . | * | Array | *2\\r\\n$3\\r\\nfoo\\r\\n$3\\r\\nbar\\r\\n | Array of elements | . ",
     "url": "/Radish/resp-protocol.html#wire-format",
     
     "relUrl": "/resp-protocol.html#wire-format"
-  },"89": {
+  },"82": {
     "doc": "RESP Protocol",
     "title": "Client → Server (Requests)",
     "content": "Clients send commands as RESP arrays. For example, S_GET mykey is encoded as: . *2\\r\\n ← Array of 2 elements $5\\r\\n ← Bulk string, 5 bytes S_GET\\r\\n ← Command name $5\\r\\n ← Bulk string, 5 bytes mykey\\r\\n ← Key . Radish’s client encodes this automatically: . function write_resp_command(sock::TCPSocket, line::String) parts = split(strip(line), ' ', keepempty=false) write(sock, \"*$(length(parts))\\r\\n\") for part in parts write(sock, \"\\$$(length(part))\\r\\n$(part)\\r\\n\") end end . ",
     "url": "/Radish/resp-protocol.html#client--server-requests",
     
     "relUrl": "/resp-protocol.html#client--server-requests"
-  },"90": {
+  },"83": {
     "doc": "RESP Protocol",
     "title": "Server → Client (Responses)",
     "content": "The server formats responses based on the ExecuteResult type: . | Result | RESP Encoding | . | SUCCESS + nothing | +OK\\r\\n | . | SUCCESS + Bool | :1\\r\\n or :0\\r\\n | . | SUCCESS + Integer | :42\\r\\n | . | SUCCESS + String | $5\\r\\nhello\\r\\n | . | SUCCESS + Vector | *N\\r\\n + each element | . | SUCCESS + Tuple | *N\\r\\n + each element | . | KEY_NOT_FOUND | $-1\\r\\n | . | ERROR | -ERR message\\r\\n | . ",
     "url": "/Radish/resp-protocol.html#server--client-responses",
     
     "relUrl": "/resp-protocol.html#server--client-responses"
-  },"91": {
+  },"84": {
     "doc": "RESP Protocol",
     "title": "Parsing Commands",
     "content": "On the server side, RESP commands are parsed into the Command struct: . struct Command name::String # Command name (e.g., \"S_GET\") key::Union{Nothing, String} # Key, or nothing for keyless commands args::Vector{String} # Additional arguments end . The parser uses a heuristic to determine which part is the key: . if startswith(cmd_name, \"S_\") || startswith(cmd_name, \"L_\") || cmd_name in [\"EXISTS\", \"DEL\", \"TYPE\", \"TTL\", \"PERSIST\", \"EXPIRE\", \"RENAME\"] key = parts[2] args = parts[3:end] else key = nothing args = parts[2:end] end . Commands prefixed with S_ or L_ always have a key as the second element. Meta commands (EXISTS, DEL, etc.) also have keys. Everything else (PING, KLIST, MULTI) is keyless. ",
     "url": "/Radish/resp-protocol.html#parsing-commands",
     
     "relUrl": "/resp-protocol.html#parsing-commands"
-  },"92": {
+  },"85": {
     "doc": "RESP Protocol",
     "title": "Transaction Responses",
     "content": "Transaction results are encoded as nested arrays — each sub-result is a complete RESP response embedded inside the outer array: . *3\\r\\n ← 3 results +OK\\r\\n ← First command: SUCCESS, nothing → +OK :1\\r\\n ← Second command: SUCCESS, true → :1 $5\\r\\n12\\r\\n ← Third command: SUCCESS, \"12\" → bulk string . The server handles this through recursive calls: . if !isempty(result.value) &amp;&amp; isa(result.value[1], ExecuteResult) write(sock, \"*$(length(result.value))\\r\\n\") for sub_result in result.value write_resp_response(sock, sub_result) # Recursive end end . ",
     "url": "/Radish/resp-protocol.html#transaction-responses",
     
     "relUrl": "/resp-protocol.html#transaction-responses"
-  },"93": {
+  },"86": {
     "doc": "RESP Protocol",
     "title": "Client-Side Rendering",
     "content": "The client reads RESP responses and formats them for human display, adding emoji prefixes: . | RESP Type | Display | . | +OK | OK | . | -ERR ... | ❌ ERR ... | . | :42 | ✅ 42 | . | $5 hello | ✅ hello | . | $-1 | ✅ (nil) | . | *N [...] | ✅ [item1, item2, ...] | . This is handled by the recursive read_resp_response function, which dispatches on the first character of each line. ",
     "url": "/Radish/resp-protocol.html#client-side-rendering",
     
     "relUrl": "/resp-protocol.html#client-side-rendering"
-  },"94": {
+  },"87": {
     "doc": "Server & Client",
     "title": "Server &amp; Client",
     "content": "Radish follows a classic TCP client-server architecture. The server listens for connections on a configurable host and port, spawning a new async task for each client. The client provides an interactive REPL for sending commands and displaying responses. ",
     "url": "/Radish/server-client.html#server--client",
     
     "relUrl": "/server-client.html#server--client"
-  },"95": {
+  },"88": {
     "doc": "Server & Client",
     "title": "Server Architecture",
     "content": " ",
     "url": "/Radish/server-client.html#server-architecture",
     
     "relUrl": "/server-client.html#server-architecture"
-  },"96": {
+  },"89": {
     "doc": "Server & Client",
     "title": "Startup Sequence",
     "content": "When you run julia server_runner.jl, the server initializes in this order: . graph TD subgraph Init direction LR A[\"Create directories\"] --&gt; B[\"RadishContext\"] --&gt; C[\"ShardedLock\"] --&gt; D[\"DirtyTracker\"] end subgraph Recovery direction LR E[\"Load RDB snapshots\"] --&gt; F[\"Open AOF\"] --&gt; G[\"Replay AOF\"] --&gt; H[\"Truncate + snapshot\"] end subgraph Serve direction LR I[\"Background cleaner\"] --&gt; J[\"Background syncer\"] --&gt; K[\"Listen on :9000\"] --&gt; L[\"Accept clients\"] end Init --&gt; Recovery --&gt; Serve . ",
     "url": "/Radish/server-client.html#startup-sequence",
     
     "relUrl": "/server-client.html#startup-sequence"
-  },"97": {
+  },"90": {
     "doc": "Server & Client",
     "title": "Per-Client Handling",
     "content": "Each client gets its own @async task: . while true client = accept(server) client_counter += 1 @async handle_client(client, ctx, db_lock, tracker, aof, client_counter) end . The handle_client function: . | Sends a welcome message — +Welcome to Radish Server\\r\\n | Creates a ClientSession — tracks transaction state per client | Enters the read loop — reads RESP commands, dispatches, writes responses | Handles disconnection — EOFError, broken pipes, QUIT/EXIT commands | . function handle_client(sock, ctx, db_lock, tracker, aof, client_id) write(sock, \"+Welcome to Radish Server\\r\\n\") session = ClientSession() while isopen(sock) cmd = read_resp_command(sock) result = execute!(ctx, db_lock, cmd, session; tracker=tracker) # Log to AOF (write commands only) if should_log_to_aof(cmd) aof_append!(aof, cmd) end write_resp_response(sock, result) end end . ",
     "url": "/Radish/server-client.html#per-client-handling",
     
     "relUrl": "/server-client.html#per-client-handling"
-  },"98": {
+  },"91": {
     "doc": "Server & Client",
     "title": "Connection Resilience",
     "content": "The server gracefully handles common disconnection scenarios: . | Event | Handling | . | EOFError | Client disconnected normally → log and clean up | . | Broken pipe (-32) | Client closed connection mid-write → log and clean up | . | Connection reset (-104) | Network interruption → log and clean up | . | Health check probe | Docker’s nc -z probes cause ECONNRESET → handled silently | . ",
     "url": "/Radish/server-client.html#connection-resilience",
     
     "relUrl": "/server-client.html#connection-resilience"
-  },"99": {
+  },"92": {
     "doc": "Server & Client",
     "title": "Graceful Shutdown",
     "content": "On Ctrl+C (InterruptException), the server: . | Saves a full snapshot — captures all current state to RDB | Deletes the AOF — unnecessary since snapshot is complete | Closes the TCP server — stops accepting new connections | Prints goodbye — Radish server stopped. Goodbye! | . ",
     "url": "/Radish/server-client.html#graceful-shutdown",
     
     "relUrl": "/server-client.html#graceful-shutdown"
-  },"100": {
+  },"93": {
     "doc": "Server & Client",
     "title": "Client Architecture",
     "content": " ",
     "url": "/Radish/server-client.html#client-architecture",
     
     "relUrl": "/server-client.html#client-architecture"
-  },"101": {
+  },"94": {
     "doc": "Server & Client",
     "title": "Interactive REPL",
     "content": "The client provides a command-line interface with an interactive read-eval-print loop: . 🌱 Connecting to Radish server at 127.0.0.1:9000... ✅ Welcome to Radish Server Type 'HELP' for commands or 'QUIT' to disconnect RADISH-CLI&gt; S_SET greeting hello OK RADISH-CLI&gt; S_GET greeting ✅ hello RADISH-CLI&gt; . ",
     "url": "/Radish/server-client.html#interactive-repl",
     
     "relUrl": "/server-client.html#interactive-repl"
-  },"102": {
+  },"95": {
     "doc": "Server & Client",
     "title": "Client-Side vs Server-Side Commands",
     "content": "Not all commands hit the server: . | Command | Handled By | Behavior | . | HELP | Client | Displays the full command reference locally | . | QUIT / EXIT | Both | Sent to server, then client disconnects | . | Everything else | Server | Encoded as RESP, sent over TCP | . ",
     "url": "/Radish/server-client.html#client-side-vs-server-side-commands",
     
     "relUrl": "/server-client.html#client-side-vs-server-side-commands"
-  },"103": {
+  },"96": {
     "doc": "Server & Client",
     "title": "Command Flow",
     "content": "sequenceDiagram participant User participant Client as Radish Client participant Server as Radish Server User-&gt;&gt;Client: Types \"S_SET key hello 60\" Client-&gt;&gt;Client: write_resp_command (encode to RESP) Client-&gt;&gt;Server: *4\\r\\n$5\\r\\nS_SET\\r\\n$3\\r\\nkey\\r\\n... Server-&gt;&gt;Server: read_resp_command (parse to Command) Server-&gt;&gt;Server: execute! (dispatch, lock, run) Server-&gt;&gt;Client: +OK\\r\\n Client-&gt;&gt;Client: read_resp_response (decode RESP) Client-&gt;&gt;User: Displays \"OK\" . ",
     "url": "/Radish/server-client.html#command-flow",
     
     "relUrl": "/server-client.html#command-flow"
-  },"104": {
+  },"97": {
     "doc": "Server & Client",
     "title": "Connection Management",
     "content": "The client uses simple but robust connection handling: . function start_client(host=\"127.0.0.1\", port=9000) sock = connect(host, port) # Read welcome welcome = readline(sock) # REPL loop while isopen(sock) print(\"RADISH-CLI&gt; \") line = readline() write_resp_command(sock, line) response = read_resp_response(sock) println(response) end end . If the server goes down, the client detects the closed socket and exits with a clear error message. Ctrl+C in the client triggers a clean disconnect. ",
     "url": "/Radish/server-client.html#connection-management",
     
     "relUrl": "/server-client.html#connection-management"
-  },"105": {
+  },"98": {
     "doc": "Server & Client",
     "title": "Multiple Clients",
     "content": "Radish supports multiple concurrent clients out of the box: . # Terminal 1: Start server julia server_runner.jl # Terminal 2: Client A julia client_runner.jl # Terminal 3: Client B julia client_runner.jl . All clients share the same RadishContext. The sharded locking system ensures safe concurrent access. Each client has an independent ClientSession, so one client’s transaction doesn’t affect another. ",
     "url": "/Radish/server-client.html#multiple-clients",
     
     "relUrl": "/server-client.html#multiple-clients"
-  },"106": {
+  },"99": {
     "doc": "Server & Client",
     "title": "Configuration",
     "content": "The server exposes a few configurable constants: . | Parameter | Default | Description | . | Host | 127.0.0.1 | Bind address (use 0.0.0.0 for Docker) | . | Port | 9000 | TCP port | . | SYNC_INTERVAL | 5 seconds | How often the background syncer runs | . | CLEANER_INTERVAL | 10 seconds | How often the TTL cleaner runs | . | NUM_SNAPSHOT_SHARDS | 256 | Number of RDB shard files | . Both the server and client accept host and port as command-line arguments: . julia server_runner.jl 0.0.0.0 9000 julia client_runner.jl 127.0.0.1 9000 . ",
     "url": "/Radish/server-client.html#configuration",
     
     "relUrl": "/server-client.html#configuration"
-  },"107": {
+  },"100": {
     "doc": "Server & Client",
     "title": "Server & Client",
     "content": " ",
     "url": "/Radish/server-client.html",
     
     "relUrl": "/server-client.html"
-  },"108": {
+  },"101": {
+    "doc": "Strings",
+    "title": "Strings",
+    "content": "Strings are the simplest data type in Radish — they store a single value as a Julia String. But “simple” doesn’t mean limited. Radish strings support a rich set of operations. ",
+    "url": "/Radish/strings.html",
+    
+    "relUrl": "/strings.html"
+  },"102": {
+    "doc": "Strings",
+    "title": "Basic Operations",
+    "content": "RADISH-CLI&gt; S_SET greeting \"hello\" 60 # Set with 60s TTL OK RADISH-CLI&gt; S_GET greeting ✅ hello RADISH-CLI&gt; S_LEN greeting ✅ 5 . ",
+    "url": "/Radish/strings.html#basic-operations",
+    
+    "relUrl": "/strings.html#basic-operations"
+  },"103": {
+    "doc": "Strings",
+    "title": "Numeric Operations",
+    "content": "String values that represent integers can be incremented atomically — a pattern Redis uses heavily for counters: . RADISH-CLI&gt; S_SET counter 100 OK RADISH-CLI&gt; S_INCR counter # +1 ✅ true RADISH-CLI&gt; S_INCRBY counter 50 # +50 ✅ true RADISH-CLI&gt; S_GINCR counter # Get, THEN increment ✅ 151 RADISH-CLI&gt; S_GET counter ✅ 152 . The GINCR variants (get-then-increment) are useful when you need the value before the increment — a common pattern in ID generation. If you try to S_INCR a string that isn’t a valid integer, Radish returns an error — matching Redis’s behavior. ",
+    "url": "/Radish/strings.html#numeric-operations",
+    
+    "relUrl": "/strings.html#numeric-operations"
+  },"104": {
+    "doc": "Strings",
+    "title": "String Manipulation",
+    "content": "RADISH-CLI&gt; S_SET name \"Radish\" OK RADISH-CLI&gt; S_APPEND name \" DB\" # Append in place ✅ true RADISH-CLI&gt; S_GET name ✅ Radish DB RADISH-CLI&gt; S_GETRANGE name 1 6 # Substring (1-indexed) ✅ Radish RADISH-CLI&gt; S_RPAD name 15 . # Right-pad to length 15 ✅ true RADISH-CLI&gt; S_GET name ✅ Radish DB...... ",
+    "url": "/Radish/strings.html#string-manipulation",
+    
+    "relUrl": "/strings.html#string-manipulation"
+  },"105": {
+    "doc": "Strings",
+    "title": "Longest Common Subsequence (LCS)",
+    "content": "One of the more interesting operations is S_LCS, which computes the longest common subsequence between two string values: . RADISH-CLI&gt; S_SET a \"ABCBDAB\" OK RADISH-CLI&gt; S_SET b \"BDCAB\" OK RADISH-CLI&gt; S_LCS a b ✅ [BCAB, 4] . This is implemented using dynamic programming and returns both the subsequence and its length. Redis added LCS support in version 7.0 — Radish implements the same algorithm. ",
+    "url": "/Radish/strings.html#longest-common-subsequence-lcs",
+    
+    "relUrl": "/strings.html#longest-common-subsequence-lcs"
+  },"106": {
+    "doc": "Strings",
+    "title": "Implementation Detail",
+    "content": "All string type commands operate on the raw String value extracted from the RadishElement. They follow a consistent pattern: . # Read-only: return a derived value function sget(value::String, args...)::String return value end # Mutating: modify the element in place and return a result function sincr!(elem::RadishElement, args...) n = tryparse(Int, elem.value) if n === nothing throw(ErrorException(\"Value is not an integer\")) end elem.value = string(n + 1) return true end . ",
+    "url": "/Radish/strings.html#implementation-detail",
+    
+    "relUrl": "/strings.html#implementation-detail"
+  },"107": {
     "doc": "Transactions",
     "title": "Transactions",
     "content": "Radish supports Redis-style transactions using MULTI, EXEC, and DISCARD. Transactions provide atomicity — a group of commands executes as a single indivisible unit, with no other client’s commands interleaved. ",
     "url": "/Radish/transactions.html",
     
     "relUrl": "/transactions.html"
-  },"109": {
+  },"108": {
     "doc": "Transactions",
     "title": "Why Transactions?",
     "content": "Consider a simple bank transfer: . S_SET account_A 1000 S_SET account_B 500 . To transfer 100 from A to B, you need three operations: . | Read A’s balance | Decrement A by 100 | Increment B by 100 | . Without transactions, another client could modify A between steps 1 and 2, leading to an incorrect final state. Transactions solve this by guaranteeing that all three operations happen atomically. ",
     "url": "/Radish/transactions.html#why-transactions",
     
     "relUrl": "/transactions.html#why-transactions"
-  },"110": {
+  },"109": {
     "doc": "Transactions",
     "title": "How to Use Them",
     "content": " ",
     "url": "/Radish/transactions.html#how-to-use-them",
     
     "relUrl": "/transactions.html#how-to-use-them"
-  },"111": {
+  },"110": {
     "doc": "Transactions",
     "title": "Basic Flow",
     "content": "RADISH-CLI&gt; MULTI # Start transaction OK RADISH-CLI&gt; S_SET mykey hello # Commands are queued, not executed QUEUED RADISH-CLI&gt; S_GET mykey QUEUED RADISH-CLI&gt; EXEC # Execute all at once ✅ [OK, hello] . ",
     "url": "/Radish/transactions.html#basic-flow",
     
     "relUrl": "/transactions.html#basic-flow"
-  },"112": {
+  },"111": {
     "doc": "Transactions",
     "title": "Counter Increment",
     "content": "RADISH-CLI&gt; S_SET counter 10 OK RADISH-CLI&gt; MULTI OK RADISH-CLI&gt; S_INCR counter QUEUED RADISH-CLI&gt; S_INCR counter QUEUED RADISH-CLI&gt; S_GET counter QUEUED RADISH-CLI&gt; EXEC ✅ [true, true, 12] . ",
     "url": "/Radish/transactions.html#counter-increment",
     
     "relUrl": "/transactions.html#counter-increment"
-  },"113": {
+  },"112": {
     "doc": "Transactions",
     "title": "Aborting a Transaction",
     "content": "RADISH-CLI&gt; MULTI OK RADISH-CLI&gt; S_SET key value QUEUED RADISH-CLI&gt; DISCARD # Clear the queue, nothing happens OK RADISH-CLI&gt; S_GET key ✅ (nil) # Key was never set . ",
     "url": "/Radish/transactions.html#aborting-a-transaction",
     
     "relUrl": "/transactions.html#aborting-a-transaction"
-  },"114": {
+  },"113": {
     "doc": "Transactions",
     "title": "Implementation Details",
     "content": " ",
     "url": "/Radish/transactions.html#implementation-details",
     
     "relUrl": "/transactions.html#implementation-details"
-  },"115": {
+  },"114": {
     "doc": "Transactions",
     "title": "Client Session State",
     "content": "Each client connection maintains a ClientSession: . mutable struct ClientSession in_transaction::Bool queued_commands::Vector{Command} end . When in_transaction == true, the dispatcher queues commands instead of executing them immediately, returning QUEUED to the client. ",
     "url": "/Radish/transactions.html#client-session-state",
     
     "relUrl": "/transactions.html#client-session-state"
-  },"116": {
+  },"115": {
     "doc": "Transactions",
     "title": "Atomic Execution",
     "content": "When EXEC is called, the transaction executes in these steps: . sequenceDiagram participant Client participant Dispatcher participant Lock as ShardedLock participant Context as RadishContext Client-&gt;&gt;Dispatcher: EXEC Dispatcher-&gt;&gt;Dispatcher: Extract all keys from queued commands Dispatcher-&gt;&gt;Dispatcher: Sort keys to prevent deadlock Dispatcher-&gt;&gt;Lock: Acquire write locks (sorted order) loop For each queued command Dispatcher-&gt;&gt;Context: Execute without re-locking Context--&gt;&gt;Dispatcher: Result end Dispatcher-&gt;&gt;Lock: Release all locks (reverse order) Dispatcher--&gt;&gt;Client: Array of results . ",
     "url": "/Radish/transactions.html#atomic-execution",
     
     "relUrl": "/transactions.html#atomic-execution"
-  },"117": {
+  },"116": {
     "doc": "Transactions",
     "title": "Preventing Deadlock",
     "content": "The critical detail is sorted lock acquisition. If Transaction A locks key apple then banana, and Transaction B locks banana then apple, they would deadlock. By always acquiring locks in sorted order, this is impossible. function extract_all_keys(commands::Vector{Command}) keys = String[] for cmd in commands if cmd.key !== nothing push!(keys, cmd.key) end # Multi-key operations (S_LCS, L_MOVE, etc.) if cmd.name in MULTI_KEY_OPS &amp;&amp; !isempty(cmd.args) push!(keys, cmd.args[1]) end end return keys end . ",
     "url": "/Radish/transactions.html#preventing-deadlock",
     
     "relUrl": "/transactions.html#preventing-deadlock"
-  },"118": {
+  },"117": {
     "doc": "Transactions",
     "title": "No Rollback",
     "content": "Like Redis, Radish transactions have no rollback. If one command in the transaction fails (e.g., type mismatch), the other commands still execute. The error is included in the result array. This is a deliberate design choice: . | Commands typically only fail due to programming errors (wrong type, wrong arguments), not runtime conditions | Rollback would add significant complexity with little practical benefit | Redis doesn’t support rollback either, and it works well in practice | . ",
     "url": "/Radish/transactions.html#no-rollback",
     
     "relUrl": "/transactions.html#no-rollback"
-  },"119": {
+  },"118": {
     "doc": "Transactions",
     "title": "Error Handling",
     "content": "| Situation | Behavior | . | EXEC without MULTI | Returns error | . | DISCARD without MULTI | Returns error | . | Command fails during EXEC | Error included in result array, other commands continue | . | All commands succeed | Array of results returned | . ",
     "url": "/Radish/transactions.html#error-handling",
     
     "relUrl": "/transactions.html#error-handling"
-  },"120": {
+  },"119": {
     "doc": "Transactions",
     "title": "Limitations",
     "content": ". | No WATCH/UNWATCH — Redis’s optimistic locking is not yet implemented | Write locks for everything — even read operations within a transaction acquire write locks (simpler but more restrictive) | No partial rollback — if a command fails, there’s no undo | . ",
