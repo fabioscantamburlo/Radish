@@ -31,7 +31,7 @@ mutable struct RadishElement
 end
 ```
 
-The key insight is the **`datatype` field**. Instead of using Julia's type system to distinguish between string elements and list elements (which would require parameterized containers), Radish uses a symbol tag. This keeps the dictionary homogeneous while still enabling type validation at runtime.
+The key insight is the **`datatype` field**. Instead of using Julia's type system to distinguish between values, Radish uses a symbol tag. This is because Radish data types are semantic abstractions rather than native Julia types — similar to Redis, where a string can be interpreted as an integer, a serialized list, or any other encoded value depending on the operation. 
 
 {: .note }
 > Redis uses a similar approach internally — each Redis object carries a type tag and an encoding tag that determine how the value is stored and manipulated.
@@ -40,20 +40,49 @@ The key insight is the **`datatype` field**. Instead of using Julia's type syste
 
 ## Hypercommands
 
-Hypercommands are the core abstraction. There are 8 of them, and they cover every possible operation on the database:
+Hypercommands are the core abstraction. At the moment there are 10 of them, and it's possible to add new hypercommands whenever you need a behavior that isn't yet designed.
+
+The current implementation consists of the following commands:
 
 | Hypercommand | Purpose | Example Use |
 |---|---|---|
-| `rget_or_expire!` | Read a value, checking TTL first | `S_GET`, `L_LEN` |
-| `rget_on_modify_or_expire!` | Read-and-modify in one operation | `L_POP`, `L_DEQUEUE` |
-| `radd!` | Add a new key (fail if exists) | `S_SET`, `L_ADD` |
-| `radd_or_modify!` | Create or append | `L_PREPEND`, `L_APPEND` |
+| `rget_or_expire!` | Read a value | `S_GET`, `L_LEN` |
+| `rget_on_modify_or_expire!` | Read-and-modify in one operation | `S_GINCR` |
+| `rget_on_modify_or_expire_autodelete!` | Read-modify with auto-cleanup of empty structures | `L_POP`, `L_DEQUEUE` |
+| `radd!` | Add a new key | `S_SET`, `L_ADD` |
+| `radd_or_modify!` | Create or modify in-place | `L_PREPEND`, `L_APPEND` |
 | `rmodify!` | Modify an existing key | `S_INCR`, `S_APPEND` |
-| `rdelete!` | Delete a key | `DEL` |
+| `rmodify_autodelete!` | Modify with auto-cleanup of empty structures | `L_TRIMR`, `L_TRIML` |
+| `rdelete!` | Delete a key | Internal use |
 | `relement_to_element` | Compare two keys | `S_LCS`, `S_COMPLEN` |
 | `relement_to_element_consume_key2!` | Combine two keys, consuming the second | `L_MOVE` |
 
-Every hypercommand follows the same signature pattern:
+### Detailed Breakdown
+
+- **`rget_or_expire!`** — This is the hypercommand used to retrieve already available information in the database. If only lookup is required and nothing else, this is the right one to use. It checks if the key exists, validates TTL, and returns the value without modification.
+
+- **`rget_on_modify_or_expire!`** — Similar to `rget_or_expire!`, but it allows modifying the data structure after the get operation. This is useful for operations that need to read and mutate in a single atomic step (e.g., getting a value and then incrementing it).
+
+- **`rget_on_modify_or_expire_autodelete!`** — Extends `rget_on_modify_or_expire!` with automatic cleanup. After modifying the element, it checks if the structure is empty (e.g., a list with no elements) and automatically deletes the key if so. Used for operations like `L_POP` and `L_DEQUEUE` that should remove empty lists.
+
+- **`radd!`** — Adds a new key to the database. This enforces strict "create only" semantics.
+
+- **`radd_or_modify!`** — More flexible than `radd!` — it creates the key if it doesn't exist, or modifies it if it does. Useful for append-style operations where you want to initialize or extend a data structure (e.g., append a value to a list; if the list doesn't exist, create it with that value).
+
+- **`rmodify!`** — Modifies an existing key. If the key doesn't exist, the operation fails. This enforces "update only" semantics, preventing accidental key creation.
+
+- **`rmodify_autodelete!`** — Similar to `rmodify!`, but automatically deletes the key if the modification results in an empty structure. Used for operations like `L_TRIMR` and `L_TRIML` that might reduce a list to zero elements.
+
+- **`rdelete!`** — Simply removes a key from the database. Used internally by other hypercommands and meta commands.
+
+- **`relement_to_element`** — Operates on two keys simultaneously, comparing or combining their values without modifying either. Used for operations like longest common subsequence (LCS) between two strings. The result of the operation is not stored but just returned.
+
+- **`relement_to_element_consume_key2!`** — Similar to `relement_to_element`, but consumes (deletes) the second key after the operation. Useful for move operations where you want to transfer data from one key to another. This operation does not return the new element, it just overwrites the first key.
+
+{: .note }
+> Meta commands like `EXISTS`, `DEL`, `TYPE`, `TTL`, `PERSIST`, `EXPIRE`, `RENAME`, and `FLUSHDB` are implemented as standalone functions rather than using the hypercommand pattern, since they work uniformly across all data types.
+
+### Hypercommand Signature
 
 ```julia
 hypercommand(context::RadishContext, key::String, command::Function, args...)
@@ -65,7 +94,53 @@ The `command` parameter is the type-specific function — this is the delegation
 3. **Type validation** — is the key the right type for this command?
 4. Then it **calls the type command** with the element's value
 
-### Example: How `S_GET` Works
+Does everything make sense so far? I hope so...
+
+Now, here's the missing piece: how do hypercommands know which type command to call? The answer is they don't — it's actually the other way around. Commands are mapped to `(type_command, hypercommand)` pairs through something called **palettes**.
+
+---
+
+## Command Palettes
+
+Each data type file, after implementing the type-specific operations, defines a **palette** — a dictionary mapping command names to `(type_command, hypercommand)` tuples:
+
+```julia
+# String Palette
+S_PALETTE = Dict{String, Tuple}(
+    "S_GET"     => (sget, rget_or_expire!),
+    "S_SET"     => (sadd, radd!),
+    "S_INCR"    => (sincr!, rmodify!),
+    "S_APPEND"  => (sappend!, rmodify!),
+    "S_LCS"     => (slcs, relement_to_element),
+    # ... more string commands
+)
+
+# Linked List Palette
+LL_PALETTE = Dict{String, Tuple}(
+    "L_ADD"     => (ladd!, radd!),
+    "L_PREPEND" => (lprepend!, radd_or_modify!),
+    "L_POP"     => (lpop!, rget_on_modify_or_expire!),
+    # ... more list commands
+)
+```
+
+This is the lookup table that the [dispatcher](dispatcher) uses to find the right pair. The dispatcher will be explained in detail later — for now, think of it as the "engine" that routes commands and operations.
+
+The beauty of this design is that **adding a new data type** requires only:
+
+1. Define the data structure (e.g., `HashTable`)
+2. Write type commands (e.g., `hset!`, `hget`)
+3. Create a palette mapping command names to `(type_command, hypercommand)` pairs
+4. Register the palette in the dispatcher
+
+The hypercommands don't change at all, unless you need to introduce a completely new type of operation.
+
+{: .note }
+> For instance: blocking operations are not implemented in Radish at the moment. If you want to add them, a new hypercommand would be needed.
+
+---
+
+## Example: How `S_GET` Works
 
 ```mermaid
 sequenceDiagram
@@ -101,77 +176,3 @@ sequenceDiagram
     Dispatcher-->>Client: Response
 ```
 
----
-
-## Command Palettes
-
-Each data type has a **palette** — a dictionary mapping command names to `(type_command, hypercommand)` tuples:
-
-```julia
-S_PALETTE = Dict{String, Tuple}(
-    "S_GET"     => (sget, rget_or_expire!),
-    "S_SET"     => (sadd, radd!),
-    "S_INCR"    => (sincr!, rmodify!),
-    "S_APPEND"  => (sappend!, rmodify!),
-    "S_LCS"     => (slcs, relement_to_element),
-    # ... more string commands
-)
-
-LL_PALETTE = Dict{String, Tuple}(
-    "L_ADD"     => (ladd!, radd!),
-    "L_PREPEND" => (lprepend!, radd_or_modify!),
-    "L_POP"     => (lpop!, rget_on_modify_or_expire!),
-    # ... more list commands
-)
-```
-
-This is the lookup table that the [dispatcher](dispatcher) uses to find the right pair. The beauty of this design is that **adding a new data type** is just:
-
-1. Define the data structure (e.g., `HashTable`)
-2. Write type commands (e.g., `hset!`, `hget`)
-3. Create a palette mapping command names to `(type_command, hypercommand)` pairs
-4. Register the palette in the dispatcher
-
-The hypercommands don't change at all.
-
----
-
-## Data Contracts
-
-Radish enforces strict return value contracts to keep behavior predictable:
-
-| Hypercommand | Returns on success | Returns on failure |
-|---|---|---|
-| `rget_or_expire!` | Element value | `nothing` |
-| `rget_on_modify_or_expire!` | Modified value | `nothing` |
-| `radd!` | `true` | `false` (key exists) |
-| `radd_or_modify!` | Operation result | — |
-| `rmodify!` | Result value | `nothing` (key not found) |
-| `rdelete!` | `true` (deleted) | `false` (not found) |
-
-These contracts are mapped to three execution statuses:
-
-```julia
-@enum ExecutionStatus begin
-    SUCCESS          # Command executed, value returned
-    KEY_NOT_FOUND    # Key doesn't exist or expired
-    ERROR            # Wrong type, bad arguments, etc.
-end
-```
-
-The rule is simple: `nothing` → `KEY_NOT_FOUND`, any other value → `SUCCESS`, exceptions → `ERROR`.
-
----
-
-## Type Validation
-
-Before executing a command, the [dispatcher](dispatcher) validates that the key holds the correct data type:
-
-```julia
-if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :string
-    return ExecuteResult(false, nothing,
-        "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a string")
-end
-```
-
-This prevents accidental type mismatches — just like Redis's `WRONGTYPE` error. You can't run `S_GET` on a list key, or `L_POP` on a string key.

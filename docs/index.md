@@ -28,8 +28,8 @@ Radish deliberately keeps its dependency footprint small — most of the heavy l
 {: .note }
 > Only 3 external packages are used at runtime. Everything else — the data structures, the RESP protocol, the dispatcher, persistence — is built from scratch.
 
----
 
+---
 ## Why Build an In-Memory Database?
 
 At the beginning of this journey I was fascinated by Redis and its story, I was eager to revisit some computer science concepts I never deeply studied and I thought that building a Redis inspired database could satisfy my curiosity.
@@ -47,6 +47,9 @@ But more importantly **why** having such data structures available in a shared m
 Radish is in the first place a:
 - **learning tool** — a way to explore these concepts by building them from scratch, challenging real world problems and use cases.
 - **fun tool** — a way to have fun implementing ideas, and systems. Combine them to reach a sort of maturity of the platform and try to use them for other projects.
+
+{: .note }
+> Since this is a didactical project, much of the complexity found in well-established in-memory databases is not taken into consideration. Some features may be added in the future, but likely not all. When compromises are made, they will be listed as limitations under the specific section.
 
 
 ---

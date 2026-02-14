@@ -1,64 +1,266 @@
 ---
 layout: default
 title: Data Contracts
-nav_order: 8
+nav_order: 4
 ---
 
 # Data Contracts
 
-Radish enforces **strict data contracts** at two levels: the low-level *command* functions (type-specific operations) and the high-level *hypercommands* (generic operations on the context). These contracts make the system predictable, composable, and easy to debug.
+Radish uses a layered system of structs to represent commands, their execution, and results. Understanding these contracts is crucial to understanding how data flows through the system.
 
 ---
 
-## Command-Level Contracts
+## The Four Core Structs
 
-Every type command (e.g., `sget`, `sincr!`, `lpop!`) returns a `CommandResult`:
+### 1. Command — The Client Request
+
+```julia
+struct Command
+    name::String                    # Command name (e.g., "S_GET", "L_POP")
+    key::Union{Nothing, String}     # Target key, or nothing for keyless commands
+    args::Vector{String}            # Additional arguments
+end
+```
+
+**Purpose:** Represents a parsed client request after RESP decoding.
+
+**Created by:** The RESP protocol layer (`read_resp_command` in `resp.jl`)
+
+**Examples:**
+```julia
+Command("S_GET", "mykey", [])                    # S_GET mykey
+Command("S_SET", "mykey", ["hello", "60"])       # S_SET mykey hello 60
+Command("L_RANGE", "mylist", ["1", "10"])        # L_RANGE mylist 1 10
+Command("PING", nothing, [])                     # PING (no key)
+```
+
+**Flow:** Client → RESP decoder → `Command` → Dispatcher
+
+---
+
+### 2. CommandResult — Type Command Output
 
 ```julia
 struct CommandResult
-    success::Bool
-    value::Any                              # Result value (string, int, tuple, etc.)
-    error::Union{Nothing, String}           # Error message if success=false
-    element::Union{RadishElement, Nothing}  # Only for creators (sadd, ladd!)
+    success::Bool                              # Did the operation succeed?
+    value::Any                                 # Result value (for reads/modifications)
+    error::Union{Nothing, String}              # Error message if success=false
+    element::Union{RadishElement, Nothing}     # New element (for creators only)
 end
 ```
 
-There are three convenience constructors that make the intent explicit:
+**Purpose:** Returned by **type commands** (like `sget`, `sincr!`, `lpop!`) to indicate success or failure at the data structure level.
 
+**Created by:** Type commands in `rstrings.jl`, `rlinkedlists.jl`
+
+**Convenience constructors:**
 ```julia
-CommandSuccess(value)           # Operation succeeded, return value
-CommandError(msg::String)       # Operation failed, return error message
-CommandCreate(elem)             # New element created (for add commands)
+CommandSuccess(value)           # Success with a return value
+CommandError(msg::String)       # Failure with error message
+CommandCreate(elem::RadishElement)  # Success, created new element
 ```
 
-### The Three Patterns
+**Examples:**
+```julia
+# String get operation
+CommandSuccess("hello")
 
-All type commands fall into one of three categories:
+# Increment operation
+CommandSuccess(true)
 
-#### 1. Readers — Return a value
+# Create new string
+CommandCreate(RadishElement("world", nothing, now(), :string))
+
+# Error: value is not an integer
+CommandError("Value 'abc' is not an integer")
+```
+
+**Flow:** Type command → `CommandResult` → Hypercommand
+
+---
+
+### 3. ExecuteResult — Hypercommand Output
 
 ```julia
-function sget(elem::RadishElement, args...)
+struct ExecuteResult
+    status::ExecutionStatus                # SUCCESS, KEY_NOT_FOUND, or ERROR
+    value::Any                             # Result to return to client
+    error::Union{Nothing, String}          # Error message (only for ERROR status)
+end
+```
+
+**Purpose:** Returned by **hypercommands** (like `rget_or_expire!`, `radd!`) after handling TTL checks, key lookup, and delegation to type commands.
+
+**Created by:** Hypercommands in `radishelem.jl`
+
+**Status enum:**
+```julia
+@enum ExecutionStatus begin
+    SUCCESS          # Command executed successfully
+    KEY_NOT_FOUND    # Key doesn't exist or expired
+    ERROR            # Wrong command, wrong type, bad arguments
+end
+```
+
+**Examples:**
+```julia
+# Successful read
+ExecuteResult(SUCCESS, "hello", nothing)
+
+# Key not found or expired
+ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+
+# Type mismatch error
+ExecuteResult(ERROR, nothing, "WRONGTYPE: Key 'mykey' holds a list, not a string")
+```
+
+**Flow:** Hypercommand → `ExecuteResult` → Dispatcher → RESP encoder
+
+---
+
+### 4. ExecutionStatus — The Final Verdict
+
+```julia
+@enum ExecutionStatus begin
+    SUCCESS          # Command executed, value returned
+    KEY_NOT_FOUND    # Key doesn't exist or expired
+    ERROR            # Wrong type, bad arguments, etc.
+end
+```
+
+**Purpose:** A simple enum to categorize the outcome of a command execution.
+
+**Used by:** `ExecuteResult` to indicate the high-level status
+
+**Mapping to RESP responses:**
+
+| ExecutionStatus | RESP Response | Example |
+|---|---|---|
+| `SUCCESS` | `+OK`, `:integer`, `$bulk`, `*array` | `+OK\r\n`, `:42\r\n`, `$5\r\nhello\r\n` |
+| `KEY_NOT_FOUND` | `$-1\r\n` (nil) | Client sees `(nil)` |
+| `ERROR` | `-ERR message\r\n` | `-ERR WRONGTYPE ...\r\n` |
+
+---
+
+## The Complete Flow
+
+Here's how these structs interact during a command execution:
+
+```mermaid
+sequenceDiagram
+    participant Client
+    participant RESP as RESP Layer
+    participant Dispatcher
+    participant Hypercommand
+    participant TypeCommand
+    participant Context
+
+    Client->>RESP: "S_GET mykey\r\n"
+    RESP->>Dispatcher: Command("S_GET", "mykey", [])
+    
+    Dispatcher->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
+    
+    Hypercommand->>Context: Check key exists & TTL
+    alt Key valid
+        Hypercommand->>TypeCommand: sget(element)
+        TypeCommand-->>Hypercommand: CommandResult(success=true, value="hello")
+        Hypercommand-->>Dispatcher: ExecuteResult(SUCCESS, "hello", nothing)
+    else Key not found
+        Hypercommand-->>Dispatcher: ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+    end
+    
+    Dispatcher->>RESP: ExecuteResult
+    RESP->>Client: "$5\r\nhello\r\n" or "$-1\r\n"
+```
+
+---
+
+## Conversion Rules
+
+### CommandResult → ExecuteResult
+
+Hypercommands convert `CommandResult` to `ExecuteResult`:
+
+```julia
+cmd_result = command(element, args...)
+
+if !cmd_result.success
+    return ExecuteResult(ERROR, nothing, cmd_result.error)
+end
+
+return ExecuteResult(SUCCESS, cmd_result.value, nothing)
+```
+
+**Key insight:** `CommandResult.success=false` always becomes `ExecuteResult(ERROR, ...)`
+
+### ExecuteResult → RESP
+
+The RESP encoder (`write_resp_response` in `resp.jl`) converts `ExecuteResult` to wire format:
+
+```julia
+if result.status == ERROR
+    write(sock, "-ERR $(result.error)\r\n")
+elseif result.status == KEY_NOT_FOUND
+    write(sock, "$-1\r\n")  # nil
+elseif result.status == SUCCESS
+    # Format based on value type (string, integer, array, etc.)
+end
+```
+
+---
+
+## Why This Layered Design?
+
+1. **Separation of concerns:**
+   - Type commands focus on data structure logic
+   - Hypercommands handle cross-cutting concerns (TTL, key lookup)
+   - Dispatcher handles routing and locking
+   - RESP layer handles wire protocol
+
+2. **Type safety:**
+   - `CommandResult` is internal (type command ↔ hypercommand)
+   - `ExecuteResult` is the public contract (hypercommand ↔ dispatcher ↔ client)
+
+3. **Extensibility:**
+   - Adding a new data type only requires implementing type commands that return `CommandResult`
+   - The rest of the system (hypercommands, dispatcher, RESP) remains unchanged
+
+4. **Error propagation:**
+   - Type-level errors (e.g., "value is not an integer") flow through `CommandResult.error`
+   - System-level errors (e.g., "key not found") are handled by hypercommands
+   - Both eventually become `ExecuteResult` for the client
+
+---
+
+## Common Patterns
+
+### Pattern 1: Read Operation
+
+```julia
+# Type command (rstrings.jl)
+function sget(elem::RadishElement)
     return CommandSuccess(elem.value)
 end
 
-function slen(elem::RadishElement)
-    return CommandSuccess(length(elem.value))
-end
-
-function llen(elem::RadishElement)
-    return CommandSuccess(elem.value.len)
+# Hypercommand (radishelem.jl)
+function rget_or_expire!(context, key, command, args...)
+    if haskey(context, key)
+        element = context[key]
+        # TTL check...
+        cmd_result = command(element, args...)
+        return ExecuteResult(SUCCESS, cmd_result.value, nothing)
+    end
+    return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
 end
 ```
 
-**Contract**: Always return `CommandSuccess(value)`. The value can be a `String`, `Int`, `Tuple`, `Vector`, or `Bool`.
-
-#### 2. Mutators — Modify and return status
+### Pattern 2: Write Operation with Validation
 
 ```julia
+# Type command (rstrings.jl)
 function sincr!(elem::RadishElement)
     elem_n = tryparse(Int, string(elem.value))
-    if isa(elem_n, Nothing)
+    if elem_n === nothing
         return CommandError("Value '$(elem.value)' is not an integer")
     end
     elem_n += 1
@@ -66,155 +268,55 @@ function sincr!(elem::RadishElement)
     return CommandSuccess(true)
 end
 
-function sappend!(elem::RadishElement, value::AbstractString)
-    elem.value = elem.value * value
-    return CommandSuccess(true)
-end
-```
-
-**Contract**: Return `CommandSuccess(true)` on success, or `CommandError(msg)` if validation fails. The element is modified **in place** — the mutation happens on the `RadishElement` fields directly.
-
-{: .note }
-> Some mutators return a value instead of `true`. For example, `sgincr!` (get-then-increment) returns the value *before* mutation: `CommandSuccess(original_value)`.
-
-#### 3. Creators — Construct a new element
-
-```julia
-function sadd(value::AbstractString, ttl::AbstractString)
-    ttl_p = tryparse(Int, ttl)
-    if isa(ttl_p, Nothing)
-        return CommandError("TTL must be a valid integer, got '$ttl'")
-    end
-    elem = RadishElement(value, ttl_p, now(), :string)
-    return CommandCreate(elem)
-end
-
-function sadd(value::AbstractString)
-    elem = RadishElement(value, nothing, now(), :string)
-    return CommandCreate(elem)
-end
-```
-
-**Contract**: Return `CommandCreate(elem)` with the newly constructed `RadishElement`, or `CommandError(msg)` if input validation fails. Creators **never** receive an existing element — they receive raw arguments.
-
----
-
-## Hypercommand-Level Contracts
-
-Hypercommands translate `CommandResult` into `ExecuteResult`:
-
-```julia
-struct ExecuteResult
-    status::ExecutionStatus     # SUCCESS, KEY_NOT_FOUND, or ERROR
-    value::Any                  # The result to send to the client
-    error::Union{Nothing, String}
-end
-
-@enum ExecutionStatus begin
-    SUCCESS          # Command executed successfully
-    KEY_NOT_FOUND    # Key doesn't exist or expired
-    ERROR            # Wrong type, bad args, exception
-end
-```
-
-### Translation Rules
-
-Each hypercommand follows a consistent pattern for mapping `CommandResult` → `ExecuteResult`:
-
-| Hypercommand | On key found + success | On key found + failure | On key missing |
-|---|---|---|---|
-| `rget_or_expire!` | `SUCCESS(value)` | `ERROR(msg)` | `KEY_NOT_FOUND` |
-| `rget_on_modify_or_expire!` | `SUCCESS(value)` + mark dirty | `ERROR(msg)` | `KEY_NOT_FOUND` |
-| `radd!` | N/A (key must not exist) | `ERROR(msg)` | `SUCCESS(true)` + create |
-| `radd_or_modify!` | Delegates to `rmodify!` | — | Delegates to `radd!` |
-| `rmodify!` | `SUCCESS(value)` + mark dirty | `ERROR(msg)` | `KEY_NOT_FOUND` |
-| `rdelete!` | `true` | — | `false` |
-| `relement_to_element` | `SUCCESS(value)` | `ERROR(msg)` | `KEY_NOT_FOUND` |
-| `relement_to_element_consume_key2!` | `SUCCESS(value)` + delete key2 | `ERROR(msg)` | `KEY_NOT_FOUND` |
-
-### TTL Checking
-
-Every hypercommand that reads a key checks the TTL first:
-
-```julia
-if element.ttl !== nothing && now() > element.tinit + Second(element.ttl)
-    delete!(context, key)
-    if tracker !== nothing
-        mark_deleted!(tracker, key)
+# Hypercommand (radishelem.jl)
+function rmodify!(context, key, command, args...)
+    if haskey(context, key)
+        cmd_result = command(context[key], args...)
+        if !cmd_result.success
+            return ExecuteResult(ERROR, nothing, cmd_result.error)
+        end
+        return ExecuteResult(SUCCESS, cmd_result.value, nothing)
     end
     return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
 end
 ```
 
-If a key has expired, it is **deleted on access** (lazy expiry) and treated as if it never existed. This is the same strategy Redis uses.
-
-### Auto-Delete Hypercommands
-
-Two additional hypercommands handle cleanup of structurally empty data structures:
-
-| Hypercommand | Behavior |
-|---|---|
-| `rget_on_modify_or_expire_autodelete!` | After modifying, check if element is empty → auto-delete |
-| `rmodify_autodelete!` | After modifying, check if element is empty → auto-delete |
-
-These are used for operations like `L_POP` and `L_TRIM` where the list might become empty. The check delegates to type-specific `is_empty` functions using Julia's multiple dispatch:
+### Pattern 3: Creator Operation
 
 ```julia
-function check_empty(elem::RadishElement)::Bool
-    return is_empty(Val(elem.datatype), elem)
+# Type command (rstrings.jl)
+function sadd(value::String, ttl::String)
+    ttl_p = tryparse(Int, ttl)
+    if ttl_p === nothing
+        return CommandError("TTL must be a valid integer")
+    end
+    elem = RadishElement(value, ttl_p, now(), :string)
+    return CommandCreate(elem)
 end
 
-# Strings are never structurally empty
-function is_empty(::Val{:string}, elem::RadishElement)::Bool
-    return false
-end
-
-# Lists are empty when they have no nodes
-function is_empty(::Val{:list}, elem::RadishElement)::Bool
-    return elem.value.len == 0
-end
-```
-
----
-
-## How `radd!` Differs From Other Hypercommands
-
-Notice that `radd!` has a **reversed** key-existence contract compared to the others:
-
-- Most hypercommands: key must **exist** → call command → return result
-- `radd!`: key must **not exist** → call creator → store new element
-
-```julia
-function radd!(context, key, command, args...; tracker=nothing)
+# Hypercommand (radishelem.jl)
+function radd!(context, key, command, args...)
     if haskey(context, key)
         return ExecuteResult(ERROR, nothing, "Key '$key' already exists")
     end
-    cmd_result = command(args...)  # Creator: no existing element passed
+    cmd_result = command(args...)
+    if !cmd_result.success
+        return ExecuteResult(ERROR, nothing, cmd_result.error)
+    end
     context[key] = cmd_result.element
     return ExecuteResult(SUCCESS, true, nothing)
 end
 ```
 
-The creator function receives the raw arguments (value, TTL), not an existing element. This asymmetry is intentional — it separates **creation logic** from **modification logic**, keeping each command function focused on one concern.
-
 ---
 
-## The Complete Contract Flow
+## Summary Table
 
-Here's how the contracts compose end-to-end:
+| Struct | Created By | Used By | Purpose |
+|---|---|---|---|
+| `Command` | RESP decoder | Dispatcher | Parsed client request |
+| `CommandResult` | Type commands | Hypercommands | Type-level operation result |
+| `ExecuteResult` | Hypercommands | Dispatcher, RESP encoder | System-level execution result |
+| `ExecutionStatus` | Hypercommands | RESP encoder | High-level status category |
 
-```mermaid
-graph TD
-    A["Client sends: S_INCR counter"] --> B["Dispatcher looks up S_PALETTE"]
-    B --> C["Finds: sincr!, rmodify!"]
-    C --> D["rmodify! checks key exists"]
-    D -->|"Key found"| E["Calls sincr!(element)"]
-    E -->|"CommandSuccess(true)"| F["rmodify! returns ExecuteResult(SUCCESS, true, nil)"]
-    E -->|"CommandError(msg)"| G["rmodify! returns ExecuteResult(ERROR, nil, msg)"]
-    D -->|"Key missing"| H["rmodify! returns ExecuteResult(KEY_NOT_FOUND, nil, nil)"]
-    F --> I["RESP formats: :1"]
-    G --> I2["RESP formats: -ERR msg"]
-    H --> I3["RESP formats: $-1"]
-```
-
-This layered design — **type command → hypercommand → dispatcher → RESP formatter** — means each layer has a clear, well-defined contract with the next.
+**The golden rule:** Type commands return `CommandResult`, hypercommands return `ExecuteResult`, and the dispatcher routes everything.
