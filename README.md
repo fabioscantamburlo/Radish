@@ -4,7 +4,7 @@
 
 **Radish** is a didactical in-memory database inspired by [Redis](https://redis.io), built entirely in [Julia](https://julialang.org) with minor dependencies. It started as a learning exercise to understand how key-value stores work under the hood and it grew more and more.
 
-Radish is both a **learning tool** and a **fun tool** -  a way to explore in-memory db concepts and have fun implemeting these ideas.
+Radish is both a **learning tool** and a **fun tool** — a way to explore in-memory database concepts and have fun implementing them.
 
 ---
 
