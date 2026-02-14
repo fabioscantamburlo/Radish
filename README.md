@@ -2,7 +2,9 @@
 
 ![Radish](artifacts/radish_image.jpeg)
 
-**Radish** is a didactical in-memory database inspired by [Redis](https://redis.io), built entirely in [Julia](https://julialang.org) with minor dependencies. It started as a learning exercise to understand how key-value stores work under the hood — and grew into an almost fully functional server with persistence, transactions, concurrent access, and a wire protocol.
+**Radish** is a didactical in-memory database inspired by [Redis](https://redis.io), built entirely in [Julia](https://julialang.org) with minor dependencies. It started as a learning exercise to understand how key-value stores work under the hood and it grew more and more.
+
+Radish is both a **learning tool** and a **fun tool** -  a way to explore in-memory db concepts and have fun implemeting these ideas.
 
 ---
 
@@ -52,6 +54,44 @@ Honestly a random choice — Julia was a language I always heard about but never
 
 ---
 
+## Quick Start
+
+Radish runs fully in Docker. All commands go through `make`:
+
+**Build & Run**
+| Command | Description |
+|---------|-------------|
+| `make build` | Build the Docker image |
+| `make rebuild` | Force rebuild from scratch (no cache) |
+| `make server` | Start the server in the background |
+| `make server-logs` | Tail the server logs |
+| `make server-stop` | Stop the server |
+
+**Client**
+| Command | Description |
+|---------|-------------|
+| `make client` | Attach an interactive client to the running server |
+
+**Docs**
+| Command | Description |
+|---------|-------------|
+| `make docs` | Start the Jekyll docs server at `http://localhost:4000` |
+| `make docs-build` | Build the docs Docker image |
+| `make docs-bg` | Start the docs server in the background |
+| `make docs-stop` | Stop the docs server |
+
+**Teardown**
+| Command | Description |
+|---------|-------------|
+| `make down` | Stop and remove all containers |
+| `make clean` | Remove containers, networks and volumes (wipes persisted data) |
+| `make ps` | Show status of all Radish containers |
+| `make help` | Show all available commands |
+
+---
+
 ## Documentation
 
 Full documentation is available at the project's GitHub Pages site, covering each component in detail: data structures, the RESP protocol, persistence strategies, concurrency, transactions, Docker setup, and the dispatcher architecture.
+
+
