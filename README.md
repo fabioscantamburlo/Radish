@@ -17,7 +17,8 @@ Radish is both a **learning tool** and a **fun tool** — a way to explore in-me
 | RESP Protocol | ✅ | Redis Serialization Protocol for wire communication |
 | Persistence | ✅ | Sharded RDB snapshots + AOF with crash recovery |
 | Transactions | ✅ | MULTI/EXEC/DISCARD with atomic execution |
-| Sharded Locking | ✅ | 256 ReadWriteLocks for concurrent access |
+| Configuration | ✅ | YAML-based config for all tunable parameters |
+| Sharded Locking | ✅ | Configurable ReadWriteLocks for concurrent access |
 | TTL & Expiry | ✅ | Background cleaner with probabilistic sampling |
 | Docker Support | ✅ | Full Docker Compose setup with health checks |
 | Key Management | ✅ | EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE, RENAME, FLUSHDB |
@@ -38,13 +39,55 @@ Every value is wrapped in a `RadishElement` carrying metadata (value, TTL, creat
 
 ## Dependencies
 
-Only 3 external packages are used at runtime. Everything else — data structures, RESP protocol, dispatcher, persistence — is built from scratch.
+Only 4 external packages are used at runtime. Everything else — data structures, RESP protocol, dispatcher, persistence — is built from scratch.
 
 | Package | Purpose |
 |---------|---------|
 | **JSON3** | Serialization of snapshot data to sharded `.rdb` files |
 | **StatsBase** | Random key sampling for background TTL expiration |
 | **ConcurrentUtilities** | `ReadWriteLock` for the sharded locking system |
+| **YAML** | Parses the `radish.yml` configuration file at startup |
+
+---
+
+## Configuration
+
+All tunable parameters live in a single `radish.yml` file at the project root:
+
+```yaml
+network:
+  host: "127.0.0.1"
+  port: 9000
+
+persistence:
+  dir: "persistence"
+  snapshots_subdir: "snapshots"
+  aof_subdir: "aof"
+  aof_filename: "radish.aof"
+  num_snapshot_shards: 256
+
+background_tasks:
+  sync_interval_sec: 5
+  cleaner_interval_sec: 0.1
+
+concurrency:
+  num_lock_shards: 256
+
+ttl_cleanup:
+  sampling_threshold: 100000
+  sample_percentage: 0.10
+
+data_limits:
+  list_display_limit: 50
+```
+
+Edit `radish.yml` to adapt Radish to your use-case. CLI arguments for host/port override the config file values. You can also pass a custom config path as the third argument:
+
+```bash
+julia server_runner.jl 0.0.0.0 9000 /path/to/custom.yml
+```
+
+If the file is missing, all parameters fall back to sensible defaults — Radish works out of the box with no configuration.
 
 ---
 
