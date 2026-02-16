@@ -99,6 +99,17 @@ healthcheck:
 
 This avoids sending actual RESP commands for health checks. The server handles these connection-and-immediate-disconnect probes gracefully — the `ECONNRESET` from health check probes is caught and logged silently.
 
+### Configuration
+
+The server reads its [configuration](configuration) from `radish.yml` at startup. Inside Docker, the config file is baked into the image during the build. To use a custom config, you can mount it as a volume:
+
+```yaml
+volumes:
+  - ./my-config.yml:/app/radish.yml
+```
+
+Note that when running in Docker, the `network.host` should be `0.0.0.0` (not `127.0.0.1`) to accept connections from other containers.
+
 ### Data Persistence
 
 Data is stored in a Docker named volume (`radish-data`), which means:

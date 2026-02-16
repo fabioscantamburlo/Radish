@@ -65,8 +65,8 @@ const MULTI_KEY_OPS = Set(["S_LCS", "S_COMPLEN", "L_MOVE", "RENAME"])
 | Read operations | Read lock on key's shard |
 | Write operations | Write lock on key's shard |
 | Multi-key operations | Write locks on both keys' shards (sorted) |
-| `KLIST` | Read locks on all 256 shards |
-| `FLUSHDB` | Write locks on all 256 shards |
+| `KLIST` | Read locks on all shards |
+| `FLUSHDB` | Write locks on all shards |
 | `PING`, `DUMP` | No locks needed |
 
 Locks are always released in the `finally` block, ensuring cleanup even on exceptions.

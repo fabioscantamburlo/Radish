@@ -2,6 +2,9 @@ module Radish
 
 # Load order matters - break circular dependencies
 
+# 0. Configuration (loaded first, no dependencies)
+include(joinpath(@__DIR__, "src", "config.jl"))
+
 # 1. DirtyTracker first (needed by hypercommands, no dependencies)
 include(joinpath(@__DIR__, "src", "dirty_tracker.jl"))
 
@@ -29,10 +32,13 @@ include(joinpath(@__DIR__, "src", "persistence.jl"))
 include(joinpath(@__DIR__, "src", "server.jl"))
 include(joinpath(@__DIR__, "src", "client.jl"))
 
+# Config exports
+export RadishConfig, load_config, CONFIG, init_config!, snapshots_dir, aof_dir, aof_path
+
 # Persistence exports
 export DirtyTracker, mark_dirty!, mark_deleted!, save_snapshot!, save_snapshot_shards!,
        save_full_snapshot!, load_snapshot!, has_changes, clear!, pop_changes!,
-       ensure_persistence_dirs!, snapshot_shard_id, NUM_SNAPSHOT_SHARDS,
+       ensure_persistence_dirs!, snapshot_shard_id,
        AOFState, aof_open!, aof_append!, aof_append_batch!, aof_truncate!, aof_close!, replay_aof!
 
 # Functions of the Radish

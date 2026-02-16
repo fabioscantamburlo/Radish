@@ -8,11 +8,8 @@ export RadishElement, S_PALETTE, LL_PALETTE
 export start_server
 
 # ============================================================================
-# Configuration
+# Configuration (read from CONFIG[])
 # ============================================================================
-
-const SYNC_INTERVAL = 5          # seconds between syncs
-const CLEANER_INTERVAL = 0.1        # seconds between cleaner runs
 
 # Commands that should NOT be logged to AOF (reads + meta-commands)
 const AOF_EXCLUDED_OPS = union(READ_OPS, Set(["PING", "QUIT", "EXIT", "BGSAVE", "DUMP", "MULTI", "DISCARD", "EXEC", "KLIST"]))
@@ -32,7 +29,7 @@ Background task: Async syncer for persistence (sharded RDB)
 function async_syncer(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyTracker, aof::AOFState)
     while true
         try
-            sleep(SYNC_INTERVAL)
+            sleep(CONFIG[].sync_interval_sec)
 
             if !has_changes(tracker)
                 continue
@@ -92,16 +89,17 @@ function async_cleaner(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyT
             all_keys = collect(keys(ctx))
 
             if isempty(all_keys)
-                sleep(CLEANER_INTERVAL)
+                sleep(CONFIG[].cleaner_interval_sec)
                 continue
             end
 
             all_key_len = length(all_keys)
-            # Sample 10% of keys randomly, or all if < 100K
-            if all_key_len < 100_000
+            cfg = CONFIG[]
+            # Sample keys randomly, or all if below threshold
+            if all_key_len < cfg.sampling_threshold
                 sampled_keys = all_keys
             else
-                sample_size = max(1, round(Int, 0.10 * length(all_keys)))
+                sample_size = max(1, round(Int, cfg.sample_percentage * length(all_keys)))
                 sampled_keys = sample(all_keys, sample_size, replace=false)
             end
 
@@ -145,11 +143,11 @@ function async_cleaner(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyT
                 @info "Cleaner: removed $total_cleaned expired keys"
             end
 
-            sleep(CLEANER_INTERVAL)
+            sleep(CONFIG[].cleaner_interval_sec)
 
         catch e
             @error "Cleaner error: $e"
-            sleep(CLEANER_INTERVAL)
+            sleep(CONFIG[].cleaner_interval_sec)
         end
     end
 end
@@ -224,7 +222,8 @@ end
 # Server Main Entry Point
 # ============================================================================
 
-function start_server(host="127.0.0.1", port=9000)
+function start_server(host::String=CONFIG[].host, port::Int=CONFIG[].port)
+    cfg = CONFIG[]
     println("Initializing Radish Server...")
 
     # Ensure persistence directory structure
@@ -232,9 +231,9 @@ function start_server(host="127.0.0.1", port=9000)
 
     # Initialize context, lock, dirty tracker, and AOF
     ctx = RadishContext()
-    db_lock = ShardedLock(256)
+    db_lock = ShardedLock(cfg.num_lock_shards)
     tracker = DirtyTracker()
-    aof = AOFState(AOF_PATH)
+    aof = AOFState(aof_path(cfg))
 
     # Load snapshot from sharded RDB files
     println("Loading snapshot...")
@@ -256,7 +255,7 @@ function start_server(host="127.0.0.1", port=9000)
         println("Replayed $aof_count commands from AOF")
         # After replay, save a fresh snapshot and clear AOF
         save_full_snapshot!(ctx, tracker)
-        open(AOF_PATH, "w") do f end
+        open(aof_path(cfg), "w") do f end
         println("Post-replay snapshot saved, AOF cleared")
     end
 
@@ -271,9 +270,30 @@ function start_server(host="127.0.0.1", port=9000)
     # Start TCP server
     server = listen(IPv4(host), port)
     println("Radish server listening on $host:$port")
-    println("   Sync interval: $(SYNC_INTERVAL)s")
-    println("   Snapshot shards: $(NUM_SNAPSHOT_SHARDS)")
-    println("   Press Ctrl+C to stop")
+    println()
+    host_src = host != cfg.host ? " (override)" : ""
+    port_src = port != cfg.port ? " (override)" : ""
+    println("  Configuration:")
+    println("  ├── Network")
+    println("  │   ├── host: $host$host_src")
+    println("  │   └── port: $port$port_src")
+    println("  ├── Persistence")
+    println("  │   ├── dir: $(cfg.persistence_dir)")
+    println("  │   ├── snapshots: $(snapshots_dir(cfg))")
+    println("  │   ├── aof: $(aof_path(cfg))")
+    println("  │   └── snapshot shards: $(cfg.num_snapshot_shards)")
+    println("  ├── Background Tasks")
+    println("  │   ├── sync interval: $(cfg.sync_interval_sec)s")
+    println("  │   └── cleaner interval: $(cfg.cleaner_interval_sec)s")
+    println("  ├── Concurrency")
+    println("  │   └── lock shards: $(cfg.num_lock_shards)")
+    println("  ├── TTL Cleanup")
+    println("  │   ├── sampling threshold: $(cfg.sampling_threshold) keys")
+    println("  │   └── sample percentage: $(Int(cfg.sample_percentage * 100))%")
+    println("  └── Data Limits")
+    println("      └── list display limit: $(cfg.list_display_limit)")
+    println()
+    println("  Press Ctrl+C to stop")
 
     client_counter = 0
 
@@ -291,8 +311,9 @@ function start_server(host="127.0.0.1", port=9000)
             save_full_snapshot!(ctx, tracker)
             # Close and remove AOF (snapshot is complete)
             aof_close!(aof)
-            if isfile(AOF_PATH)
-                rm(AOF_PATH)
+            aof_file = aof_path(cfg)
+            if isfile(aof_file)
+                rm(aof_file)
             end
         else
             @error "Server error: $e"

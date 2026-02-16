@@ -20,7 +20,7 @@ When you run `julia server_runner.jl`, the server initializes in this order:
 graph TD
     subgraph Init
         direction LR
-        A["Create directories"] --> B["RadishContext"] --> C["ShardedLock"] --> D["DirtyTracker"]
+        Z["Load radish.yml"] --> A["Create directories"] --> B["RadishContext"] --> C["ShardedLock"] --> D["DirtyTracker"]
     end
 
     subgraph Recovery
@@ -30,7 +30,7 @@ graph TD
 
     subgraph Serve
         direction LR
-        I["Background cleaner"] --> J["Background syncer"] --> K["Listen on :9000"] --> L["Accept clients"]
+        I["Background cleaner"] --> J["Background syncer"] --> K["Listen on host:port"] --> L["Accept clients"]
     end
 
     Init --> Recovery --> Serve
@@ -189,19 +189,20 @@ All clients share the same `RadishContext`. The [sharded locking](concurrency) s
 
 ## Configuration
 
-The server exposes a few configurable constants:
+All server parameters are managed through a single YAML file (`radish.yml`). See the [Configuration](configuration) page for the full reference.
 
-| Parameter | Default | Description |
-|---|---|---|
-| Host | `127.0.0.1` | Bind address (use `0.0.0.0` for Docker) |
-| Port | `9000` | TCP port |
-| `SYNC_INTERVAL` | `5` seconds | How often the background syncer runs |
-| `CLEANER_INTERVAL` | `10` seconds | How often the TTL cleaner runs |
-| `NUM_SNAPSHOT_SHARDS` | `256` | Number of RDB shard files |
-
-Both the server and client accept host and port as command-line arguments:
+Both the server and client accept command-line arguments that **override** the config file values:
 
 ```bash
+# Use defaults from radish.yml
+julia server_runner.jl
+
+# Override host and port
 julia server_runner.jl 0.0.0.0 9000
+
+# Use a custom config file
+julia server_runner.jl 0.0.0.0 9000 /path/to/custom.yml
+
+# Client follows the same pattern
 julia client_runner.jl 127.0.0.1 9000
 ```

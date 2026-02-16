@@ -29,7 +29,7 @@ This is a **race condition** — the classic lost-update problem. Radish needs t
 
 ## Sharded Locking
 
-Instead of a single global lock (which would serialize everything), Radish uses **sharded locking** — 256 independent `ReadWriteLock`s:
+Instead of a single global lock (which would serialize everything), Radish uses **sharded locking** — N independent `ReadWriteLock`s (configurable via [`num_lock_shards`](configuration), default 256):
 
 ```julia
 struct ShardedLock
@@ -48,15 +48,15 @@ shard_id(lock::ShardedLock, key::String) = (hash(key) % lock.num_shards) + 1
 
 ### Why 256 Shards?
 
-The number of shards controls the **granularity of contention**:
+The number of shards is [configurable](configuration) and controls the **granularity of contention**:
 
 | Shards | Contention | Memory | Comment |
 |---|---|---|---|
 | 1 | Maximum — all operations serialized | Minimal | Equivalent to a global lock |
-| 256 | Low — only keys on the same shard contend | Moderate | Good balance |
+| 256 | Low — only keys on the same shard contend | Moderate | Good balance (default) |
 | ∞ | Zero — per-key locking | High | Overkill for most workloads |
 
-256 is a reasonable default — with uniform key distribution, two random keys have only a 1/256 ≈ 0.4% chance of contending with each other.
+256 is a reasonable default — with uniform key distribution, two random keys have only a 1/256 ≈ 0.4% chance of contending with each other. You can tune this in `radish.yml` under `concurrency.num_lock_shards`.
 
 ### Read vs Write Locks
 
@@ -106,7 +106,7 @@ This `sort → lock → unlock in reverse` pattern is a standard technique for d
 
 ## Global Operations
 
-Some commands need access to all keys (e.g., `KLIST`, `FLUSHDB`). These acquire **all 256 shard locks**:
+Some commands need access to all keys (e.g., `KLIST`, `FLUSHDB`). These acquire **all shard locks**:
 
 ```julia
 function acquire_all_read!(lock::ShardedLock)
@@ -146,7 +146,7 @@ The cleaner uses **per-shard locking** — it locks one shard at a time, checks 
 
 ### Async Syncer (Persistence)
 
-See the [Persistence](persistence) page for details. The syncer runs every 5 seconds, pops dirty changes, and writes them to shard-specific RDB files.
+See the [Persistence](persistence) page for details. The syncer runs at a [configurable interval](configuration) (default: every 5 seconds), pops dirty changes, and writes them to shard-specific RDB files.
 
 ---
 

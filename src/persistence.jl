@@ -9,30 +9,24 @@ using Dates
 using JSON3
 using Logging
 
-export ensure_persistence_dirs!, snapshot_shard_id, NUM_SNAPSHOT_SHARDS,
+export ensure_persistence_dirs!, snapshot_shard_id,
        save_snapshot!, save_snapshot_shards!, save_full_snapshot!, load_snapshot!,
        aof_open!, aof_append!, aof_append_batch!, aof_truncate!, aof_close!, replay_aof!
 
 # ============================================================================
-# Configuration
+# Configuration (read from CONFIG[])
 # ============================================================================
 
-const PERSISTENCE_DIR = "persistence"
-const SNAPSHOTS_DIR = joinpath(PERSISTENCE_DIR, "snapshots")
-const AOF_DIR = joinpath(PERSISTENCE_DIR, "aof")
-const AOF_PATH = joinpath(AOF_DIR, "radish.aof")
-const NUM_SNAPSHOT_SHARDS = 256  # Must match ShardedLock num_shards
-
 """Compute snapshot shard ID for a key. Uses same hash formula as ShardedLock."""
-snapshot_shard_id(key::String) = (hash(key) % NUM_SNAPSHOT_SHARDS) + 1
+snapshot_shard_id(key::String) = (hash(key) % CONFIG[].num_snapshot_shards) + 1
 
 """Get file path for a shard's RDB file."""
-shard_path(shard::Int) = joinpath(SNAPSHOTS_DIR, "shard_$(lpad(shard, 3, '0')).rdb")
+shard_path(shard::Int) = joinpath(snapshots_dir(CONFIG[]), "shard_$(lpad(shard, 3, '0')).rdb")
 
 """Create persistence directory structure."""
 function ensure_persistence_dirs!()
-    mkpath(SNAPSHOTS_DIR)
-    mkpath(AOF_DIR)
+    mkpath(snapshots_dir(CONFIG[]))
+    mkpath(aof_dir(CONFIG[]))
 end
 
 # ============================================================================
@@ -226,7 +220,7 @@ function save_full_snapshot!(ctx::RadishContext, tracker::DirtyTracker)
     end
 
     count = 0
-    for sid in 1:NUM_SNAPSHOT_SHARDS
+    for sid in 1:CONFIG[].num_snapshot_shards
         path = shard_path(sid)
 
         if !haskey(shards, sid)
@@ -269,13 +263,13 @@ function load_snapshot!(ctx::RadishContext)::Int
     ensure_persistence_dirs!()
 
     # Clean up any leftover .tmp files from interrupted writes
-    for sid in 1:NUM_SNAPSHOT_SHARDS
+    for sid in 1:CONFIG[].num_snapshot_shards
         tmp = shard_path(sid) * ".tmp"
         isfile(tmp) && rm(tmp)
     end
 
     count = 0
-    for sid in 1:NUM_SNAPSHOT_SHARDS
+    for sid in 1:CONFIG[].num_snapshot_shards
         path = shard_path(sid)
         isfile(path) || continue
 
@@ -401,7 +395,7 @@ Replay AOF commands into the context on startup (crash recovery).
 Parses each line back into a Command and dispatches through execute!.
 Returns the number of commands replayed.
 """
-function replay_aof!(ctx::RadishContext, db_lock::ShardedLock, aof_path::String=AOF_PATH)
+function replay_aof!(ctx::RadishContext, db_lock::ShardedLock, aof_path::String=aof_path(CONFIG[]))
     if !isfile(aof_path) || filesize(aof_path) == 0
         @info "No AOF to replay"
         return 0

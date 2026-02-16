@@ -32,7 +32,7 @@ Radish uses **both** — just like Redis. Snapshots provide the baseline, and AO
 
 ## Sharded RDB Snapshots
 
-Instead of writing a single monolithic snapshot file, Radish partitions the database into **256 shards** and writes each shard to its own file:
+Instead of writing a single monolithic snapshot file, Radish partitions the database into **N shards** (configurable via [`num_snapshot_shards`](configuration)) and writes each shard to its own file:
 
 ```
 persistence/snapshots/
@@ -45,14 +45,14 @@ persistence/snapshots/
 Each key is assigned to a shard using a hash function:
 
 ```julia
-snapshot_shard_id(key::String) = (hash(key) % NUM_SNAPSHOT_SHARDS) + 1
+snapshot_shard_id(key::String) = (hash(key) % CONFIG[].num_snapshot_shards) + 1
 ```
 
 ### Why Shard the Snapshots?
 
 When only a few keys change, there's no reason to rewrite the entire database. Sharded snapshots enable **incremental saves** — only the shard files containing dirty keys are touched.
 
-For example, if 10 keys change across 3 shards, Radish only rewrites those 3 shard files. The other 253 remain untouched. The savings depend entirely on how many shards are touched — the best case is a single dirty shard, which rewrites just 1 of 256 files. The worst case is when writes are spread across all 256 shards (e.g., a bulk load of uniformly distributed keys), which forces every shard file to be rewritten — equivalent to a full snapshot with a little extra overhead for managing more files instead of one.
+For example, if 10 keys change across 3 shards, Radish only rewrites those 3 shard files. The rest remain untouched. The savings depend entirely on how many shards are touched — the best case is a single dirty shard, which rewrites just 1 out of N files. The worst case is when writes are spread across all shards (e.g., a bulk load of uniformly distributed keys), which forces every shard file to be rewritten — equivalent to a full snapshot with a little extra overhead for managing more files instead of one. The number of shards is [configurable](configuration) (default: 256).
 
 ### Snapshot Format
 
@@ -143,11 +143,11 @@ After each successful snapshot sync, the AOF is truncated (emptied). This preven
 
 ## Background Syncer
 
-A background task runs every 5 seconds (configurable via `SYNC_INTERVAL`):
+A background task runs periodically (configurable via [`sync_interval_sec`](configuration)):
 
 ```mermaid
 graph TD
-    A["Syncer wakes up (every 5s)"] --> B{Has dirty changes?}
+    A["Syncer wakes up (every sync_interval_sec)"] --> B{Has dirty changes?}
     B -->|No| A
     B -->|Yes| C["Pop dirty sets atomically"]
     C --> D["Acquire read locks on affected shards"]

@@ -1,0 +1,48 @@
+# =============================================================================
+# Radish Configuration File
+# =============================================================================
+# This file contains all tunable parameters for the Radish in-memory database.
+# Modify these values to adapt Radish to your specific use-case.
+
+# -----------------------------------------------------------------------------
+# Network
+# -----------------------------------------------------------------------------
+network:
+  host: "127.0.0.1"        # Server bind address
+  port: 9000                # Server listen port
+
+# -----------------------------------------------------------------------------
+# Persistence
+# -----------------------------------------------------------------------------
+persistence:
+  dir: "persistence"        # Root directory for all persistence data
+  snapshots_subdir: "snapshots"  # Subdirectory for RDB shard files
+  aof_subdir: "aof"              # Subdirectory for append-only files
+  aof_filename: "radish.aof"     # Name of the AOF file
+  num_snapshot_shards: 256        # Number of snapshot shard files (must match concurrency.num_lock_shards)
+
+# -----------------------------------------------------------------------------
+# Background Tasks
+# -----------------------------------------------------------------------------
+background_tasks:
+  sync_interval_sec: 5      # Seconds between RDB snapshot syncs
+  cleaner_interval_sec: 0.1  # Seconds between TTL expiration cleanup runs
+
+# -----------------------------------------------------------------------------
+# Concurrency
+# -----------------------------------------------------------------------------
+concurrency:
+  num_lock_shards: 256      # Number of ShardedLock partitions (must match persistence.num_snapshot_shards)
+
+# -----------------------------------------------------------------------------
+# TTL Cleanup
+# -----------------------------------------------------------------------------
+ttl_cleanup:
+  sampling_threshold: 100000  # Check all keys below this count; sample above
+  sample_percentage: 0.10     # Fraction of keys to sample when above threshold
+
+# -----------------------------------------------------------------------------
+# Data Limits
+# -----------------------------------------------------------------------------
+data_limits:
+  list_display_limit: 50     # Max elements returned by L_GET (0 = unlimited)

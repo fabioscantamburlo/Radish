@@ -22,11 +22,12 @@ Radish deliberately keeps its dependency footprint small — most of the heavy l
 | **Logging** | stdlib | Structured `@info`, `@warn`, `@debug` logging throughout the server |
 | **JSON3** | external | Serialization of snapshot data to sharded `.rdb` files (one JSON object per key) |
 | **StatsBase** | external | `sample()` function used by the background TTL cleaner to randomly sample keys for expiration checks |
-| **ConcurrentUtilities** | external | Provides `ReadWriteLock` — the foundation of the [sharded locking](concurrency) system (256 independent RW locks) |
+| **ConcurrentUtilities** | external | Provides `ReadWriteLock` — the foundation of the [sharded locking](concurrency) system |
+| **YAML** | external | Parses the [`radish.yml`](configuration) configuration file at startup |
 | **JuliaFormatter** | dev only | Code formatting for development — not used at runtime |
 
 {: .note }
-> Only 3 external packages are used at runtime. Everything else — the data structures, the RESP protocol, the dispatcher, persistence — is built from scratch.
+> Only 4 external packages are used at runtime. Everything else — the data structures, the RESP protocol, the dispatcher, persistence — is built from scratch.
 
 
 ---
@@ -78,7 +79,8 @@ Eventually, Julia turned out to be an interesting choice for a project like this
 | [RESP Protocol](resp-protocol) | ✅ | Redis Serialization Protocol for wire communication |
 | [Persistence](persistence) | ✅ | Sharded RDB snapshots + AOF with crash recovery |
 | [Transactions](transactions) | ✅ | MULTI/EXEC/DISCARD with atomic execution |
-| [Sharded Locking](concurrency) | ✅ | 256 ReadWriteLocks for concurrent access |
+| [Configuration](configuration) | ✅ | YAML-based config for all tunable parameters |
+| [Sharded Locking](concurrency) | ✅ | Configurable ReadWriteLocks for concurrent access |
 | [TTL & Expiry](concurrency) | ✅ | Background cleaner with probabilistic sampling |
 | [Docker Support](docker) | ✅ | Full Docker Compose setup with health checks |
 | Key Management | ✅ | EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE, RENAME, FLUSHDB |
