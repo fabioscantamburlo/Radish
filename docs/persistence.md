@@ -8,6 +8,8 @@ nav_order: 5
 
 One of the core challenges of any in-memory database is **durability** — what happens when the server crashes or restarts? Radish implements a dual-strategy persistence model inspired by Redis: **RDB snapshots** for periodic full-state captures and **AOF (Append-Only File)** for real-time write logging.
 
+On top of that another idea is to avoid full writes everytime if you already know a lot of keys are the same. For doing that, Radish implements a **DirtyTracker** that tries rewrite only the keys that are changed.
+
 ---
 
 ## The Durability Problem
@@ -50,7 +52,7 @@ snapshot_shard_id(key::String) = (hash(key) % NUM_SNAPSHOT_SHARDS) + 1
 
 When only a few keys change, there's no reason to rewrite the entire database. Sharded snapshots enable **incremental saves** — only the shard files containing dirty keys are touched.
 
-For example, if 10 keys change across 3 shards, Radish only rewrites those 3 shard files. The other 253 remain untouched.
+For example, if 10 keys change across 3 shards, Radish only rewrites those 3 shard files. The other 253 remain untouched. The savings depend entirely on how many shards are touched — the best case is a single dirty shard, which rewrites just 1 of 256 files. The worst case is when writes are spread across all 256 shards (e.g., a bulk load of uniformly distributed keys), which forces every shard file to be rewritten — equivalent to a full snapshot with a little extra overhead for managing more files instead of one.
 
 ### Snapshot Format
 

@@ -1,12 +1,19 @@
 ---
 layout: default
 title: Dispatcher
-nav_order: 3
+nav_order: 4
 ---
 
 # The Dispatcher
 
-The dispatcher is the **central router** of Radish — it receives every command from every client and decides what to do with it. It handles command parsing, lock acquisition, palette lookup, type validation, transaction management, and error handling.
+The dispatcher is the **central router** of Radish — it receives every command from every client and decides what to do with it. It handles:
+
+- **Command parsing** — reading the incoming RESP input into a structured command
+- **Lock acquisition** — acquiring the right read or write locks for the keys involved
+- **Palette lookup** — finding the `(type_command, hypercommand)` pair for the given command
+- **Type validation** — ensuring the target key holds the expected data type
+- **Transaction management** — queuing commands during `MULTI`/`EXEC` blocks
+- **Error handling** — returning well-formed error responses on failure
 
 Think of it as the traffic controller between the [RESP protocol layer](resp-protocol) and the [hypercommand layer](architecture).
 
@@ -37,42 +44,7 @@ graph TD
 
 ## Palette Lookup
 
-The dispatcher checks four palettes in order:
-
-```julia
-# 1. No-key commands (PING, KLIST, DBSIZE, FLUSHDB, DUMP)
-NOKEY_PALETTE = Dict{String, Function}(...)
-
-# 2. String commands (S_GET, S_SET, S_INCR, ...)
-S_PALETTE = Dict{String, Tuple}(...)
-
-# 3. Linked list commands (L_ADD, L_POP, L_APPEND, ...)
-LL_PALETTE = Dict{String, Tuple}(...)
-
-# 4. Meta commands (EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE)
-META_PALETTE = Dict{String, Function}(...)
-```
-
-The `NOKEY_PALETTE` maps directly to functions (no key needed). The `S_PALETTE` and `LL_PALETTE` map to `(type_command, hypercommand)` tuples — the [delegation pattern](architecture). The `META_PALETTE` maps to functions that work on any key type.
-
-### Adding a New Command
-
-To add a command like `S_REVERSE`:
-
-1. Write the type command in `rstrings.jl`:
-   ```julia
-   function sreverse!(elem::RadishElement)
-       elem.value = reverse(elem.value)
-       return CommandSuccess(true)
-   end
-   ```
-
-2. Add it to the palette:
-   ```julia
-   "S_REVERSE" => (sreverse!, rmodify!)
-   ```
-
-That's it — the dispatcher, locking, RESP encoding, and type validation all work automatically.
+The dispatcher checks all four palettes (`NOKEY_PALETTE`, `S_PALETTE`, `LL_PALETTE`, `META_PALETTE`) to find the handler for an incoming command. See [Command Palettes](palettes) for the full reference.
 
 ---
 
@@ -115,7 +87,7 @@ end
 The same check applies for list commands (`:list`). This prevents operations like `S_INCR` on a list key — the error is returned immediately without calling the hypercommand.
 
 {: .note }
-> Redis returns `WRONGTYPE Operation against a key holding the wrong kind of value` — Radish follows the same pattern with a more descriptive message.
+> Redis returns `WRONGTYPE Operation against a key holding the wrong kind of value` — Radish follows the same pattern, including the key name and its actual type in the message.
 
 ---
 

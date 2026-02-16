@@ -161,4 +161,4 @@ See the [Persistence](persistence) page for details. The syncer runs every 5 sec
 | TTL cleanup | Lazy + sampling | Lazy + sampling (same approach) |
 | Background I/O | Forked child process (COW) | Async task with read locks |
 
-The multi-threaded approach makes Radish more complex but also makes it a richer learning subject — you get to see concurrency patterns that Redis's single-threaded design elegantly avoids.
+The multi-threaded approach makes Radish more complex but also makes it a richer learning subject — you get to see concurrency patterns that simply don't arise in a single-threaded model.

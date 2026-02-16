@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Data Contracts
-nav_order: 4
+nav_order: 5
 ---
 
 # Data Contracts
@@ -144,33 +144,51 @@ end
 
 ## The Complete Flow
 
-Here's how these structs interact during a command execution:
+Here's how these structs interact during a command execution: (I know this chart is a big hard to see, please zoom in, this is not a static image I promise you will see the details after zooming)
 
 ```mermaid
 sequenceDiagram
     participant Client
     participant RESP as RESP Layer
     participant Dispatcher
-    participant Hypercommand
-    participant TypeCommand
-    participant Context
+    participant Palette as Palette (S_PALETTE)
+    participant Hypercommand as Hypercommand (rget_or_expire!)
+    participant TypeCommand as Type Command (sget)
+    participant Context as RadishContext
 
-    Client->>RESP: "S_GET mykey\r\n"
+    Client->>RESP: Raw bytes — "S_GET mykey\r\n"
+    Note over RESP: Parses RESP protocol<br/>Builds Command struct
+
     RESP->>Dispatcher: Command("S_GET", "mykey", [])
-    
+    Note over Dispatcher: name = "S_GET"<br/>key  = "mykey"<br/>args = []
+
+    Dispatcher->>Palette: Lookup S_PALETTE["S_GET"]
+    Palette-->>Dispatcher: (sget, rget_or_expire!)
+    Note over Dispatcher: Acquires read lock<br/>on mykey's shard
+
     Dispatcher->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
-    
-    Hypercommand->>Context: Check key exists & TTL
-    alt Key valid
+
+    Hypercommand->>Context: haskey(ctx, "mykey") ?
+    Note over Hypercommand,Context: Also checks TTL:<br/>is tinit + ttl > now() ?
+
+    alt Key exists and TTL valid
         Hypercommand->>TypeCommand: sget(element)
-        TypeCommand-->>Hypercommand: CommandResult(success=true, value="hello")
+        Note over TypeCommand: element.value = "hello"<br/>element.datatype = :string
+
+        TypeCommand-->>Hypercommand: CommandResult(success=true, value="hello", error=nothing, element=nothing)
+
         Hypercommand-->>Dispatcher: ExecuteResult(SUCCESS, "hello", nothing)
-    else Key not found
+    else Key missing or expired
+        Note over Hypercommand: Deletes key if expired
         Hypercommand-->>Dispatcher: ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
     end
-    
-    Dispatcher->>RESP: ExecuteResult
-    RESP->>Client: "$5\r\nhello\r\n" or "$-1\r\n"
+
+    Note over Dispatcher: Releases read lock<br/>on mykey's shard
+
+    Dispatcher->>RESP: ExecuteResult(SUCCESS, "hello", nothing)
+    Note over RESP: status = SUCCESS<br/>→ encode as Bulk String
+
+    RESP->>Client: "$5\r\nhello\r\n"
 ```
 
 ---

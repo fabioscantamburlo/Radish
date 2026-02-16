@@ -98,47 +98,10 @@ Does everything make sense so far? I hope so...
 
 Now, here's the missing piece: how do hypercommands know which type command to call? The answer is they don't — it's actually the other way around. Commands are mapped to `(type_command, hypercommand)` pairs through something called **palettes**.
 
----
-
-## Command Palettes
-
-Each data type file, after implementing the type-specific operations, defines a **palette** — a dictionary mapping command names to `(type_command, hypercommand)` tuples:
-
-```julia
-# String Palette
-S_PALETTE = Dict{String, Tuple}(
-    "S_GET"     => (sget, rget_or_expire!),
-    "S_SET"     => (sadd, radd!),
-    "S_INCR"    => (sincr!, rmodify!),
-    "S_APPEND"  => (sappend!, rmodify!),
-    "S_LCS"     => (slcs, relement_to_element),
-    # ... more string commands
-)
-
-# Linked List Palette
-LL_PALETTE = Dict{String, Tuple}(
-    "L_ADD"     => (ladd!, radd!),
-    "L_PREPEND" => (lprepend!, radd_or_modify!),
-    "L_POP"     => (lpop!, rget_on_modify_or_expire!),
-    # ... more list commands
-)
-```
-
-This is the lookup table that the [dispatcher](dispatcher) uses to find the right pair. The dispatcher will be explained in detail later — for now, think of it as the "engine" that routes commands and operations.
-
-The beauty of this design is that **adding a new data type** requires only:
-
-1. Define the data structure (e.g., `HashTable`)
-2. Write type commands (e.g., `hset!`, `hget`)
-3. Create a palette mapping command names to `(type_command, hypercommand)` pairs
-4. Register the palette in the dispatcher
-
-The hypercommands don't change at all, unless you need to introduce a completely new type of operation.
-
-{: .note }
-> For instance: blocking operations are not implemented in Radish at the moment. If you want to add them, a new hypercommand would be needed.
+See [Command Palettes](palettes) for the full reference, in the next section.
 
 ---
+Following an example of how an invokation of a command works in details.
 
 ## Example: How `S_GET` Works
 
