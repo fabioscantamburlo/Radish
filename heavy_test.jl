@@ -48,9 +48,9 @@ end
 # Setup: Initial Data Population
 # ============================================================================
 
-function setup_worker(worker_id::Int, start_key::Int, end_key::Int, total_keys::Int)
+function setup_worker(worker_id::Int, start_key::Int, end_key::Int, total_keys::Int, host::String, port::Int)
     try
-        sock = connect("127.0.0.1", 9000)
+        sock = connect(host, port)
         read_resp(sock)  # drain welcome
 
         half = total_keys ÷ 2
@@ -93,7 +93,7 @@ function setup_worker(worker_id::Int, start_key::Int, end_key::Int, total_keys::
     end
 end
 
-function setup_initial_data(num_keys::Int, num_workers::Int)
+function setup_initial_data(num_keys::Int, num_workers::Int, host::String, port::Int)
     println("Setting up $num_keys initial keys with $num_workers workers...")
     println("  50% strings, 50% lists (1-20 items), 50% with TTL 60-3600s")
 
@@ -104,7 +104,7 @@ function setup_initial_data(num_keys::Int, num_workers::Int)
     for i in 1:num_workers
         start_key = (i - 1) * keys_per_worker + 1
         end_key = i == num_workers ? num_keys : i * keys_per_worker
-        push!(tasks, @async setup_worker(i, start_key, end_key, num_keys))
+        push!(tasks, @async setup_worker(i, start_key, end_key, num_keys, host, port))
     end
 
     for task in tasks
@@ -211,10 +211,10 @@ end
 # Client Worker
 # ============================================================================
 
-function client_worker(client_id::Int, num_ops::Int, total_keys::Int, run_forever::Bool)
+function client_worker(client_id::Int, num_ops::Int, total_keys::Int, run_forever::Bool, host::String, port::Int)
     try
         sleep(rand() * 2.0)  # stagger starts 0-2s
-        sock = connect("127.0.0.1", 9000)
+        sock = connect(host, port)
         read_resp(sock)  # drain welcome
 
         ops_count = 0
@@ -247,12 +247,14 @@ end
 # ============================================================================
 
 function run_heavy_test(; mode::String="test", num_clients::Int=10,
-                         ops_per_client::Int=10_000, initial_keys::Int=100_000)
+                         ops_per_client::Int=10_000, initial_keys::Int=100_000,
+                         host::String="127.0.0.1", port::Int=9000)
     setup_only = mode == "setup"
     run_forever = mode == "forever"
 
     println("=== Radish Heavy Test ===")
     println("  Mode:         $(setup_only ? "SETUP ONLY" : run_forever ? "CONTINUOUS" : "TIMED")")
+    println("  Server:       $host:$port")
     println("  Initial keys: $initial_keys")
     println("  Clients:      $num_clients")
     if !setup_only
@@ -265,7 +267,7 @@ function run_heavy_test(; mode::String="test", num_clients::Int=10,
     sleep(1)
 
     # Phase 1: Setup
-    setup_initial_data(initial_keys, num_clients)
+    setup_initial_data(initial_keys, num_clients, host, port)
 
     if setup_only
         println("Setup complete. Exiting.")
@@ -279,7 +281,7 @@ function run_heavy_test(; mode::String="test", num_clients::Int=10,
     end
 
     start_time = time()
-    tasks = [@async client_worker(i, ops_per_client, initial_keys, run_forever)
+    tasks = [@async client_worker(i, ops_per_client, initial_keys, run_forever, host, port)
              for i in 1:num_clients]
 
     try
@@ -311,7 +313,7 @@ end
 
 function show_usage()
     println("""
-    Usage: julia heavy_test.jl [mode] [num_clients] [ops_per_client] [initial_keys]
+    Usage: julia heavy_test.jl [mode] [num_clients] [ops_per_client] [initial_keys] [host] [port]
 
     Modes:
       setup    - Populate initial data only
@@ -322,11 +324,14 @@ function show_usage()
       num_clients    = 10
       ops_per_client = 10000
       initial_keys   = 100000
+      host           = 127.0.0.1
+      port           = 9000
 
     Examples:
       julia heavy_test.jl setup 10 0 50000
       julia heavy_test.jl test 25 10000 100000
       julia heavy_test.jl forever 50 0 200000
+      julia heavy_test.jl test 10 10000 100000 192.168.1.50 9000
     """)
 end
 
@@ -339,6 +344,8 @@ mode = length(ARGS) >= 1 ? ARGS[1] : "test"
 num_clients = length(ARGS) >= 2 ? parse(Int, ARGS[2]) : 10
 ops_per_client = length(ARGS) >= 3 ? parse(Int, ARGS[3]) : 10_000
 initial_keys = length(ARGS) >= 4 ? parse(Int, ARGS[4]) : 100_000
+host = length(ARGS) >= 5 ? ARGS[5] : "127.0.0.1"
+port = length(ARGS) >= 6 ? parse(Int, ARGS[6]) : 9000
 
 if !(mode in ["setup", "test", "forever"])
     println("Invalid mode: $mode")
@@ -346,4 +353,4 @@ if !(mode in ["setup", "test", "forever"])
     exit(1)
 end
 
-run_heavy_test(; mode, num_clients, ops_per_client, initial_keys)
+run_heavy_test(; mode, num_clients, ops_per_client, initial_keys, host, port)
