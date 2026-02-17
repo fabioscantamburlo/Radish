@@ -33,7 +33,7 @@ Radish deliberately keeps its dependency footprint small — most of the heavy l
 ---
 ## Why Build an In-Memory Database?
 
-At the beginning of this journey I was fascinated by Redis and its story, I was eager to revisit some computer science concepts I never deeply studied and I thought that building a Redis inspired database could satisfy my curiosity.
+At the beginning of this journey I was fascinated by Redis and its story (mainly driven by the author!); I was eager to revisit some computer science concepts I never deeply studied and I thought that building a Redis inspired database could satisfy my curiosity.
 
 In particular, I wanted to deeply understand:
 
@@ -41,12 +41,12 @@ In particular, I wanted to deeply understand:
 - **Client-server architecture** — TCP sockets, wire protocols, request-response cycles
 - **Persistence strategies** — trading off durability vs. performance (RDB snapshots, AOF logs)
 - **Concurrency** — handling multiple clients safely without corrupting shared state
-- **Systems thinking** — how all these pieces fit together into a coherent system
+- **Systems thinking** — how all these pieces fit together into a coherent system (the bigger picture problem!)
 
 But more importantly **why** having such data structures available in a shared memory database is a powerful tool for software development.
 
 Radish is in the first place a:
-- **learning tool** — a way to explore these concepts by building them from scratch, challenging real world problems and use cases.
+- **learning tool** — a way to explore these concepts by building them from scratch, challenging real-world problems and use cases.
 - **fun tool** — a way to have fun implementing ideas, and systems. Combine them to reach a sort of maturity of the platform and try to use them for other projects.
 
 {: .note }
@@ -64,7 +64,7 @@ With today's LLMs it's easy to pick up a new language and write something useful
 
 Eventually, Julia turned out to be an interesting choice for a project like this because it has:
 
-1. **High-level expressiveness** — Julia's multiple dispatch system makes the [delegation pattern](architecture) feel natural (This was not known by me in the first place, so it was luck I guess)
+1. **High-level expressiveness** — Julia's multiple dispatch system makes the [delegation pattern](architecture) feel natural (TI didn't know this beforehand, so I got lucky)
 2. **Performance** — Julia compiles to native code, making it viable for a server handling many concurrent connections
 3. **Async I/O** — Julia's `@async` and task model work well for background processes, a lot of extra functionalities were developed in this way. Just to name a few: TTL cleanup and snapshot syncing.
 
@@ -85,12 +85,12 @@ Eventually, Julia turned out to be an interesting choice for a project like this
 | [Docker Support](docker) | ✅ | Full Docker Compose setup with health checks |
 | Key Management | ✅ | EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE, RENAME, FLUSHDB |
 
-More data-structures are coming at some point, I had the feeling that resolving other issues was more valuable than adding overstudied data-types. Still I think that implementing those from scratch is quite fun.
+More data structures are coming at some point, I had the feeling that resolving other issues was more valuable than adding overstudied data-types. Still I think that implementing those from scratch is quite fun.
 
 
 ---
 
-## A quick look to the Architecture
+## A quick look at the Architecture
 
 At its core, Radish stores everything in a single dictionary:
 
@@ -128,4 +128,4 @@ Read on to explore each component in detail →
 ---
 
 {: .note }
-> This documentation is itself a learning resource, or at least, it tries to be a good read. Each page wants to explain not just *what* Radish does, but *why* it was designed that way, *which* compromises were taken. Hopefully the reader can take something home from this guide (that would be very fulfilling for me)
+> This documentation is itself a learning resource, or at least, it tries to be a good read. Each page aims to explain not just *what* Radish does, but *why* it was designed that way, *which* compromises were taken. Hopefully the reader can take something home from this guide (that would be very fulfilling for me)

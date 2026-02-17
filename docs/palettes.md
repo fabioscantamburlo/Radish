@@ -31,9 +31,9 @@ The palette defines every command that a specific data type supports, along with
 
 ---
 
-# Command Palettes in details
+# Command Palettes in detail
 
-Radish has several **palettes**, one for each datatype and on top of that, Radish implements two special **palettes** used for general operations, or for operations that are not type-specific — they can be triggered on all types.
+Radish has several **palettes**, one for each datatype and on top of that, plus two special palettes for operations that are type-agnostic.
 
 The [dispatcher](dispatcher) checks all four palettes to route any incoming command:
 

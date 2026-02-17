@@ -93,7 +93,7 @@ If the file is missing, all parameters fall back to sensible defaults — Radish
 
 ## Why Julia?
 
-Honestly a random choice — Julia was a language I always heard about but never studied. It turned out to be a good fit: high-level expressiveness via multiple dispatch, native-code performance, and a solid async task model for background processes like TTL cleanup and snapshot syncing.
+Honestly a random choice — Julia was a language I always heard about but never studied. It turned out to be a good fit: high-level expressiveness via multiple dispatch and a solid async task model for background processes like TTL cleanup and snapshot syncing.
 
 ---
 
@@ -130,6 +130,19 @@ Radish runs fully in Docker. All commands go through `make`:
 | `make clean` | Remove containers, networks and volumes (wipes persisted data) |
 | `make ps` | Show status of all Radish containers |
 | `make help` | Show all available commands |
+
+---
+
+
+## Limitations
+
+- Radish is slow, very slow compared to Redis. Not that my idea was to compete with Redis nor to catch it. I am completely aware that Julia may not be the best language to do in-memory databases but, more realistically, my optimisation is not nearly the best possible.
+
+- Radish has limitations in terms of scalability. It's not designed to be scaled out of a single machine. 
+
+- Radish does not support bulk insert commands, for instance it is not possible to insert multiple *strings* with a single command, nor to create a *list* of n elements with a single command. This may be resolved in the future.
+
+- Many more limitations exist — if you spot one, please open an issue. It's always fun to receive an external point of view.
 
 ---
 

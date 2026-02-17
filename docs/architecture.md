@@ -101,7 +101,7 @@ Now, here's the missing piece: how do hypercommands know which type command to c
 See [Command Palettes](palettes) for the full reference, in the next section.
 
 ---
-Following an example of how an invokation of a command works in details.
+Following an example of how an invocation of a command works in detail.
 
 ## Example: How `S_GET` Works
 

@@ -8,7 +8,7 @@ nav_order: 5
 
 One of the core challenges of any in-memory database is **durability** — what happens when the server crashes or restarts? Radish implements a dual-strategy persistence model inspired by Redis: **RDB snapshots** for periodic full-state captures and **AOF (Append-Only File)** for real-time write logging.
 
-On top of that another idea is to avoid full writes everytime if you already know a lot of keys are the same. For doing that, Radish implements a **DirtyTracker** that tries rewrite only the keys that are changed.
+On top of that another idea is to avoid full writes every time if you already know a lot of keys are the same. For doing that, Radish implements a **DirtyTracker** that tries to rewrite only the keys that are changed.
 
 ---
 

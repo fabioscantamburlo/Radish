@@ -6,7 +6,8 @@ nav_order: 9
 
 # RESP Protocol
 
-Radish uses the **RESP (Redis Serialization Protocol)** for client-server communication — the same wire protocol that real Redis uses. This means you could, in theory, connect a Redis client to Radish (with some command name adjustments).
+
+Radish uses the **RESP (Redis Serialization Protocol)** for client-server communication. This follows a custom implementation, from scratch. (It could not be the best implementation of the RESP protocol out there).
 
 ---
 

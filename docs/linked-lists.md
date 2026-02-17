@@ -6,11 +6,14 @@ nav_order: 6
 
 # Linked Lists
 
-Radish implements a **custom doubly-linked list** rather than using Julia's built-in `Vector`. This is a deliberate design choice with important performance implications.
+Radish implements a **custom doubly-linked list** rather than using Julia's built-in `Vector`. This is a deliberate design choice.
+The goal was to learn how to build custom structures rather than using built-in types. In addition to that, the goal was to obtain a classic double-linked list implementation with fast performances for head/tail operations rather than random access.
 
 ---
 
 ## Why Not Use Arrays?
+
+Simple comparison between `Vector` type in Julia and a `Doubly-Linked List` type.
 
 | Operation | Array (`Vector`) | Doubly-Linked List |
 |---|---|---|

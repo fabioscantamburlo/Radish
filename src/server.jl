@@ -243,9 +243,7 @@ function start_server(host::String=CONFIG[].host, port::Int=CONFIG[].port)
     else
         println("Starting with empty database")
         # Seed test data only if no snapshot
-        radd!(ctx, "user1", sadd, "ciao"; tracker=tracker)
-        radd!(ctx, "user2", sadd, "ciao2"; tracker=tracker)
-        radd!(ctx, "user3", sadd, "cioa3"; tracker=tracker)
+        radd!(ctx, "author", sadd, "https://github.com/fabioscantamburlo"; tracker=tracker) # EASTER EGG!
     end
 
     # Replay AOF if exists (crash recovery)

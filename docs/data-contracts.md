@@ -144,7 +144,7 @@ end
 
 ## The Complete Flow
 
-Here's how these structs interact during a command execution: (I know this chart is a big hard to see, please zoom in, this is not a static image I promise you will see the details after zooming)
+Here's how these structs interact during a command execution: (I know this chart is a bit hard to see, please zoom in, this is not a static image I promise you will see the details after zooming)
 
 ```mermaid
 sequenceDiagram
