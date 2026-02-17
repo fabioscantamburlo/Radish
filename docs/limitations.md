@@ -66,6 +66,21 @@ There is no password protection or authentication mechanism. Any client that can
 
 ---
 
+## CLI not polished
+
+The Radish-CLI needs a lot of improvements, to name a few:
+- It does not suggest commands
+- It does not support quick actions like: arrow up for command history
+
+---
+
+
+## No clients available
+
+The only way to connect with Radish at the moment, is to use Radis-CLI. I have an idea of implementing a python client but it's not yet in alpha stage.
+
+---
+
 ## No Pub/Sub
 
 Redis's publish/subscribe messaging pattern is not implemented. There are no `SUBSCRIBE`, `PUBLISH`, or `PSUBSCRIBE` commands. Clients can only interact through direct command-response cycles.
