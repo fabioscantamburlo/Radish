@@ -27,6 +27,11 @@ function read_resp_command(sock::TCPSocket)
         
         len = parse(Int, len_line[2:end])
         
+        # Guard against excessively large payloads (512 MB limit, same as Redis)
+        if len < 0 || len > 512 * 1024 * 1024
+            error("Bulk string length out of bounds: $len")
+        end
+        
         # Read actual data
         data = String(read(sock, len))
         read(sock, 2)  # consume \r\n

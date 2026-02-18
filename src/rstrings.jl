@@ -33,7 +33,7 @@ function sadd(value::AbstractString)
     if isa(value_n, Nothing)
         value_n = value
     end
-    elem = RadishElement(value, nothing, now(), :string)
+    elem = RadishElement(value_n, nothing, now(), :string)
     return CommandCreate(elem)
 end
 
@@ -130,7 +130,7 @@ end
 
 """Function to append RadishElement StringType with a given value of stringtype"""
 function sappend!(elem::RadishElement, value::AbstractString)
-    elem.value = elem.value * value
+    elem.value = string(elem.value) * value
     return CommandSuccess(true)
 end
 

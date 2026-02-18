@@ -347,11 +347,13 @@ function rttl(context::Dict{String, RadishElement}, key::AbstractString;
     return ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
 end
 
-"""Return the total number of keys in the database.
+"""Return the total number of keys in the database (excludes expired keys).
 """
 function rdbsize(context::Dict{String, RadishElement};
                  tracker::Union{DirtyTracker, Nothing}=nothing)
-    return ExecuteResult(SUCCESS, length(context), nothing)
+    count = sum(1 for (_, elem) in context
+                if elem.ttl === nothing || now() <= elem.tinit + Second(elem.ttl))
+    return ExecuteResult(SUCCESS, count, nothing)
 end
 
 """Remove TTL from a key (make it persistent).

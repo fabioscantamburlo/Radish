@@ -118,7 +118,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             acquire_read!(db_lock, cmd_key)
         end
     elseif is_multi && cmd_key !== nothing && !isempty(cmd_args)
-        # Multi-key: lock both keys
+        # Multi-key: lock both keys (includes RENAME)
         key_list = [cmd_key, cmd_args[1]]
         if is_read
             acquire_read!(db_lock, key_list)
@@ -133,7 +133,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             acquire_write!(db_lock, cmd_key)
         end
     else
-        Int[]
+        Int[] # no lock needed
     end
 
     try

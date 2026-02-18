@@ -416,10 +416,18 @@ function replay_aof!(ctx::RadishContext, db_lock::ShardedLock, aof_path::String=
 
             cmd_name = uppercase(parts[1])
 
-            # Parse into Command (same heuristic as read_resp_command in resp.jl)
+            # Commands that take a key as second argument
+            const KEY_COMMANDS = union(
+                Set(["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME"]),
+                Set(k for k in keys(S_PALETTE)),
+                Set(k for k in keys(LL_PALETTE)),
+                Set(k for k in keys(META_PALETTE))
+            )
+
+            # Parse into Command
             if length(parts) == 1
                 cmd = Command(cmd_name, nothing, String[])
-            elseif startswith(cmd_name, "S_") || startswith(cmd_name, "L_")
+            elseif startswith(cmd_name, "S_") || startswith(cmd_name, "L_") || cmd_name in KEY_COMMANDS
                 key = parts[2]
                 args = length(parts) > 2 ? String.(parts[3:end]) : String[]
                 cmd = Command(cmd_name, key, args)
