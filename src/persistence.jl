@@ -403,6 +403,12 @@ function replay_aof!(ctx::RadishContext, db_lock::ShardedLock, aof_path::String=
 
     count = 0
     session = ClientSession()
+    KEY_COMMANDS = union(
+        Set(["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME"]),
+        Set(keys(S_PALETTE)),
+        Set(keys(LL_PALETTE)),
+        Set(keys(META_PALETTE))
+    )
 
     for line in eachline(aof_path)
         line = strip(line)
@@ -415,14 +421,6 @@ function replay_aof!(ctx::RadishContext, db_lock::ShardedLock, aof_path::String=
             end
 
             cmd_name = uppercase(parts[1])
-
-            # Commands that take a key as second argument
-            const KEY_COMMANDS = union(
-                Set(["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME"]),
-                Set(k for k in keys(S_PALETTE)),
-                Set(k for k in keys(LL_PALETTE)),
-                Set(k for k in keys(META_PALETTE))
-            )
 
             # Parse into Command
             if length(parts) == 1

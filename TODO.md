@@ -61,6 +61,11 @@
 
 ## 🔴 HIGH PRIORITY - Next Sprint
 
+
+## Dispatcher work
+
+- [ ] Dispatcher refactor (`resolve_locks` / `route_command`), the idea is to decompose the execute function into smaller, dedicated parts. There is a lot of hardcoding if-else and conditions in general that may end up in very complex situations adding other commands. This has to be taken seriously now. 
+
 ### Unit Tests
 - [ ] Set up test infrastructure (`test/` directory, `runtests.jl`)
 - [ ] **String operations** — S_SET, S_GET, S_INCR, S_INCR_BY, S_APPEND, S_LEN, S_GETRANGE, S_LCS, S_COMPLEN, S_LPAD, S_RPAD, S_GINCR, S_GINCR_BY
