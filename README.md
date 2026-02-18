@@ -154,67 +154,11 @@ Full documentation is available at the project's GitHub Pages site, covering eac
 
 ## TODO
 
-### 🔴 High Priority
+🔴 **High priority** — unit tests, integration/Docker tests
 
-**Unit Tests**
-- [ ] Set up test infrastructure (`test/` directory, `runtests.jl`)
-- [ ] String operations — S_SET, S_GET, S_INCR, S_INCR_BY, S_APPEND, S_LEN, S_GETRANGE, S_LCS, S_COMPLEN, S_LPAD, S_RPAD, S_GINCR, S_GINCR_BY
-- [ ] Linked list operations — L_ADD, L_GET, L_LEN, L_PREPEND, L_APPEND, L_TRIMR, L_TRIML, L_RANGE, L_MOVE, L_POP, L_DEQUEUE
-- [ ] Key management — EXISTS, DEL, TYPE, TTL, DBSIZE, PERSIST, EXPIRE, FLUSHDB, RENAME
-- [ ] TTL / expiration — creation with TTL, expiration behavior, PERSIST removes TTL, EXPIRE sets TTL, edge cases
-- [ ] Transactions — MULTI/EXEC/DISCARD, atomic execution, nested MULTI handling
-- [ ] Dispatcher — palette lookup, type validation (WRONGTYPE), unknown commands, read vs write lock selection
-- [ ] Persistence — snapshot save/load round-trip, AOF append/replay, dirty tracker, shard distribution
-- [ ] Configuration — load from YAML, missing file fallback, default values
-- [ ] Concurrency — ShardedLock shard_id hashing, read/write lock acquisition, ordered multi-key locking
-- [ ] Edge cases — empty strings, very long strings, empty lists, type mismatches, concurrent operations on same keys
+🟡 **Medium priority** — dispatcher refactor (`resolve_locks` / `route_command`), `INFO` command
 
-**Heavy / Integration Tests (Docker)**
-- [ ] Create `test/heavytests.jl` — stress tests not suitable for unit test runs
-- [ ] Large dataset test — insert 100k+ keys, verify persistence round-trip
-- [ ] Large list test — lists with 100k+ elements, pop/dequeue all
-- [ ] Concurrent client test — multiple clients writing/reading simultaneously
-- [ ] Crash recovery test — kill server mid-operation, restart, verify data integrity
-- [ ] TTL bulk expiration test — insert many keys with TTL, verify cleaner reclaims them
-- [ ] Transaction contention test — concurrent transactions on overlapping keys
-- [ ] Add `make test` and `make heavytest` targets
+🟢 **Low priority** — hash maps, sets, sorted sets, Python client, observability, performance
 
----
-
-### 🟡 Medium Priority
-
-**Dispatcher Refactor**
-- [ ] Extract `resolve_locks(cmd) → (shard_ids, is_write)` to eliminate the acquire/release duplication
-- [ ] Extract `route_command(ctx, cmd; tracker) → ExecuteResult` as pure routing with no lock logic
-- [ ] `execute!` becomes: resolve → acquire → route → release (in `finally`)
-- [ ] This removes the current risk of acquire/release mismatch when adding new commands
-
-**Server Commands**
-- [ ] `INFO` - Server statistics
-
----
-
-### 🟢 Low Priority
-
-**Enhanced Data Structures**
-- [ ] Hash Maps (H_SET, H_GET, H_GETALL, H_DEL, H_EXISTS, H_LEN, H_KEYS, H_VALS, H_INCRBY)
-- [ ] Sets (S_ADD, S_REM, S_MEMBERS, S_ISMEMBER, S_CARD, S_INTER, S_UNION, S_DIFF)
-- [ ] Sorted Sets (Z_ADD, Z_RANGE, Z_RANK, Z_SCORE, Z_REM)
-- [ ] `L_CONCAT` — non-mutating list concatenation
-
-**Python Client**
-- [ ] RESP encoder/decoder
-- [ ] Connection management
-- [ ] All string and list commands
-- [ ] Transaction support
-
-**Observability**
-- [ ] Metrics (commands processed, clients, memory)
-- [ ] Prometheus endpoint
-- [ ] Structured JSON logging
-- [ ] Slow query logging (>100ms)
-
-**Performance**
-- [ ] Connection pooling
-- [ ] Batch command processing
+See [`TODO.md`](TODO.md) for the full detailed tracker.
 
