@@ -26,6 +26,17 @@ server-stop:    ## Stop the server
 client:         ## Attach an interactive client to the running server
 	$(DC) --profile client run --rm radish-client
 
+# ─── Simulator ────────────────────────────────────────────────────────────────
+
+simulator:      ## Run the workload simulator (load + run) against the server
+	$(DC) --profile simulator run --rm radish-simulator
+
+simload:        ## Run simulator in load-only mode
+	$(DC) --profile simulator run --rm radish-simulator julia --project=. workload_simulator.jl load --host radish-server --port 9000
+
+simrun:         ## Run simulator in run-only mode
+	$(DC) --profile simulator run --rm radish-simulator julia --project=. workload_simulator.jl run --host radish-server --port 9000
+
 # ─── Docs ─────────────────────────────────────────────────────────────────────
 
 docs-build:     ## Build the docs Docker image
@@ -46,10 +57,10 @@ docs-stop:      ## Stop the docs server
 # ─── Teardown ─────────────────────────────────────────────────────────────────
 
 down:           ## Stop and remove all running containers
-	$(DC) --profile client --profile docs down
+	$(DC) --profile client --profile docs --profile simulator down
 
 clean:          ## Remove containers, networks and volumes (wipes persisted data!)
-	$(DC) --profile client --profile docs down -v
+	$(DC) --profile client --profile docs --profile simulator down -v
 
 # ─── Utilities ────────────────────────────────────────────────────────────────
 
@@ -64,5 +75,6 @@ help:           ## Show this help message
 		| awk 'BEGIN {FS = ":.*##"}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
 .PHONY: build rebuild server server-logs server-stop client \
+        simulator simload simrun \
         docs-build docs docs-bg docs-logs docs-stop \
         down clean ps logs help

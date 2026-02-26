@@ -31,6 +31,17 @@ services:
     profiles:
       - client
 
+  radish-simulator:
+    image: radish
+    command: julia --project=. workload_simulator.jl loadrun --host radish-server --port 9000
+    depends_on:
+      radish-server:
+        condition: service_healthy
+    networks:
+      - radish-net
+    profiles:
+      - simulator
+
   radish-docs:
     build:
       context: ./docs

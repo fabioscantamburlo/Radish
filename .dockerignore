@@ -20,5 +20,4 @@ artifacts/
 # Test and benchmark files
 test_*.jl
 bench.jl
-heavy_test.jl
 behavioural_tester.jl
