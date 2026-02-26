@@ -62,7 +62,7 @@ This can be partially worked around using [transactions](transactions) (MULTI/EX
 
 ## No Authentication
 
-There is no password protection or authentication mechanism. Any client that can reach the TCP port can execute any command, including `FLUSHDB`. This is fine for local development but means Radish should never be exposed on a public network.
+There is no password protection or authentication mechanism. Any client that can reach the TCP port can execute any command, including `FLUSHDB`. This is fine for local development but means Radish should never be exposed on a public network, or better used as a **PRODUCTION TOOL**.
 
 ---
 
@@ -71,6 +71,7 @@ There is no password protection or authentication mechanism. Any client that can
 The Radish-CLI needs a lot of improvements, to name a few:
 - It does not suggest commands
 - It does not support quick actions like: arrow up for command history
+- It does not clear automatically
 
 ---
 
@@ -139,7 +140,7 @@ When the server starts with an empty database (no snapshots to load), it inserts
 
 The `num_lock_shards` and `num_snapshot_shards` configuration values **must be equal**. Both the sharded lock and the snapshot system use the same hash function to partition keys. If these values don't match, incremental snapshot saves will target the wrong shard files. See the [Configuration](configuration#important-constraints) page for details.
 
-This may actually be corrected in the future.
+This may actually be corrected in the future, having two different shard functions. 
 
 ---
 
