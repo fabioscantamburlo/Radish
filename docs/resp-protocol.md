@@ -6,6 +6,8 @@ nav_order: 9
 
 # RESP Protocol
 
+<span class="label label-purple">Heavily AI Assisted</span>
+
 
 Radish uses the **RESP (Redis Serialization Protocol)** for client-server communication. This follows a custom implementation, from scratch. (It could not be the best implementation of the RESP protocol out there).
 

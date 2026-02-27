@@ -120,7 +120,7 @@
   },"17": {
     "doc": "Concurrency",
     "title": "Comparing with Redis",
-    "content": "| Aspect | Redis | Radish | . | Threading | Single-threaded | Multi-threaded | . | Synchronization | Not needed (single thread) | Sharded ReadWriteLocks | . | Deadlock prevention | N/A | Sorted lock acquisition | . | Global operations | Instant (no contention) | Acquire all 256 locks | . | TTL cleanup | Lazy + sampling | Lazy + sampling (same approach) | . | Background I/O | Forked child process (COW) | Async task with read locks | . The multi-threaded approach makes Radish more complex but also makes it a richer learning subject — you get to see concurrency patterns that simply don’t arise in a single-threaded model. ",
+    "content": "| Aspect | Redis | Radish | . | Threading | Single-threaded | Multi-threaded | . | Synchronization | Not needed (single thread) | Sharded ReadWriteLocks | . | Deadlock prevention | N/A | Sorted lock acquisition | . | Global operations | Instant (no contention) | Acquire all 256 locks | . | TTL cleanup | Lazy + sampling | Lazy + sampling (same approach) | . | Background I/O | Forked child process (COW) | Async task with read locks | . The multi-threaded approach makes some challenges for Radish that Redis doesn’t have to deal with, such as deadlocks and race conditions. The author decided to use a multi-threaded approach to have fun trying to learn concurrencies problems on a single machine. ",
     "url": "/Radish/concurrency.html#comparing-with-redis",
     
     "relUrl": "/concurrency.html#comparing-with-redis"
@@ -400,7 +400,7 @@
   },"57": {
     "doc": "Docker",
     "title": "Docker &amp; Deployment",
-    "content": "Radish can run entirely in Docker — no Julia installation needed. This makes it easy to demo, test, and deploy. ",
+    "content": "Heavily AI Assisted . Radish can run entirely in Docker — no Julia installation needed. This makes it easy to demo, test, and deploy. ",
     "url": "/Radish/docker.html#docker--deployment",
     
     "relUrl": "/docker.html#docker--deployment"
@@ -932,7 +932,7 @@
   },"133": {
     "doc": "RESP Protocol",
     "title": "RESP Protocol",
-    "content": "Radish uses the RESP (Redis Serialization Protocol) for client-server communication. This follows a custom implementation, from scratch. (It could not be the best implementation of the RESP protocol out there). ",
+    "content": "Heavily AI Assisted . Radish uses the RESP (Redis Serialization Protocol) for client-server communication. This follows a custom implementation, from scratch. (It could not be the best implementation of the RESP protocol out there). ",
     "url": "/Radish/resp-protocol.html",
     
     "relUrl": "/resp-protocol.html"
@@ -988,7 +988,7 @@
   },"141": {
     "doc": "Server & Client",
     "title": "Server &amp; Client",
-    "content": "Radish follows a classic TCP client-server architecture. The server listens for connections on a configurable host and port, spawning a new async task for each client. The client provides an interactive REPL for sending commands and displaying responses. ",
+    "content": "Heavily AI Assisted . Radish follows a classic TCP client-server architecture. The server listens for connections on a configurable host and port, spawning a new async task for each client. The client provides an interactive REPL for sending commands and displaying responses. ",
     "url": "/Radish/server-client.html#server--client",
     
     "relUrl": "/server-client.html#server--client"

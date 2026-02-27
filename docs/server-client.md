@@ -6,6 +6,8 @@ nav_order: 11
 
 # Server & Client
 
+<span class="label label-purple">Heavily AI Assisted</span>
+
 Radish follows a classic **TCP client-server architecture**. The server listens for connections on a configurable host and port, spawning a new async task for each client. The client provides an interactive REPL for sending commands and displaying responses.
 
 ---

@@ -6,6 +6,8 @@ nav_order: 12
 
 # Docker & Deployment
 
+<span class="label label-purple">Heavily AI Assisted</span>
+
 Radish can run entirely in Docker — no Julia installation needed. This makes it easy to demo, test, and deploy.
 
 ---
