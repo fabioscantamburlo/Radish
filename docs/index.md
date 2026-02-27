@@ -9,6 +9,12 @@ permalink: /
 
 ![Radish Logo](assets/radish_image.jpeg)
 
+### Disclaimer
+Some of the content in this project including documentation, code, and design is AI-assisted (some parts more than others, which are clearly marked with a <span class="label label-purple">Heavily AI Assisted</span> badge).
+The core philosophy here is that leveraging AI is a valid and powerful way to learn, provided the goal remains to understand the underlying concepts and grow in knowledge. Furthermore, this project also served as a personal experiment to explore the current capabilities and limits of AI-assisted development.
+
+### Let's get started!!!!
+
 **Radish** is a didactical in-memory database inspired by [Redis](https://redis.io), built entirely in [Julia](https://julialang.org) with minor dependencies. It started as a learning exercise to understand how key-value stores work under the hood — and grew into an almost fully functional server with persistence, transactions, concurrent access, and a wire protocol.
 
 ### Dependencies
