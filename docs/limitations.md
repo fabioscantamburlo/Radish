@@ -78,7 +78,7 @@ The Radish-CLI needs a lot of improvements, to name a few:
 
 ## No clients available
 
-The only way to connect with Radish at the moment, is to use Radis-CLI. I have an idea of implementing a python client but it's not yet in alpha stage.
+The only way to connect to Radish at the moment, is to use Radish-CLI. I have an idea of implementing a python client but it's not yet in alpha stage.
 
 ---
 
