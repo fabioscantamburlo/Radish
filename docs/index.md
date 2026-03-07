@@ -70,7 +70,7 @@ With today's LLMs it's easy to pick up a new language and write something useful
 
 Eventually, Julia turned out to be an interesting choice for a project like this because it has:
 
-1. **High-level expressiveness** — Julia's multiple dispatch system makes the [delegation pattern](architecture) feel natural (TI didn't know this beforehand, so I got lucky)
+1. **High-level expressiveness** — Julia's multiple dispatch system makes the [delegation pattern](architecture) feel natural (I didn't know this beforehand, so I got lucky)
 2. **Performance** — Julia compiles to native code, making it viable for a server handling many concurrent connections
 3. **Async I/O** — Julia's `@async` and task model work well for background processes, a lot of extra functionalities were developed in this way. Just to name a few: TTL cleanup and snapshot syncing.
 

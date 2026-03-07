@@ -32,3 +32,9 @@ persistence/
 radish.snapshot
 radish.snapshot.tmp
 radish.aof
+
+# Claude Code local config
+.claude/
+
+# Jekyll build output
+docs/_site/
