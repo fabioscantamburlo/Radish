@@ -6,7 +6,7 @@
 
 Radish is both a **learning tool** and a **fun tool** — a way to explore in-memory database concepts and have fun implementing them.
 
-See the full documentation here: ![Radish-Documentation](https://fabioscantamburlo.github.io/Radish/)
+See the full documentation here: [Radish Documentation](https://fabioscantamburlo.github.io/Radish/)
 
 ---
 
