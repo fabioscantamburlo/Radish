@@ -33,7 +33,7 @@ function show_help()
       TTL <key>               - Get remaining TTL in seconds (-1=no TTL, nil=not found)
       PERSIST <key>           - Remove TTL from key (returns 1 or 0)
       EXPIRE <key> <sec>      - Set TTL on existing key (returns 1 or nil)
-      RENAME <old> <new>      - Rename a key atomically (overwrites new if exists)
+      RENAME <old> <new>       - Rename a key atomically (overwrites new if exists)
     
     Server Commands:
       FLUSHDB                 - Delete all keys from database

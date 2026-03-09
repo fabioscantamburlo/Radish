@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Command Palettes
-nav_order: 3
+nav_order: 5
 ---
 
 # Command Palettes introduction

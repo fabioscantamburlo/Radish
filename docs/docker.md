@@ -1,7 +1,7 @@
 ---
 layout: default
 title: Docker
-nav_order: 12
+nav_order: 14
 ---
 
 # Docker & Deployment
@@ -136,19 +136,56 @@ Manifest.toml
 
 ## Common Operations
 
-| Action | Command |
-|---|---|
-| Build the image | `docker compose build` |
-| Start server (foreground) | `docker compose up` |
-| Start server (background) | `docker compose up -d` |
-| Connect a client | `docker compose run --rm radish-client` |
-| View server logs | `docker compose logs -f radish-server` |
-| Run workload simulator (load + run) | `make simulator` |
-| Run simulator load only | `make simload` |
-| Run simulator run only | `make simrun` |
-| Stop everything | `docker compose down` |
-| Stop and wipe data | `docker compose down -v` |
-| Rebuild after code changes | `docker compose build --no-cache` |
+All day-to-day operations are wrapped in `make` targets. Run `make help` to see the full list at any time.
+
+**Build**
+
+| Command | Description |
+|---------|-------------|
+| `make build` | Build the Docker image |
+| `make rebuild` | Force rebuild from scratch (no cache) |
+
+**Server**
+
+| Command | Description |
+|---------|-------------|
+| `make server` | Start the server in the background |
+| `make server-logs` | Tail the server logs (Ctrl+C to stop) |
+| `make server-stop` | Stop the server |
+
+**Client**
+
+| Command | Description |
+|---------|-------------|
+| `make client` | Attach an interactive client to the running server |
+
+**Simulator**
+
+| Command | Description |
+|---------|-------------|
+| `make simulator` | Run the workload simulator (load + run) |
+| `make simload` | Run simulator in load-only mode |
+| `make simrun` | Run simulator in run-only mode |
+
+**Docs**
+
+| Command | Description |
+|---------|-------------|
+| `make docs-build` | Build the docs Docker image |
+| `make docs` | Start the Jekyll docs server at `http://localhost:4000` |
+| `make docs-bg` | Start the docs server in the background |
+| `make docs-logs` | Tail the docs logs (Ctrl+C to stop) |
+| `make docs-stop` | Stop the docs server |
+
+**Teardown & Utilities**
+
+| Command | Description |
+|---------|-------------|
+| `make down` | Stop and remove all containers |
+| `make clean` | Remove containers, networks and volumes (wipes persisted data) |
+| `make ps` | Show status of all Radish containers |
+| `make logs` | Tail logs for all running containers |
+| `make help` | Show all available commands |
 
 ---
 
