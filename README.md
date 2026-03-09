@@ -1,6 +1,6 @@
 # Radish
 
-![Radish](artifacts/radish_image.jpeg)
+![Radish](docs/assets/radish_image.jpeg)
 
 **Radish** is a didactical in-memory database inspired by [Redis](https://redis.io), built entirely in [Julia](https://julialang.org) with minor dependencies. It started as a learning exercise to understand how key-value stores work under the hood and it grew more and more.
 
