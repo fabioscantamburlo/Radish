@@ -1,6 +1,6 @@
 # Radish TODO - Remaining Items
 
-> Last updated: YAML configuration system completed
+> Last updated: Dispatcher refactor and test infrastructure completed
 
 ---
 
@@ -57,23 +57,38 @@
 - ✅ Server handles ECONNRESET from healthcheck probes gracefully
 - ✅ `DOCKER.md` usage guide
 
+### Dispatcher Refactor
+- ✅ Extracted `route_command` — single source of truth for command routing (no locks, no transactions)
+- ✅ Eliminated `execute_unlocked!` — was 60 lines of duplicated routing logic
+- ✅ Added `LockPlan` struct — describes lock mode (:none/:read/:write), scope (:none/:single/:multi/:all), and keys
+- ✅ Extracted `resolve_locks(cmd)` — pure function returning a `LockPlan`
+- ✅ Added `acquire_locks!` / `release_locks!` — dispatch to the right sharded lock functions from a `LockPlan`
+- ✅ Added `TYPE_PALETTES` registry — type palettes registered as `(:symbol, PALETTE)` pairs, iterated by `route_command`
+- ✅ Moved `RENAME` into `META_PALETTE` — no longer hardcoded in the dispatcher
+- ✅ Wrapped `KLIST` in `NOKEY_PALETTE` — returns `ExecuteResult` directly, no special case in routing
+- ✅ `META_PALETTE` uses `(function, num_extra_args)` tuples for uniform dispatch
+- ✅ Transaction queuing validation uses `OP_ALLOWED` set
+- ✅ Lock release reads from `LockPlan` — no re-derivation of read vs write in `finally` block
+- ✅ Docs updated (dispatcher.md, palettes.md)
+
+### Test Infrastructure
+- ✅ Set up test infrastructure (`test/` directory, `runtests.jl`)
+- ✅ `test/test_strings.jl` — 114 tests covering all string type commands
+- ✅ `test/test_lists.jl` — 169 tests covering DLinkedStartEnd structure and all list type commands
+- ✅ `test/test_radishelem.jl` — 141 tests covering all hypercommands and meta commands
+- ✅ Total: 424 unit tests, all passing
+
+### Bug Fixes
+- ✅ Fixed `rdbsize` crash on empty database (`sum` over empty generator needed `init=0`)
+
 ---
 
 ## 🔴 HIGH PRIORITY - Next Sprint
 
-
-## Dispatcher work
-
-- [ ] Dispatcher refactor (`resolve_locks` / `route_command`), the idea is to decompose the execute function into smaller, dedicated parts. There is a lot of hardcoding if-else and conditions in general that may end up in very complex situations adding other commands. This has to be taken seriously now. 
-
-### Unit Tests
-- [ ] Set up test infrastructure (`test/` directory, `runtests.jl`)
-- [ ] **String operations** — S_SET, S_GET, S_INCR, S_INCR_BY, S_APPEND, S_LEN, S_GETRANGE, S_LCS, S_COMPLEN, S_LPAD, S_RPAD, S_GINCR, S_GINCR_BY
-- [ ] **Linked list operations** — L_ADD, L_GET, L_LEN, L_PREPEND, L_APPEND, L_TRIMR, L_TRIML, L_RANGE, L_MOVE, L_POP, L_DEQUEUE
-- [ ] **Key management** — EXISTS, DEL, TYPE, TTL, DBSIZE, PERSIST, EXPIRE, FLUSHDB, RENAME
+### Unit Tests (remaining)
 - [ ] **TTL / expiration** — creation with TTL, expiration behavior, PERSIST removes TTL, EXPIRE sets TTL, edge cases (0, negative, very large)
 - [ ] **Transactions** — MULTI/EXEC/DISCARD, atomic execution, rollback on error, nested MULTI handling
-- [ ] **Dispatcher** — palette lookup, type validation (WRONGTYPE), unknown commands, read vs write lock selection
+- [ ] **Dispatcher** — route_command palette lookup, resolve_locks lock plans, type validation (WRONGTYPE), unknown commands
 - [ ] **Persistence** — snapshot save/load round-trip, AOF append/replay, dirty tracker, shard distribution
 - [ ] **Configuration** — load from YAML, missing file fallback, default values correct
 - [ ] **Concurrency** — ShardedLock shard_id hashing, read/write lock acquisition, ordered multi-key locking

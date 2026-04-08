@@ -352,7 +352,7 @@ end
 function rdbsize(context::Dict{String, RadishElement};
                  tracker::Union{DirtyTracker, Nothing}=nothing)
     count = sum(1 for (_, elem) in context
-                if elem.ttl === nothing || now() <= elem.tinit + Second(elem.ttl))
+                if elem.ttl === nothing || now() <= elem.tinit + Second(elem.ttl); init=0)
     return ExecuteResult(SUCCESS, count, nothing)
 end
 
