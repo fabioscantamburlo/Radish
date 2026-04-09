@@ -64,13 +64,18 @@ function handle_client(sock, ctx, db_lock, tracker, aof, client_id)
 
     while isopen(sock)
         cmd = read_resp_command(sock)
-        result = execute!(ctx, db_lock, cmd, session; tracker=tracker)
 
-        # Log to AOF (write commands only)
-        if should_log_to_aof(cmd)
+        # AOF Write-Ahead Logging (write commands only, before execution)
+        if !(cmd.name in AOF_EXCLUDED_OPS) && !session.in_transaction
             aof_append!(aof, cmd)
         end
 
+        # Log transaction commands to AOF when EXEC is called
+        if cmd.name == "EXEC" && session.in_transaction
+            # batch-write all queued write commands
+        end
+
+        result = execute!(ctx, db_lock, cmd, session; tracker=tracker)
         write_resp_response(sock, result)
     end
 end

@@ -85,21 +85,22 @@ This is implemented using dynamic programming and returns both the subsequence a
 
 ## Implementation Detail
 
-All string type commands operate on the raw `String` value extracted from the `RadishElement`. They follow a consistent pattern:
+All string type commands receive the `RadishElement` and operate on its value. They follow a consistent pattern:
 
 ```julia
-# Read-only: return a derived value
-function sget(value::String, args...)::String
-    return value
+# Read-only: return the element's value
+function sget(elem::RadishElement, args...)
+    return CommandSuccess(elem.value)
 end
 
-# Mutating: modify the element in place and return a result
-function sincr!(elem::RadishElement, args...)
-    n = tryparse(Int, elem.value)
-    if n === nothing
-        throw(ErrorException("Value is not an integer"))
+# Mutating: modify the element in place and return a CommandResult
+function sincr!(elem::RadishElement)
+    elem_n = tryparse(Int, string(elem.value))
+    if isa(elem_n, Nothing)
+        return CommandError("Value '$(elem.value)' is not an integer")
     end
-    elem.value = string(n + 1)
-    return true
+    elem_n += 1
+    elem.value = string(elem_n)
+    return CommandSuccess(true)
 end
 ```

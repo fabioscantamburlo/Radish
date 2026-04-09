@@ -114,7 +114,7 @@ classDiagram
 
     class RadishElement {
         +Any value -> Real value 
-        +Union~Int128, Nothing~ ttl
+        +Union~Int, Nothing~ ttl
         +DateTime tinit
         +Symbol datatype
     }

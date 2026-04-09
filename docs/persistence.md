@@ -110,7 +110,7 @@ This design means the server never blocks waiting for disk I/O during normal ope
 Between snapshots, every write command is logged to an append-only file:
 
 ```
-persistence/aof.radish/appendonly.aof
+persistence/aof/radish.aof
 ```
 
 Each line records the full command:

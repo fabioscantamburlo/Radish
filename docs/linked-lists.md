@@ -33,20 +33,20 @@ Radish follows the same reasoning: `L_PREPEND`, `L_APPEND`, `L_POP`, and `L_DEQU
 ## The `DLinkedStartEnd` Structure
 
 ```julia
-mutable struct DLinkedNode
-    value::String
-    prev::Union{DLinkedNode, Nothing}
-    next::Union{DLinkedNode, Nothing}
+mutable struct DLinkedListElement{T}
+    data::T
+    next::Union{DLinkedListElement{T}, Nothing}
+    prev::Union{DLinkedListElement{T}, Nothing}
 end
 
-mutable struct DLinkedStartEnd
-    start::Union{DLinkedNode, Nothing}   # Head pointer
-    finish::Union{DLinkedNode, Nothing}  # Tail pointer
-    len::Int                             # Cached length
+mutable struct DLinkedStartEnd{T}
+    head::Union{DLinkedListElement{T}, Nothing}   # Head pointer
+    tail::Union{DLinkedListElement{T}, Nothing}    # Tail pointer
+    len::Int                                       # Cached length
 end
 ```
 
-The structure maintains pointers to both the head (`start`) and tail (`finish`), plus a cached length so that `L_LEN` is O(1) without traversal.
+The structure maintains pointers to both the head and tail, plus a cached length so that `L_LEN` is O(1) without traversal.
 
 ---
 

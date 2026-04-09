@@ -150,7 +150,8 @@ Here's how these structs interact during a command execution: (I know this chart
 sequenceDiagram
     participant Client
     participant RESP as RESP Layer
-    participant Dispatcher
+    participant Dispatcher as execute!
+    participant Router as route_command
     participant Palette as Palette (S_PALETTE)
     participant Hypercommand as Hypercommand (rget_or_expire!)
     participant TypeCommand as Type Command (sget)
@@ -160,13 +161,15 @@ sequenceDiagram
     Note over RESP: Parses RESP protocol<br/>Builds Command struct
 
     RESP->>Dispatcher: Command("S_GET", "mykey", [])
-    Note over Dispatcher: name = "S_GET"<br/>key  = "mykey"<br/>args = []
+    Note over Dispatcher: resolve_locks → LockPlan<br/>acquire_locks! → read lock
 
-    Dispatcher->>Palette: Lookup S_PALETTE["S_GET"]
-    Palette-->>Dispatcher: (sget, rget_or_expire!)
-    Note over Dispatcher: Acquires read lock<br/>on mykey's shard
+    Dispatcher->>Router: route_command(ctx, cmd)
+    Note over Router: name = "S_GET"<br/>key  = "mykey"<br/>args = []
 
-    Dispatcher->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
+    Router->>Palette: Lookup S_PALETTE["S_GET"]
+    Palette-->>Router: (sget, rget_or_expire!)
+
+    Router->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
 
     Hypercommand->>Context: haskey(ctx, "mykey") ?
     Note over Hypercommand,Context: Also checks TTL:<br/>is tinit + ttl > now() ?
@@ -177,13 +180,14 @@ sequenceDiagram
 
         TypeCommand-->>Hypercommand: CommandResult(success=true, value="hello", error=nothing, element=nothing)
 
-        Hypercommand-->>Dispatcher: ExecuteResult(SUCCESS, "hello", nothing)
+        Hypercommand-->>Router: ExecuteResult(SUCCESS, "hello", nothing)
     else Key missing or expired
         Note over Hypercommand: Deletes key if expired
-        Hypercommand-->>Dispatcher: ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+        Hypercommand-->>Router: ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
     end
 
-    Note over Dispatcher: Releases read lock<br/>on mykey's shard
+    Router-->>Dispatcher: ExecuteResult
+    Note over Dispatcher: release_locks!
 
     Dispatcher->>RESP: ExecuteResult(SUCCESS, "hello", nothing)
     Note over RESP: status = SUCCESS<br/>→ encode as Bulk String

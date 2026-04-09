@@ -25,7 +25,7 @@ Each value is wrapped in a `RadishElement`:
 ```julia
 mutable struct RadishElement
     value::Any              # The actual data (String, DLinkedStartEnd, etc.)
-    ttl::Union{Int128, Nothing}  # Time To Live in seconds, or nothing
+    ttl::Union{Int, Nothing}  # Time To Live in seconds, or nothing
     tinit::DateTime         # Timestamp of creation
     datatype::Symbol        # Type identifier (:string, :list, etc.)
 end
@@ -108,34 +108,40 @@ Following an example of how an invocation of a command works in detail.
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Dispatcher
+    participant Dispatcher as execute!
+    participant Router as route_command
     participant Hypercommand as rget_or_expire!
     participant Context as RadishContext
     participant TypeCmd as sget
 
     Client->>Dispatcher: S_GET "mykey"
-    Dispatcher->>Dispatcher: Lookup S_PALETTE["S_GET"]
-    Dispatcher->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
+    Dispatcher->>Dispatcher: resolve_locks → LockPlan(:read, :single)
+    Dispatcher->>Dispatcher: acquire_locks! → read lock on shard
+    Dispatcher->>Router: route_command(ctx, cmd)
+    Router->>Router: Lookup S_PALETTE["S_GET"]
+    Router->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
 
     activate Hypercommand
     Hypercommand->>Context: haskey(ctx, "mykey")?
     alt Key Missing
-        Hypercommand-->>Dispatcher: nothing → KEY_NOT_FOUND
+        Hypercommand-->>Router: nothing → KEY_NOT_FOUND
     else Key Exists
         Hypercommand->>Context: Check TTL expired?
         alt Expired
             Hypercommand->>Context: delete!(ctx, "mykey")
-            Hypercommand-->>Dispatcher: nothing → KEY_NOT_FOUND
+            Hypercommand-->>Router: nothing → KEY_NOT_FOUND
         else Valid
-            Hypercommand->>TypeCmd: sget(element.value)
+            Hypercommand->>TypeCmd: sget(element)
             activate TypeCmd
-            TypeCmd-->>Hypercommand: "hello"
+            TypeCmd-->>Hypercommand: CommandSuccess("hello")
             deactivate TypeCmd
-            Hypercommand-->>Dispatcher: "hello" → SUCCESS
+            Hypercommand-->>Router: ExecuteResult(SUCCESS, "hello")
         end
     end
     deactivate Hypercommand
 
+    Router-->>Dispatcher: ExecuteResult
+    Dispatcher->>Dispatcher: release_locks!
     Dispatcher-->>Client: Response
 ```
 

@@ -68,8 +68,9 @@ Each shard uses a `ReadWriteLock` from the ConcurrentUtilities package:
 The [dispatcher](dispatcher) determines whether a command needs a read or write lock:
 
 ```julia
-const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET", "L_LEN",
-                       "L_RANGE", "KLIST", "EXISTS", "TYPE", "TTL", "DBSIZE"])
+const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "S_LCS", "S_COMPLEN",
+                       "L_GET", "L_LEN", "L_RANGE",
+                       "KLIST", "EXISTS", "TYPE", "TTL", "DBSIZE"])
 ```
 
 Anything not in `READ_OPS` requires a write lock.

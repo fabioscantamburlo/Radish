@@ -108,7 +108,8 @@ When `EXEC` is called, the transaction executes in these steps:
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Dispatcher
+    participant Dispatcher as execute!
+    participant Router as route_command
     participant Lock as ShardedLock
     participant Context as RadishContext
 
@@ -118,8 +119,10 @@ sequenceDiagram
     Dispatcher->>Lock: Acquire write locks (sorted order)
     
     loop For each queued command
-        Dispatcher->>Context: Execute without re-locking
-        Context-->>Dispatcher: Result
+        Dispatcher->>Router: route_command(ctx, cmd)
+        Router->>Context: Execute via hypercommand
+        Context-->>Router: Result
+        Router-->>Dispatcher: ExecuteResult
     end
     
     Dispatcher->>Lock: Release all locks (reverse order)
