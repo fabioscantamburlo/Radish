@@ -105,14 +105,14 @@ On `Ctrl+C` (InterruptException), the server:
 
 ## Client Architecture
 
-### Interactive REPL
+### Interactive CLI
 
-The client provides a command-line interface with an interactive read-eval-print loop:
+The client provides a command-line interface with interactive line editing, built using raw terminal mode:
 
 ```
 🌱 Connecting to Radish server at 127.0.0.1:9000...
 ✅ Welcome to Radish Server
-Type 'HELP' for commands or 'QUIT' to disconnect
+Type 'HELP' for commands, Tab to complete, or 'QUIT' to disconnect
 
 RADISH-CLI> S_SET greeting hello
 OK
@@ -121,6 +121,14 @@ RADISH-CLI> S_GET greeting
 RADISH-CLI>
 ```
 
+Features:
+- Tab completion for all command names (type `S_` then Tab to see string commands)
+- Command history with up/down arrows (skips consecutive duplicates)
+- Left/right arrow cursor movement, Home/End keys
+- Backspace and Delete at any cursor position
+- Ctrl+L or `CLEAR` command to clear the screen
+- Ctrl+C for clean disconnect
+
 ### Client-Side vs Server-Side Commands
 
 Not all commands hit the server:
@@ -128,6 +136,7 @@ Not all commands hit the server:
 | Command | Handled By | Behavior |
 |---|---|---|
 | `HELP` | Client | Displays the full command reference locally |
+| `CLEAR` | Client | Clears the terminal screen |
 | `QUIT` / `EXIT` | Both | Sent to server, then client disconnects |
 | Everything else | Server | Encoded as RESP, sent over TCP |
 
@@ -151,22 +160,23 @@ sequenceDiagram
 
 ### Connection Management
 
-The client uses simple but robust connection handling:
+The client uses raw terminal mode (`stty`) for character-at-a-time input, enabling arrow keys, tab completion, and history. Terminal mode is always restored in a `finally` block, even on crashes:
 
 ```julia
 function start_client(host="127.0.0.1", port=9000)
     sock = connect(host, port)
-
-    # Read welcome
     welcome = readline(sock)
+    history = String[]
 
-    # REPL loop
-    while isopen(sock)
-        print("RADISH-CLI> ")
-        line = readline()
-        write_resp_command(sock, line)
-        response = read_resp_response(sock)
-        println(response)
+    enable_raw_mode()
+    try
+        while isopen(sock)
+            line = read_line_interactive("RADISH-CLI> ", history)
+            # ... handle local commands, send to server, display response
+        end
+    finally
+        disable_raw_mode()
+        close(sock)
     end
 end
 ```

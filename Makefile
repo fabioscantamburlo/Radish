@@ -28,14 +28,37 @@ client:         ## Attach an interactive client to the running server
 
 # ─── Simulator ────────────────────────────────────────────────────────────────
 
-simulator:      ## Run the workload simulator (load + run) against the server
+SIM = $(DC) --profile simulator run --rm radish-simulator julia --project=. workload_simulator.jl
+SIM_HOST = --host radish-server --port 9000
+
+simulator:          ## Run the workload simulator (load + run, default settings)
 	$(DC) --profile simulator run --rm radish-simulator
 
-simload:        ## Run simulator in load-only mode
-	$(DC) --profile simulator run --rm radish-simulator julia --project=. workload_simulator.jl load --host radish-server --port 9000
+simload:            ## Load keys (default: 5k keys, 10 clients)
+	$(SIM) load $(SIM_HOST)
 
-simrun:         ## Run simulator in run-only mode
-	$(DC) --profile simulator run --rm radish-simulator julia --project=. workload_simulator.jl run --host radish-server --port 9000
+simrun:             ## Run operations (default: 10k ops, 10 clients)
+	$(SIM) run $(SIM_HOST)
+
+# Tiered load targets — keys per type, 10 clients
+simload-light:      ## Load 100k keys per type (10 clients)
+	$(SIM) load $(SIM_HOST) --num-keys 100000
+
+simload-heavy:      ## Load 1M keys per type (10 clients)
+	$(SIM) load $(SIM_HOST) --num-keys 1000000
+
+simload-vheavy:     ## Load 10M keys per type (10 clients)
+	$(SIM) load $(SIM_HOST) --num-keys 10000000
+
+# Tiered run targets — ops per client, 10 clients
+simrun-light:       ## Run 100k ops per client (10 clients)
+	$(SIM) run $(SIM_HOST) --num-ops 100000
+
+simrun-heavy:       ## Run 250k ops per client (10 clients)
+	$(SIM) run $(SIM_HOST) --num-ops 250000
+
+simrun-vheavy:      ## Run 1M ops per client (10 clients)
+	$(SIM) run $(SIM_HOST) --num-ops 1000000
 
 # ─── Docs ─────────────────────────────────────────────────────────────────────
 
@@ -76,5 +99,7 @@ help:           ## Show this help message
 
 .PHONY: build rebuild server server-logs server-stop client \
         simulator simload simrun \
+        simload-light simload-heavy simload-vheavy \
+        simrun-light simrun-heavy simrun-vheavy \
         docs-build docs docs-bg docs-logs docs-stop \
         down clean ps logs help

@@ -312,6 +312,61 @@ const TYPE_REGISTRY = [
 ]
 
 # ============================================================================
+# Progress Display Helpers
+# ============================================================================
+
+"""Format a large number with comma separators (e.g., 1000000 → 1,000,000)."""
+function fmt_num(n::Number)::String
+    s = string(round(Int, n))
+    # Insert commas from right to left
+    parts = String[]
+    while length(s) > 3
+        push!(parts, s[end-2:end])
+        s = s[1:end-3]
+    end
+    push!(parts, s)
+    return join(reverse(parts), ",")
+end
+
+"""Render a progress bar string: [████████░░░░░░░░] 45%"""
+function progress_bar(current::Int, total::Int; width::Int=30)::String
+    total <= 0 && return "[" * "?" ^ width * "]   0%"
+    pct = min(1.0, current / total)
+    filled = round(Int, pct * width)
+    empty = width - filled
+    bar = "█" ^ filled * "░" ^ empty
+    pct_str = lpad("$(round(Int, pct * 100))%", 4)
+    return "[$bar]$pct_str"
+end
+
+"""Format elapsed time as human-readable string."""
+function fmt_time(seconds::Float64)::String
+    if seconds < 60
+        return "$(round(seconds, digits=1))s"
+    elseif seconds < 3600
+        m = floor(Int, seconds / 60)
+        s = round(Int, seconds % 60)
+        return "$(m)m $(s)s"
+    else
+        h = floor(Int, seconds / 3600)
+        m = round(Int, (seconds % 3600) / 60)
+        return "$(h)h $(m)m"
+    end
+end
+
+"""Print a worker progress line that overwrites itself (using carriage return)."""
+function print_worker_progress(worker_id::Int, label::String, current::Int, total::Int, 
+                                elapsed::Float64; extra::String="")
+    rate = current > 0 && elapsed > 0 ? round(Int, current / elapsed) : 0
+    bar = progress_bar(current, total)
+    msg = "  ▸ Worker #$(lpad(worker_id, 2)) [$label] $bar  $(fmt_num(current))/$(fmt_num(total))  $(fmt_num(rate))/s"
+    if !isempty(extra)
+        msg *= "  $extra"
+    end
+    println(msg)
+end
+
+# ============================================================================
 # Phase 1: LOAD — Preload keys into DB
 # ============================================================================
 
@@ -322,9 +377,17 @@ function load_worker(worker_id::Int, type_entry, start_idx::Int, end_idx::Int,
         read_resp(sock)  # drain welcome
 
         total = end_idx - start_idx + 1
+        start_time = time()
+        println("  ▸ Worker #$(lpad(worker_id, 2)) [$(type_entry.name)] started — $total keys to create")
+
+        # Adaptive report interval: ~10 reports per worker
+        report_interval = max(100, total ÷ 10)
+
         for i in start_idx:end_idx
-            if (i - start_idx + 1) % 2_000 == 0
-                println("  Worker #$worker_id [$(type_entry.name)]: $((i - start_idx + 1))/$total keys")
+            done = i - start_idx + 1
+            if done % report_interval == 0
+                elapsed = time() - start_time
+                print_worker_progress(worker_id, type_entry.name, done, total, elapsed)
             end
 
             key = "$(type_entry.prefix)_$i"
@@ -334,9 +397,12 @@ function load_worker(worker_id::Int, type_entry, start_idx::Int, end_idx::Int,
 
         send_command(sock, ["QUIT"])
         close(sock)
-        println("  Worker #$worker_id [$(type_entry.name)]: done ($total keys)")
+
+        elapsed = time() - start_time
+        rate = round(Int, total / elapsed)
+        println("  ✓ Worker #$(lpad(worker_id, 2)) [$(type_entry.name)] done — $(fmt_num(total)) keys in $(fmt_time(elapsed)) ($(fmt_num(rate)) keys/s)")
     catch e
-        println("  Worker #$worker_id [$(type_entry.name)] error: $e")
+        println("  ✗ Worker #$(lpad(worker_id, 2)) [$(type_entry.name)] error: $e")
     end
 end
 
@@ -369,7 +435,13 @@ function run_load_phase(; num_clients::Int, num_keys::Int, host::String, port::I
     elapsed = time() - start_time
     total_keys = num_keys * length(TYPE_REGISTRY)
     rate = round(total_keys / elapsed, digits=0)
-    println("\n  ✅ Load complete: $total_keys keys in $(round(elapsed, digits=2))s ($rate keys/s)")
+    println()
+    println("  ╔══════════════════════════════════════════════════╗")
+    println("  ║  LOAD COMPLETE                                   ║")
+    println("  ╚══════════════════════════════════════════════════╝")
+    println("  Total keys:   $(fmt_num(total_keys))")
+    println("  Elapsed:      $(fmt_time(elapsed))")
+    println("  Throughput:   $(fmt_num(rate)) keys/s")
 end
 
 # ============================================================================
@@ -539,7 +611,13 @@ function run_worker(client_id::Int, pool::Dict{String, Vector{String}},
         refresh_interval = 5_000          # re-discover keys every N ops
         last_refresh = 0
 
+        # Adaptive report interval
+        target_ops = forever ? 100_000 : (duration > 0 ? 50_000 : num_ops)
+        report_interval = max(500, target_ops ÷ 20)
+
         start_time = time()
+        term_label = forever ? "∞" : (duration > 0 ? "$(round(Int, duration))s" : "$(fmt_num(num_ops)) ops")
+        println("  ▸ Worker #$(lpad(client_id, 2)) started — target: $term_label")
 
         while should_continue(ops_count, start_time, num_ops, duration, forever)
             ops_count += 1
@@ -607,10 +685,14 @@ function run_worker(client_id::Int, pool::Dict{String, Vector{String}},
                 end
             end
 
-            if ops_count % 5_000 == 0
+            if ops_count % report_interval == 0
                 elapsed = time() - start_time
-                rate = round(ops_count / elapsed, digits=0)
-                println("  Client #$client_id: $ops_count ops ($rate ops/s)")
+                if !forever && duration <= 0
+                    print_worker_progress(client_id, "run", ops_count, num_ops, elapsed)
+                else
+                    rate = ops_count > 0 && elapsed > 0 ? round(Int, ops_count / elapsed) : 0
+                    println("  ▸ Worker #$(lpad(client_id, 2)) [run ] $(fmt_num(ops_count)) ops  $(fmt_num(rate))/s  $(fmt_time(elapsed))")
+                end
             end
         end
 
@@ -618,14 +700,14 @@ function run_worker(client_id::Int, pool::Dict{String, Vector{String}},
         close(sock)
 
         elapsed = time() - start_time
-        rate = round(ops_count / elapsed, digits=0)
-        println("  Client #$client_id: finished ($ops_count ops in $(round(elapsed, digits=2))s, $rate ops/s)")
+        rate = round(Int, ops_count / elapsed)
+        println("  ✓ Worker #$(lpad(client_id, 2)) [run ] done — $(fmt_num(ops_count)) ops in $(fmt_time(elapsed)) ($(fmt_num(rate)) ops/s)")
         return ops_count
     catch e
         if isa(e, InterruptException)
-            println("  Client #$client_id: interrupted")
+            println("  ⛔ Worker #$(lpad(client_id, 2)) interrupted")
         else
-            println("  Client #$client_id error: $e")
+            println("  ✗ Worker #$(lpad(client_id, 2)) error: $e")
         end
         return 0
     end
@@ -643,7 +725,7 @@ function run_run_phase(; num_clients::Int, num_ops::Int, duration::Float64,
     elseif duration > 0
         "$(round(Int, duration))s per client"
     else
-        "$num_ops ops per client"
+        "$(fmt_num(num_ops)) ops per client"
     end
     println("  Termination:    $term_desc")
     println("  Workers:        $num_clients")
@@ -658,13 +740,15 @@ function run_run_phase(; num_clients::Int, num_ops::Int, duration::Float64,
 
     pool_size = total_pool_size(initial_pool)
     for (dtype, keys) in initial_pool
-        println("    $dtype: $(length(keys)) keys")
+        println("    $(rpad(dtype, 8)) $(fmt_num(length(keys))) keys")
     end
-    println("    Total: $pool_size keys\n")
+    println("    $(rpad("Total", 8)) $(fmt_num(pool_size)) keys")
+    println()
 
     if pool_size == 0
         println("  ⚠ No keys found in DB. Run with 'load' or 'loadrun' mode first.")
-        println("    Starting anyway — will only execute general ops until keys appear.\n")
+        println("    Starting anyway — will only execute general ops until keys appear.")
+        println()
     end
 
     start_time = time()
@@ -685,8 +769,15 @@ function run_run_phase(; num_clients::Int, num_ops::Int, duration::Float64,
     end
 
     elapsed = time() - start_time
-    rate = total_ops > 0 ? round(total_ops / elapsed, digits=0) : 0
-    println("\n  ✅ Run complete: $total_ops total ops in $(round(elapsed, digits=2))s ($rate ops/s)")
+    rate = total_ops > 0 ? round(Int, total_ops / elapsed) : 0
+    println()
+    println("  ╔══════════════════════════════════════════════════╗")
+    println("  ║  RUN COMPLETE                                    ║")
+    println("  ╚══════════════════════════════════════════════════╝")
+    println("  Total ops:    $(fmt_num(total_ops))")
+    println("  Elapsed:      $(fmt_time(elapsed))")
+    println("  Throughput:   $(fmt_num(rate)) ops/s")
+    println("  Workers:      $num_clients")
 end
 
 # ============================================================================
@@ -789,7 +880,7 @@ function main()
     println("  Server:         $(config["host"]):$(config["port"])")
     println("  Clients:        $(config["num_clients"])")
     if mode in ("load", "loadrun")
-        println("  Keys per type:  $(config["num_keys"])")
+        println("  Keys per type:  $(fmt_num(config["num_keys"]))")
     end
     if mode in ("run", "loadrun")
         if config["forever"]
@@ -797,7 +888,7 @@ function main()
         elseif config["duration"] > 0
             println("  Run:            $(round(Int, config["duration"]))s")
         else
-            println("  Run:            $(config["num_ops"]) ops/client")
+            println("  Run:            $(fmt_num(config["num_ops"])) ops/client")
         end
     end
 

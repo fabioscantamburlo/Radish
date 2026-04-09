@@ -163,9 +163,15 @@ All day-to-day operations are wrapped in `make` targets. Run `make help` to see 
 
 | Command | Description |
 |---------|-------------|
-| `make simulator` | Run the workload simulator (load + run) |
-| `make simload` | Run simulator in load-only mode |
-| `make simrun` | Run simulator in run-only mode |
+| `make simulator` | Run the workload simulator (load + run, default settings) |
+| `make simload` | Load keys (default: 5k keys, 10 clients) |
+| `make simrun` | Run operations (default: 10k ops, 10 clients) |
+| `make simload-light` | Load 100k keys per type (10 clients) |
+| `make simload-heavy` | Load 1M keys per type (10 clients) |
+| `make simload-vheavy` | Load 10M keys per type (10 clients) |
+| `make simrun-light` | Run 100k ops per client (10 clients) |
+| `make simrun-heavy` | Run 250k ops per client (10 clients) |
+| `make simrun-vheavy` | Run 1M ops per client (10 clients) |
 
 **Docs**
 

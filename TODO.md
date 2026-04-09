@@ -1,6 +1,6 @@
 # Radish TODO - Remaining Items
 
-> Last updated: Dispatcher refactor and test infrastructure completed
+> Last updated: CLI improvements, config unification, simulator progress logging
 
 ---
 
@@ -80,6 +80,28 @@
 
 ### Bug Fixes
 - ✅ Fixed `rdbsize` crash on empty database (`sum` over empty generator needed `init=0`)
+- ✅ Fixed `write_resp_command` to accept `AbstractString` (was rejecting `SubString` from `strip()`)
+
+### CLI Improvements
+- ✅ Tab completion for all command names
+- ✅ Command history with up/down arrows (in-memory, skips duplicates)
+- ✅ Left/right arrow cursor movement, Home/End keys
+- ✅ Backspace and Delete at any cursor position
+- ✅ Ctrl+L and `CLEAR` command to clear screen
+- ✅ Raw terminal mode via `stty` (no external dependencies)
+
+### Config Unification
+- ✅ Unified `num_lock_shards` and `num_snapshot_shards` into single `num_shards` under `concurrency`
+- ✅ Backward-compatible config loading (falls back to legacy key names)
+- ✅ Removed configuration constraint from limitations (no longer applies)
+
+### Simulator Improvements
+- ✅ Progress bars with percentage for load and run workers
+- ✅ Comma-formatted numbers and human-readable time in all output
+- ✅ Clear start/finish messages per worker with throughput stats
+- ✅ Adaptive report intervals (~20 updates per worker regardless of workload size)
+- ✅ Summary boxes at end of each phase
+- ✅ Tiered make targets: `simload-light`/`heavy`/`vheavy`, `simrun-light`/`heavy`/`vheavy`
 
 ---
 

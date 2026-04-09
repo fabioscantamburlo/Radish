@@ -66,14 +66,13 @@ persistence:
   snapshots_subdir: "snapshots"
   aof_subdir: "aof"
   aof_filename: "radish.aof"
-  num_snapshot_shards: 256
 
 background_tasks:
   sync_interval_sec: 5
   cleaner_interval_sec: 0.1
 
 concurrency:
-  num_lock_shards: 256
+  num_shards: 256
 
 ttl_cleanup:
   sampling_threshold: 100000

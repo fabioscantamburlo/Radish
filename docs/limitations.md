@@ -66,12 +66,16 @@ There is no password protection or authentication mechanism. Any client that can
 
 ---
 
-## CLI not polished
+## CLI Limitations
 
-The Radish-CLI needs a lot of improvements, to name a few:
-- It does not suggest commands
-- It does not support quick actions like: arrow up for command history
-- It does not clear automatically
+The Radish-CLI has basic interactive features (command history, tab completion, cursor movement, Ctrl+L to clear screen) but is still limited compared to production CLIs like `redis-cli`:
+
+- No syntax highlighting
+- No multi-line input or quoting (values with spaces are not supported — see below)
+- No persistent history across sessions (history is in-memory only)
+- No reverse search (Ctrl+R)
+- Tab completion only works for command names, not key names or arguments
+- Relies on `stty` for raw terminal mode, which may not work in all terminal emulators
 
 ---
 
@@ -133,14 +137,6 @@ The LCS (Longest Common Subsequence) implementation indexes strings by byte posi
 ## Author Github Seed Data
 
 When the server starts with an empty database (no snapshots to load), it inserts this key (`author`, `"https://github.com/fabioscantamburlo"`), clearly not a production grade project but a fun easter egg to have!
-
----
-
-## Configuration Constraint
-
-The `num_lock_shards` and `num_snapshot_shards` configuration values **must be equal**. Both the sharded lock and the snapshot system use the same hash function to partition keys. If these values don't match, incremental snapshot saves will target the wrong shard files. See the [Configuration](configuration#important-constraints) page for details.
-
-This may actually be corrected in the future, having two different shard functions. 
 
 ---
 

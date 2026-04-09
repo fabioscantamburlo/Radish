@@ -18,7 +18,7 @@ export ensure_persistence_dirs!, snapshot_shard_id,
 # ============================================================================
 
 """Compute snapshot shard ID for a key. Uses same hash formula as ShardedLock."""
-snapshot_shard_id(key::String) = (hash(key) % CONFIG[].num_snapshot_shards) + 1
+snapshot_shard_id(key::String) = (hash(key) % CONFIG[].num_shards) + 1
 
 """Get file path for a shard's RDB file."""
 shard_path(shard::Int) = joinpath(snapshots_dir(CONFIG[]), "shard_$(lpad(shard, 3, '0')).rdb")
@@ -220,7 +220,7 @@ function save_full_snapshot!(ctx::RadishContext, tracker::DirtyTracker)
     end
 
     count = 0
-    for sid in 1:CONFIG[].num_snapshot_shards
+    for sid in 1:CONFIG[].num_shards
         path = shard_path(sid)
 
         if !haskey(shards, sid)
@@ -263,13 +263,13 @@ function load_snapshot!(ctx::RadishContext)::Int
     ensure_persistence_dirs!()
 
     # Clean up any leftover .tmp files from interrupted writes
-    for sid in 1:CONFIG[].num_snapshot_shards
+    for sid in 1:CONFIG[].num_shards
         tmp = shard_path(sid) * ".tmp"
         isfile(tmp) && rm(tmp)
     end
 
     count = 0
-    for sid in 1:CONFIG[].num_snapshot_shards
+    for sid in 1:CONFIG[].num_shards
         path = shard_path(sid)
         isfile(path) || continue
 

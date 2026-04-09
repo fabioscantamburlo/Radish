@@ -16,14 +16,16 @@ struct RadishConfig
     snapshots_subdir::String
     aof_subdir::String
     aof_filename::String
-    num_snapshot_shards::Int
 
     # Background tasks
     sync_interval_sec::Float64
     cleaner_interval_sec::Float64
 
-    # Concurrency
-    num_lock_shards::Int
+    # Concurrency & Sharding
+    # Single value used by both ShardedLock and snapshot partitioning.
+    # Previously split into num_lock_shards and num_snapshot_shards,
+    # but they must always be equal (same hash function), so unified.
+    num_shards::Int
 
     # TTL cleanup
     sampling_threshold::Int
@@ -42,6 +44,9 @@ aof_path(cfg::RadishConfig) = joinpath(aof_dir(cfg), cfg.aof_filename)
     load_config(path::String=DEFAULT_CONFIG_PATH) -> RadishConfig
 
 Load configuration from a YAML file. Falls back to defaults if the file is missing.
+Supports the legacy `num_lock_shards` / `num_snapshot_shards` keys for backward
+compatibility — if `num_shards` is not set, falls back to `num_lock_shards`, then
+`num_snapshot_shards`, then the default (256).
 """
 function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
     if isfile(path)
@@ -58,6 +63,11 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
     ttl = get(raw, "ttl_cleanup", Dict())
     dl = get(raw, "data_limits", Dict())
 
+    # Resolve num_shards with backward compatibility
+    num_shards = get(conc, "num_shards",
+                     get(conc, "num_lock_shards",
+                         get(pers, "num_snapshot_shards", 256)))
+
     return RadishConfig(
         # Network
         get(net, "host", "127.0.0.1"),
@@ -67,12 +77,11 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
         get(pers, "snapshots_subdir", "snapshots"),
         get(pers, "aof_subdir", "aof"),
         get(pers, "aof_filename", "radish.aof"),
-        get(pers, "num_snapshot_shards", 256),
         # Background tasks
         Float64(get(bg, "sync_interval_sec", 5)),
         Float64(get(bg, "cleaner_interval_sec", 0.1)),
-        # Concurrency
-        get(conc, "num_lock_shards", 256),
+        # Concurrency & Sharding
+        num_shards,
         # TTL cleanup
         get(ttl, "sampling_threshold", 100_000),
         Float64(get(ttl, "sample_percentage", 0.10)),
@@ -87,6 +96,6 @@ const CONFIG = Ref{RadishConfig}()
 function init_config!(path::String=DEFAULT_CONFIG_PATH)
     CONFIG[] = load_config(path)
     cfg = CONFIG[]
-    @info "Radish config loaded" host=cfg.host port=cfg.port shards=cfg.num_lock_shards sync_interval=cfg.sync_interval_sec
+    @info "Radish config loaded" host=cfg.host port=cfg.port shards=cfg.num_shards sync_interval=cfg.sync_interval_sec
     return cfg
 end

@@ -19,7 +19,6 @@ persistence:
   snapshots_subdir: "snapshots"  # Subdirectory for RDB shard files
   aof_subdir: "aof"              # Subdirectory for append-only files
   aof_filename: "radish.aof"     # Name of the AOF file
-  num_snapshot_shards: 256        # Number of snapshot shard files (must match concurrency.num_lock_shards)
 
 # -----------------------------------------------------------------------------
 # Background Tasks
@@ -29,10 +28,12 @@ background_tasks:
   cleaner_interval_sec: 0.1  # Seconds between TTL expiration cleanup runs
 
 # -----------------------------------------------------------------------------
-# Concurrency
+# Concurrency & Sharding
 # -----------------------------------------------------------------------------
+# Single value controlling both ShardedLock partitions and snapshot shard files.
+# Both systems use the same hash function, so they must use the same count.
 concurrency:
-  num_lock_shards: 256      # Number of ShardedLock partitions (must match persistence.num_snapshot_shards)
+  num_shards: 256           # Number of lock/snapshot shard partitions
 
 # -----------------------------------------------------------------------------
 # TTL Cleanup

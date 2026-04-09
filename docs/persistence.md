@@ -32,7 +32,7 @@ Radish uses **both** — just like Redis. Snapshots provide the baseline, and AO
 
 ## Sharded RDB Snapshots
 
-Instead of writing a single monolithic snapshot file, Radish partitions the database into **N shards** (configurable via [`num_snapshot_shards`](configuration)) and writes each shard to its own file:
+Instead of writing a single monolithic snapshot file, Radish partitions the database into **N shards** (configurable via [`num_shards`](configuration)) and writes each shard to its own file:
 
 ```
 persistence/snapshots/
@@ -45,7 +45,7 @@ persistence/snapshots/
 Each key is assigned to a shard using a hash function:
 
 ```julia
-snapshot_shard_id(key::String) = (hash(key) % CONFIG[].num_snapshot_shards) + 1
+snapshot_shard_id(key::String) = (hash(key) % CONFIG[].num_shards) + 1
 ```
 
 ### Why Shard the Snapshots?

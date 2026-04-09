@@ -122,7 +122,7 @@ function write_resp_response(sock::TCPSocket, result::ExecuteResult)
 end
 
 # Client-side: write command as RESP array
-function write_resp_command(sock::TCPSocket, line::String)
+function write_resp_command(sock::TCPSocket, line::AbstractString)
     parts = split(strip(line), ' ', keepempty=false)
     
     # Write array header

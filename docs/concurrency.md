@@ -29,7 +29,7 @@ This is a **race condition** — the classic lost-update problem. Radish needs t
 
 ## Sharded Locking
 
-Instead of a single global lock (which would serialize everything), Radish uses **sharded locking** — N independent `ReadWriteLock`s (configurable via [`num_lock_shards`](configuration), default 256):
+Instead of a single global lock (which would serialize everything), Radish uses **sharded locking** — N independent `ReadWriteLock`s (configurable via [`num_shards`](configuration), default 256):
 
 ```julia
 struct ShardedLock
@@ -56,7 +56,7 @@ The number of shards is [configurable](configuration) and controls the **granula
 | 256 | Low — only keys on the same shard contend | Moderate | Good balance (default) |
 | ∞ | Zero — per-key locking | High | Overkill for most workloads |
 
-256 is a reasonable default — with uniform key distribution, two random keys have only a 1/256 ≈ 0.4% chance of contending with each other. You can tune this in `radish.yml` under `concurrency.num_lock_shards`.
+256 is a reasonable default — with uniform key distribution, two random keys have only a 1/256 ≈ 0.4% chance of contending with each other. You can tune this in `radish.yml` under `concurrency.num_shards`.
 
 ### Read vs Write Locks
 
