@@ -121,7 +121,21 @@ bench-system:   ## Run system benchmarks (Level 2, 4 threads) and save to benchm
 	echo ""; \
 	echo "Saved to $$OUTFILE"
 
-bench-all:      ## Run all benchmarks (internal + system) and save to benchmarks/
+bench-local:    ## Run local benchmarks (internal + system, no Docker needed)
+	@mkdir -p benchmarks
+	@TS="$$(date +%Y%m%d_%H%M%S)"; \
+	echo "── Internal Benchmarks (Level 0/1) ──────────────────"; \
+	BENCH_ID="local_internals_$$TS" julia --project=. test/bench_internals.jl | tee "benchmarks/local_internals_$$TS.txt"; \
+	echo ""; \
+	echo "── System Benchmarks (Level 2) ──────────────────────"; \
+	BENCH_ID="local_system_$$TS" julia --threads=4 --project=. test/bench_system.jl | tee "benchmarks/local_system_$$TS.txt"; \
+	echo ""; \
+	echo "Saved to benchmarks/local_*_$$TS.txt"
+
+bench-net:      ## Run network benchmarks (Level 3, requires Docker)
+	python3 scripts/bench_net.py
+
+bench-all:      ## Run ALL benchmarks (internal + system + network/Docker)
 	@mkdir -p benchmarks
 	@TS="$$(date +%Y%m%d_%H%M%S)"; \
 	echo "── Internal Benchmarks (Level 0/1) ──────────────────"; \
@@ -130,10 +144,10 @@ bench-all:      ## Run all benchmarks (internal + system) and save to benchmarks
 	echo "── System Benchmarks (Level 2) ──────────────────────"; \
 	BENCH_ID="all_system_$$TS" julia --threads=4 --project=. test/bench_system.jl | tee "benchmarks/all_system_$$TS.txt"; \
 	echo ""; \
-	echo "Saved to benchmarks/all_internals_$$TS.txt and benchmarks/all_system_$$TS.txt"
-
-bench-net:      ## Run network benchmarks (Level 3, requires Docker)
-	python3 scripts/bench_net.py
+	echo "── Network Benchmarks (Level 3) ─────────────────────"; \
+	python3 scripts/bench_net.py | tee "benchmarks/all_net_$$TS.txt"; \
+	echo ""; \
+	echo "Saved to benchmarks/all_*_$$TS.txt"
 
 ps:             ## Show status of all Radish containers
 	$(DC) ps -a
@@ -199,4 +213,4 @@ help:           ## Show this help message
         simrun-light simrun-heavy simrun-vheavy \
         docs-build docs docs-bg docs-logs docs-stop \
         down clean ps storage storage-watch logs help \
-        test test-all bench bench-system bench-all bench-net
+        test test-all bench bench-system bench-local bench-net bench-all
