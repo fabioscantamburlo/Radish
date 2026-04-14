@@ -14,27 +14,36 @@ This is the single most important design decision in Radish: it makes the system
 
 ## Core Data Model
 
-Everything in Radish lives in a `RadishContext`, which is simply a dictionary:
+Radish uses a **typed store** — one fully-typed dictionary per data type, unified behind a `RadishStore` struct with a global key-to-type index:
 
 ```julia
-RadishContext = Dict{String, RadishElement}
+mutable struct RadishStore
+    strings::Dict{String, RadishElement{String}}
+    lists::Dict{String, RadishElement{DLinkedStartEnd{String}}}
+    keytype::Dict{String, Symbol}   # "mykey" => :string
+end
 ```
 
-Each value is wrapped in a `RadishElement`:
+Each value is wrapped in a parametric `RadishElement{T}`:
 
 ```julia
-mutable struct RadishElement
-    value::Any              # The actual data (String, DLinkedStartEnd, etc.)
+mutable struct RadishElement{T}
+    value::T                # The actual data — fully typed, zero boxing
     ttl::Union{Int, Nothing}  # Time To Live in seconds, or nothing
     tinit::DateTime         # Timestamp of creation
     datatype::Symbol        # Type identifier (:string, :list, etc.)
 end
 ```
 
-The key insight is the **`datatype` field**. Instead of using Julia's type system to distinguish between values, Radish uses a symbol tag. This is because Radish data types are semantic abstractions rather than native Julia types — similar to Redis, where a string can be interpreted as an integer, a serialized list, or any other encoded value depending on the operation. 
+The key design decisions:
+
+- **Parametric typing** — `RadishElement{String}` and `RadishElement{DLinkedStartEnd{String}}` are distinct types. Julia compiles specialized code for each, eliminating dynamic dispatch and boxing on the hot path.
+- **Typed dictionaries** — each data type gets its own `Dict` with a concrete element type. Type-specific commands (`S_GET`, `L_APPEND`) access the right dict directly with full type information.
+- **Global key index** — the `keytype` dict maps every key to its type symbol. This enforces Redis-compatible behavior (one key, one type) and enables O(1) type lookups for meta commands.
+- **Always-String storage** — string values are always stored as `String`, even when they represent integers. Integer parsing happens dynamically when needed (e.g., `S_INCR`), matching Redis's behavior.
 
 {: .note }
-> Redis uses a similar approach internally — each Redis object carries a type tag and an encoding tag that determine how the value is stored and manipulated.
+> Redis uses a similar approach internally — each Redis object carries a type tag and an encoding tag that determine how the value is stored and manipulated. Radish's `keytype` index serves the same purpose as Redis's type tag.
 
 ---
 
@@ -84,8 +93,10 @@ The current implementation consists of the following commands:
 
 ### Hypercommand Signature
 
+Hypercommands operate on **typed sub-dictionaries** extracted from the `RadishStore` by the dispatcher:
+
 ```julia
-hypercommand(context::RadishContext, key::String, command::Function, args...)
+hypercommand(typed_dict::Dict{String, RadishElement{T}}, key::String, command::Function, args...)
 ```
 
 The `command` parameter is the type-specific function — this is the delegation. The hypercommand handles:
@@ -117,12 +128,13 @@ sequenceDiagram
     Client->>Dispatcher: S_GET "mykey"
     Dispatcher->>Dispatcher: resolve_locks → LockPlan(:read, :single)
     Dispatcher->>Dispatcher: acquire_locks! → read lock on shard
-    Dispatcher->>Router: route_command(ctx, cmd)
+    Dispatcher->>Router: route_command(store, cmd)
     Router->>Router: Lookup S_PALETTE["S_GET"]
-    Router->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
+    Router->>Router: Extract store.strings (typed dict)
+    Router->>Hypercommand: rget_or_expire!(store.strings, "mykey", sget)
 
     activate Hypercommand
-    Hypercommand->>Context: haskey(ctx, "mykey")?
+    Hypercommand->>Context: haskey(store.strings, "mykey")?
     alt Key Missing
         Hypercommand-->>Router: nothing → KEY_NOT_FOUND
     else Key Exists

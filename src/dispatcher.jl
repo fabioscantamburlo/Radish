@@ -28,15 +28,14 @@ export RadishElement, S_PALETTE, LL_PALETTE, META_PALETTE
 # =============================================================================
 
 const NOKEY_PALETTE = Dict{String, Function}(
-    "PING" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "PONG", nothing),
-    "QUIT" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
-    "EXIT" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
-    "DUMP" => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Use BGSAVE for snapshots", nothing),
-    "DBSIZE" => rdbsize,
-    "FLUSHDB" => rflushdb,
-    # KLIST returns a raw list — wrap it so all NOKEY commands return ExecuteResult
-    "KLIST" => (ctx, args...; tracker=nothing) -> begin
-        ret = rlistkeys(ctx, args...; tracker=tracker)
+    "PING" => (store, args::Vector{String}; tracker=nothing, t=now()) -> ExecuteResult(SUCCESS, "PONG", nothing),
+    "QUIT" => (store, args::Vector{String}; tracker=nothing, t=now()) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
+    "EXIT" => (store, args::Vector{String}; tracker=nothing, t=now()) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
+    "DUMP" => (store, args::Vector{String}; tracker=nothing, t=now()) -> ExecuteResult(SUCCESS, "Use BGSAVE for snapshots", nothing),
+    "DBSIZE" => (store, args::Vector{String}; tracker=nothing, t=now()) -> rdbsize(store; tracker=tracker, t=t),
+    "FLUSHDB" => (store, args::Vector{String}; tracker=nothing, t=now()) -> rflushdb(store; tracker=tracker),
+    "KLIST" => (store, args::Vector{String}; tracker=nothing, t=now()) -> begin
+        ret = rlistkeys(store, args; tracker=tracker, t=t)
         ExecuteResult(SUCCESS, ret, nothing)
     end,
 )
@@ -88,6 +87,39 @@ const MULTI_KEY_OPS = Set(["S_LCS", "S_COMPLEN", "L_MOVE", "RENAME"])
 const WRITE_META_OPS = Set(["DEL", "PERSIST", "EXPIRE", "RENAME"])
 
 # =============================================================================
+# COMMAND_TABLE — Flat lookup table built at module load time (OPTIM 2.5)
+#
+# One hash lookup per command instead of 3-4 (NOKEY miss → META miss → TYPE_PALETTES loop).
+# Entry format: command_name => (kind, ...)
+#   :nokey  => (kind, handler::Function)
+#   :meta0  => (kind, handler::Function)                    — 0 extra args
+#   :meta1  => (kind, handler::Function)                    — 1 extra arg
+#   :type   => (kind, type_command, hypercommand, expected_type::Symbol)
+# =============================================================================
+
+const COMMAND_TABLE = let table = Dict{String, Tuple}()
+    # NOKEY commands
+    for (name, handler) in NOKEY_PALETTE
+        table[name] = (:nokey, handler)
+    end
+    # META commands
+    for (name, (handler, num_extra)) in META_PALETTE
+        if num_extra == 0
+            table[name] = (:meta0, handler)
+        else
+            table[name] = (:meta1, handler)
+        end
+    end
+    # Type palette commands
+    for (expected_type, palette) in TYPE_PALETTES
+        for (name, (type_cmd, hypercommand)) in palette
+            table[name] = (:type, type_cmd, hypercommand, expected_type)
+        end
+    end
+    table
+end
+
+# =============================================================================
 # route_command — Pure routing logic (no locks, no transactions)
 #
 # This is the single source of truth for "given a command, what do I do?"
@@ -95,62 +127,76 @@ const WRITE_META_OPS = Set(["DEL", "PERSIST", "EXPIRE", "RENAME"])
 # =============================================================================
 
 """
-    route_command(ctx, cmd; tracker=nothing) -> ExecuteResult
+    route_command(store, cmd; tracker=nothing) -> ExecuteResult
 
 Route a command to the correct palette and hypercommand.
-Handles palette lookup, key validation, type validation, and dispatch.
+Single hash lookup via COMMAND_TABLE. Handles key validation, type validation, and dispatch.
 Does NOT acquire locks — the caller is responsible for that.
 """
-function route_command(ctx::RadishContext, cmd::Command;
+function route_command(store::RadishStore, cmd::Command;
                        tracker::Union{DirtyTracker, Nothing}=nothing)
     cmd_name = cmd.name
     cmd_key = cmd.key
     cmd_args = cmd.args
+    t = now()  # Cache once per command
 
     try
-        # --- NOKEY commands (no key required) ---
-        if cmd_name in keys(NOKEY_PALETTE)
+        entry = get(COMMAND_TABLE, cmd_name, nothing)
+        if entry === nothing
+            return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
+        end
+
+        kind = entry[1]
+
+        if kind === :nokey
             if cmd_key !== nothing
                 return ExecuteResult(ERROR, nothing, "Command $(cmd_name) does not accept a key")
             end
-            handler = NOKEY_PALETTE[cmd_name]
-            return handler(ctx, cmd_args...; tracker=tracker)
-        end
+            handler = entry[2]
+            return handler(store, cmd_args; tracker=tracker, t=t)
 
-        # --- META commands (key required, any datatype) ---
-        if cmd_name in keys(META_PALETTE)
+        elseif kind === :meta0
             if cmd_key === nothing
                 return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
             end
-            handler, num_extra = META_PALETTE[cmd_name]
-            if num_extra > 0
-                if isempty(cmd_args)
-                    return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires an argument")
-                end
-                return handler(ctx, cmd_key, cmd_args[1]; tracker=tracker)
+            handler = entry[2]
+            return handler(store, cmd_key; tracker=tracker, t=t)
+
+        elseif kind === :meta1
+            if cmd_key === nothing
+                return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
+            end
+            handler = entry[2]
+            if isempty(cmd_args)
+                return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires an argument")
+            end
+            return handler(store, cmd_key, cmd_args[1]; tracker=tracker, t=t)
+
+        else  # :type
+            if cmd_key === nothing
+                return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
+            end
+            type_command = entry[2]
+            hypercommand = entry[3]
+            expected_type = entry[4]::Symbol
+
+            # Type validation via keytype index
+            existing_type = store_keytype(store, cmd_key)
+            if existing_type !== nothing && existing_type != expected_type
+                return ExecuteResult(ERROR, nothing,
+                    "WRONGTYPE: Key '$(cmd_key)' holds a $(existing_type), not a $(expected_type)")
+            end
+            # Get the typed sub-dict and dispatch
+            typed_dict = store_get_typed(store, expected_type)
+            result = hypercommand(typed_dict, cmd_key, type_command, cmd_args; tracker=tracker, t=t)
+            # Sync keytype index
+            if haskey(typed_dict, cmd_key)
+                store.keytype[cmd_key] = expected_type
             else
-                return handler(ctx, cmd_key; tracker=tracker)
+                delete!(store.keytype, cmd_key)
             end
+            return result
         end
-
-        # --- Type palette commands (key required, type-specific) ---
-        for (expected_type, palette) in TYPE_PALETTES
-            if cmd_name in keys(palette)
-                if cmd_key === nothing
-                    return ExecuteResult(ERROR, nothing, "Command $(cmd_name) requires a key")
-                end
-                # Type validation for existing keys
-                if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != expected_type
-                    return ExecuteResult(ERROR, nothing,
-                        "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a $(expected_type)")
-                end
-                type_command, hypercommand = palette[cmd_name]
-                return hypercommand(ctx, cmd_key, type_command, cmd_args...; tracker=tracker)
-            end
-        end
-
-        # --- Unknown command ---
-        return ExecuteResult(ERROR, nothing, "Unknown command: $(cmd_name)")
 
     catch e
         return ExecuteResult(ERROR, nothing, string(e))
@@ -169,12 +215,13 @@ end
 # =============================================================================
 
 struct LockPlan
-    mode::Symbol         # :none, :read, :write
-    scope::Symbol        # :none, :single, :multi, :all
-    keys::Vector{String} # keys to lock (empty for :none/:all)
+    mode::Symbol                    # :none, :read, :write
+    scope::Symbol                   # :none, :single, :multi, :all
+    key1::Union{String, Nothing}    # first key (single + multi)
+    key2::Union{String, Nothing}    # second key (multi only)
 end
 
-LockPlan() = LockPlan(:none, :none, String[])
+LockPlan() = LockPlan(:none, :none, nothing, nothing)
 
 """
     resolve_locks(cmd) -> LockPlan
@@ -189,65 +236,72 @@ function resolve_locks(cmd::Command)::LockPlan
     cmd_args = cmd.args
 
     # NOKEY palette commands
-    if cmd_name in keys(NOKEY_PALETTE)
+    if haskey(NOKEY_PALETTE, cmd_name)
         if cmd_name == "KLIST"
-            return LockPlan(:read, :all, String[])
+            return LockPlan(:read, :all, nothing, nothing)
         elseif cmd_name == "FLUSHDB"
-            return LockPlan(:write, :all, String[])
+            return LockPlan(:write, :all, nothing, nothing)
         else
             return LockPlan()  # PING, QUIT, EXIT, DUMP, DBSIZE — no lock
         end
     end
 
     # META palette commands (require a key)
-    if cmd_name in keys(META_PALETTE)
+    if haskey(META_PALETTE, cmd_name)
         cmd_key === nothing && return LockPlan()  # will error in route_command
         mode = cmd_name in WRITE_META_OPS ? :write : :read
         # RENAME is multi-key
         if cmd_name in MULTI_KEY_OPS && !isempty(cmd_args)
-            return LockPlan(mode, :multi, [cmd_key, cmd_args[1]])
+            return LockPlan(mode, :multi, cmd_key, cmd_args[1])
         end
-        return LockPlan(mode, :single, [cmd_key])
+        return LockPlan(mode, :single, cmd_key, nothing)
     end
 
     # Multi-key type operations (S_LCS, S_COMPLEN, L_MOVE)
     if cmd_name in MULTI_KEY_OPS && cmd_key !== nothing && !isempty(cmd_args)
         mode = cmd_name in READ_OPS ? :read : :write
-        return LockPlan(mode, :multi, [cmd_key, cmd_args[1]])
+        return LockPlan(mode, :multi, cmd_key, cmd_args[1])
     end
 
     # Single-key operations (all type palette commands)
     if cmd_key !== nothing
         mode = cmd_name in READ_OPS ? :read : :write
-        return LockPlan(mode, :single, [cmd_key])
+        return LockPlan(mode, :single, cmd_key, nothing)
     end
 
     # Fallback — no lock (command will likely error in route_command)
     return LockPlan()
 end
 
-"""Acquire locks according to a LockPlan. Returns shard IDs for release."""
-function acquire_locks!(db_lock::ShardedLock, plan::LockPlan)::Vector{Int}
-    plan.mode == :none && return Int[]
+"""Acquire locks according to a LockPlan. Returns shard ID(s) for release.
+Single-key returns Int (no allocation), multi/all returns Vector{Int}."""
+function acquire_locks!(db_lock::ShardedLock, plan::LockPlan)::Union{Int, Vector{Int}}
+    plan.mode == :none && return 0
 
     if plan.scope == :all
         return plan.mode == :read ? acquire_all_read!(db_lock) : acquire_all_write!(db_lock)
     elseif plan.scope == :multi
-        return plan.mode == :read ? acquire_read!(db_lock, plan.keys) : acquire_write!(db_lock, plan.keys)
+        keys = String[plan.key1, plan.key2]
+        return plan.mode == :read ? acquire_read!(db_lock, keys) : acquire_write!(db_lock, keys)
     elseif plan.scope == :single
-        return plan.mode == :read ? acquire_read!(db_lock, plan.keys[1]) : acquire_write!(db_lock, plan.keys[1])
+        return plan.mode == :read ? acquire_read!(db_lock, plan.key1) : acquire_write!(db_lock, plan.key1)
     end
 
-    return Int[]
+    return 0
 end
 
 """Release locks according to a LockPlan."""
-function release_locks!(db_lock::ShardedLock, plan::LockPlan, shard_ids::Vector{Int})
-    isempty(shard_ids) && return
-    if plan.mode == :read
-        release_read!(db_lock, shard_ids)
+function release_locks!(db_lock::ShardedLock, plan::LockPlan, shard_ids::Union{Int, Vector{Int}})
+    if shard_ids isa Int
+        shard_ids == 0 && return
+        plan.mode == :read ? release_read!(db_lock, shard_ids) : release_write!(db_lock, shard_ids)
     else
-        release_write!(db_lock, shard_ids)
+        isempty(shard_ids) && return
+        if plan.mode == :read
+            release_read!(db_lock, shard_ids)
+        else
+            release_write!(db_lock, shard_ids)
+        end
     end
 end
 
@@ -255,7 +309,7 @@ end
 # execute! — Main entry point (transaction lifecycle + locking + routing)
 # =============================================================================
 
-function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, session::ClientSession;
+function execute!(store::RadishStore, db_lock::ShardedLock, cmd::Command, session::ClientSession;
                   tracker::Union{DirtyTracker, Nothing}=nothing)
     cmd_name = cmd.name
 
@@ -279,7 +333,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
         if !session.in_transaction
             return ExecuteResult(ERROR, nothing, "EXEC without MULTI")
         end
-        return execute_transaction!(ctx, db_lock, session; tracker=tracker)
+        return execute_transaction!(store, db_lock, session; tracker=tracker)
     end
 
     if cmd_name == "BGSAVE"
@@ -287,7 +341,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
             @async begin
                 shard_ids = acquire_all_read!(db_lock)
                 try
-                    save_full_snapshot!(ctx, tracker)
+                    save_full_snapshot!(store, tracker)
                 finally
                     release_read!(db_lock, shard_ids)
                 end
@@ -317,7 +371,7 @@ function execute!(ctx::RadishContext, db_lock::ShardedLock, cmd::Command, sessio
     shard_ids = acquire_locks!(db_lock, plan)
 
     try
-        return route_command(ctx, cmd; tracker=tracker)
+        return route_command(store, cmd; tracker=tracker)
     finally
         release_locks!(db_lock, plan, shard_ids)
     end
@@ -345,7 +399,7 @@ end
 Execute a transaction: acquire write locks on all keys, then route each
 queued command through route_command (no per-command locking).
 """
-function execute_transaction!(ctx::RadishContext, db_lock::ShardedLock, session::ClientSession;
+function execute_transaction!(store::RadishStore, db_lock::ShardedLock, session::ClientSession;
                               tracker::Union{DirtyTracker, Nothing}=nothing)
     all_keys = extract_all_keys(session.queued_commands)
 
@@ -358,7 +412,7 @@ function execute_transaction!(ctx::RadishContext, db_lock::ShardedLock, session:
     results = ExecuteResult[]
     try
         for cmd in session.queued_commands
-            result = route_command(ctx, cmd; tracker=tracker)
+            result = route_command(store, cmd; tracker=tracker)
             push!(results, result)
         end
     finally

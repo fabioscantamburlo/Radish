@@ -1,5 +1,11 @@
 # RadishElement Rework — Design & Strategy
 
+> **Status: ✅ COMPLETED**
+>
+> Implemented and validated. All 424 tests passing.
+> Hot path improvement: `rmodify!` + `sincr!` went from 556 ns to 66 ns (8.4x faster).
+> See `benchmarks/pre_rework_20260410_111309.txt` and `benchmarks/post_rework.txt` for full numbers.
+
 > This document captures the design decisions made for the RadishElement rework.
 > It serves as the implementation guide for the refactor.
 

@@ -155,7 +155,7 @@ sequenceDiagram
     participant Palette as Palette (S_PALETTE)
     participant Hypercommand as Hypercommand (rget_or_expire!)
     participant TypeCommand as Type Command (sget)
-    participant Context as RadishContext
+    participant Context as RadishStore
 
     Client->>RESP: Raw bytes — "S_GET mykey\r\n"
     Note over RESP: Parses RESP protocol<br/>Builds Command struct
@@ -163,15 +163,16 @@ sequenceDiagram
     RESP->>Dispatcher: Command("S_GET", "mykey", [])
     Note over Dispatcher: resolve_locks → LockPlan<br/>acquire_locks! → read lock
 
-    Dispatcher->>Router: route_command(ctx, cmd)
+    Dispatcher->>Router: route_command(store, cmd)
     Note over Router: name = "S_GET"<br/>key  = "mykey"<br/>args = []
 
     Router->>Palette: Lookup S_PALETTE["S_GET"]
     Palette-->>Router: (sget, rget_or_expire!)
+    Note over Router: Extract store.strings<br/>(typed sub-dict)
 
-    Router->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
+    Router->>Hypercommand: rget_or_expire!(store.strings, "mykey", sget)
 
-    Hypercommand->>Context: haskey(ctx, "mykey") ?
+    Hypercommand->>Context: haskey(store.strings, "mykey") ?
     Note over Hypercommand,Context: Also checks TTL:<br/>is tinit + ttl > now() ?
 
     alt Key exists and TTL valid
@@ -281,12 +282,11 @@ end
 ```julia
 # Type command (rstrings.jl)
 function sincr!(elem::RadishElement)
-    elem_n = tryparse(Int, string(elem.value))
+    elem_n = tryparse(Int, elem.value)
     if elem_n === nothing
         return CommandError("Value '$(elem.value)' is not an integer")
     end
-    elem_n += 1
-    elem.value = string(elem_n)
+    elem.value = string(elem_n + 1)
     return CommandSuccess(true)
 end
 

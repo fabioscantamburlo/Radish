@@ -22,9 +22,9 @@ global_logger(ConsoleLogger(stderr, Logging.Error))
 # Initialize config (needed by _lget which reads CONFIG[].list_display_limit)
 init_config!()
 
-# Helper: create a string RadishElement
+# Helper: create a string RadishElement (always String-typed)
 function make_string_elem(value; ttl=nothing)
-    RadishElement(value, ttl, now(), :string)
+    RadishElement(string(value), ttl, now(), :string)
 end
 
 # Helper: create a list RadishElement with given values
@@ -47,8 +47,14 @@ function to_vector(list::DLinkedStartEnd)
     return result
 end
 
-# Helper: create a fresh RadishContext
-fresh_ctx() = RadishContext()
+# Helper: create a fresh typed string dict (for hypercommand tests)
+fresh_ctx() = Dict{String, RadishElement{String}}()
+
+# Helper: create a fresh typed list dict (for hypercommand tests)
+fresh_list_ctx() = Dict{String, RadishElement{DLinkedStartEnd{String}}}()
+
+# Helper: create a fresh RadishStore (for meta command tests)
+fresh_store() = RadishStore()
 
 println("Running Radish test suite...\n")
 

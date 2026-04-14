@@ -38,3 +38,10 @@ radish.aof
 
 # Jekyll build output
 docs/_site/
+
+# Benchmark results
+benchmarks/
+
+# Kiro specs and config
+.kiro/
+.DS_Store

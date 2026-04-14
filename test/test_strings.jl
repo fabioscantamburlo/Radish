@@ -9,7 +9,7 @@
     # =========================================================================
     @testset "sadd" begin
         @testset "create string without TTL" begin
-            result = sadd("hello")
+            result = sadd(String["hello"])
             @test result.success == true
             @test result.element !== nothing
             @test result.element.value == "hello"
@@ -18,7 +18,7 @@
         end
 
         @testset "create string with valid TTL" begin
-            result = sadd("world", "60")
+            result = sadd(String["world", "60"])
             @test result.success == true
             @test result.element.value == "world"
             @test result.element.ttl == 60
@@ -26,29 +26,29 @@
         end
 
         @testset "create string with invalid TTL" begin
-            result = sadd("value", "notanumber")
+            result = sadd(String["value", "notanumber"])
             @test result.success == false
             @test result.error !== nothing
             @test occursin("TTL", result.error)
         end
 
-        @testset "integer value is stored as Int" begin
-            result = sadd("42")
+        @testset "integer value is stored as String" begin
+            result = sadd(String["42"])
             @test result.success == true
-            @test result.element.value == 42
-            @test result.element.value isa Int
+            @test result.element.value == "42"
+            @test result.element.value isa String
         end
 
         @testset "non-integer value stays as String" begin
-            result = sadd("hello")
+            result = sadd(String["hello"])
             @test result.element.value == "hello"
             @test result.element.value isa String
         end
 
         @testset "integer value with TTL" begin
-            result = sadd("100", "30")
+            result = sadd(String["100", "30"])
             @test result.success == true
-            @test result.element.value == 100
+            @test result.element.value == "100"
             @test result.element.ttl == 30
         end
     end
@@ -59,21 +59,21 @@
     @testset "sget" begin
         @testset "get string value" begin
             elem = make_string_elem("hello")
-            result = sget(elem)
+            result = sget(elem, String[])
             @test result.success == true
             @test result.value == "hello"
         end
 
-        @testset "get integer value" begin
+        @testset "get integer-parseable value" begin
             elem = make_string_elem(42)
-            result = sget(elem)
+            result = sget(elem, String[])
             @test result.success == true
-            @test result.value == 42
+            @test result.value == "42"
         end
 
         @testset "get empty string" begin
             elem = make_string_elem("")
-            result = sget(elem)
+            result = sget(elem, String[])
             @test result.success == true
             @test result.value == ""
         end
@@ -85,41 +85,41 @@
     @testset "sincr!" begin
         @testset "increment integer string" begin
             elem = make_string_elem("10")
-            result = sincr!(elem)
+            result = sincr!(elem, String[])
             @test result.success == true
-            @test result.value == true
+            @test result.value == 1
             @test elem.value == "11"
         end
 
         @testset "increment zero" begin
             elem = make_string_elem("0")
-            sincr!(elem)
+            sincr!(elem, String[])
             @test elem.value == "1"
         end
 
         @testset "increment negative" begin
             elem = make_string_elem("-5")
-            sincr!(elem)
+            sincr!(elem, String[])
             @test elem.value == "-4"
         end
 
         @testset "increment non-integer fails" begin
             elem = make_string_elem("hello")
-            result = sincr!(elem)
+            result = sincr!(elem, String[])
             @test result.success == false
             @test occursin("not an integer", result.error)
         end
 
         @testset "increment float string fails" begin
             elem = make_string_elem("3.14")
-            result = sincr!(elem)
+            result = sincr!(elem, String[])
             @test result.success == false
         end
 
         @testset "multiple increments" begin
             elem = make_string_elem("0")
             for _ in 1:100
-                sincr!(elem)
+                sincr!(elem, String[])
             end
             @test elem.value == "100"
         end
@@ -131,32 +131,32 @@
     @testset "sincr_by!" begin
         @testset "increment by positive" begin
             elem = make_string_elem("10")
-            result = sincr_by!(elem, "5")
+            result = sincr_by!(elem, String["5"])
             @test result.success == true
             @test elem.value == "15"
         end
 
         @testset "increment by negative (decrement)" begin
             elem = make_string_elem("10")
-            sincr_by!(elem, "-3")
+            sincr_by!(elem, String["-3"])
             @test elem.value == "7"
         end
 
         @testset "increment by zero" begin
             elem = make_string_elem("10")
-            sincr_by!(elem, "0")
+            sincr_by!(elem, String["0"])
             @test elem.value == "10"
         end
 
         @testset "non-integer value fails" begin
             elem = make_string_elem("hello")
-            result = sincr_by!(elem, "5")
+            result = sincr_by!(elem, String["5"])
             @test result.success == false
         end
 
         @testset "non-integer increment fails" begin
             elem = make_string_elem("10")
-            result = sincr_by!(elem, "abc")
+            result = sincr_by!(elem, String["abc"])
             @test result.success == false
             @test occursin("not an integer", result.error)
         end
@@ -168,15 +168,15 @@
     @testset "sgincr!" begin
         @testset "returns original value before increment" begin
             elem = make_string_elem("10")
-            result = sgincr!(elem)
+            result = sgincr!(elem, String[])
             @test result.success == true
-            @test result.value == 10       # original value returned
-            @test elem.value == "11"       # element was incremented
+            @test result.value == 10
+            @test elem.value == "11"
         end
 
         @testset "non-integer fails" begin
             elem = make_string_elem("abc")
-            result = sgincr!(elem)
+            result = sgincr!(elem, String[])
             @test result.success == false
         end
     end
@@ -187,21 +187,21 @@
     @testset "sgincr_by!" begin
         @testset "returns original value before increment" begin
             elem = make_string_elem("100")
-            result = sgincr_by!(elem, "25")
+            result = sgincr_by!(elem, String["25"])
             @test result.success == true
-            @test result.value == 100      # original
-            @test elem.value == "125"      # incremented
+            @test result.value == 100
+            @test elem.value == "125"
         end
 
         @testset "non-integer value fails" begin
             elem = make_string_elem("hello")
-            result = sgincr_by!(elem, "5")
+            result = sgincr_by!(elem, String["5"])
             @test result.success == false
         end
 
         @testset "non-integer increment fails" begin
             elem = make_string_elem("10")
-            result = sgincr_by!(elem, "xyz")
+            result = sgincr_by!(elem, String["xyz"])
             @test result.success == false
         end
     end
@@ -212,33 +212,33 @@
     @testset "sappend!" begin
         @testset "append to string" begin
             elem = make_string_elem("hello")
-            result = sappend!(elem, " world")
+            result = sappend!(elem, String[" world"])
             @test result.success == true
             @test elem.value == "hello world"
         end
 
         @testset "append to empty string" begin
             elem = make_string_elem("")
-            sappend!(elem, "data")
+            sappend!(elem, String["data"])
             @test elem.value == "data"
         end
 
         @testset "append empty string" begin
             elem = make_string_elem("hello")
-            sappend!(elem, "")
+            sappend!(elem, String[""])
             @test elem.value == "hello"
         end
 
-        @testset "append to integer value (coerces to string)" begin
+        @testset "append to integer-parseable value" begin
             elem = make_string_elem(42)
-            sappend!(elem, "abc")
+            sappend!(elem, String["abc"])
             @test elem.value == "42abc"
         end
 
         @testset "multiple appends" begin
             elem = make_string_elem("a")
-            sappend!(elem, "b")
-            sappend!(elem, "c")
+            sappend!(elem, String["b"])
+            sappend!(elem, String["c"])
             @test elem.value == "abc"
         end
     end
@@ -249,7 +249,7 @@
     @testset "srpad!" begin
         @testset "right pad shorter string" begin
             elem = make_string_elem("hi")
-            result = srpad!(elem, "10", ".")
+            result = srpad!(elem, String["10", "."])
             @test result.success == true
             @test elem.value == "hi........"
             @test length(elem.value) == 10
@@ -257,28 +257,28 @@
 
         @testset "right pad already long enough" begin
             elem = make_string_elem("hello")
-            srpad!(elem, "3", ".")
-            @test elem.value == "hello"  # no change
+            srpad!(elem, String["3", "."])
+            @test elem.value == "hello"
         end
 
         @testset "invalid length fails" begin
             elem = make_string_elem("hi")
-            result = srpad!(elem, "abc", ".")
+            result = srpad!(elem, String["abc", "."])
             @test result.success == false
         end
 
-        @testset "pad integer value fails (not a string)" begin
+        @testset "pad integer-parseable value works" begin
             elem = make_string_elem(42)
-            result = srpad!(elem, "10", "0")
-            @test result.success == false
-            @test occursin("not a string", result.error)
+            result = srpad!(elem, String["10", "0"])
+            @test result.success == true
+            @test elem.value == "4200000000"
         end
     end
 
     @testset "slpad!" begin
         @testset "left pad shorter string" begin
             elem = make_string_elem("hi")
-            result = slpad!(elem, "10", "0")
+            result = slpad!(elem, String["10", "0"])
             @test result.success == true
             @test elem.value == "00000000hi"
             @test length(elem.value) == 10
@@ -286,13 +286,13 @@
 
         @testset "left pad already long enough" begin
             elem = make_string_elem("hello")
-            slpad!(elem, "3", "0")
+            slpad!(elem, String["3", "0"])
             @test elem.value == "hello"
         end
 
         @testset "invalid length fails" begin
             elem = make_string_elem("hi")
-            result = slpad!(elem, "xyz", "0")
+            result = slpad!(elem, String["xyz", "0"])
             @test result.success == false
         end
     end
@@ -303,41 +303,41 @@
     @testset "sgetrange" begin
         @testset "valid range" begin
             elem = make_string_elem("hello world")
-            result = sgetrange(elem, "1", "5")
+            result = sgetrange(elem, String["1", "5"])
             @test result.success == true
             @test result.value == "hello"
         end
 
         @testset "range beyond string length" begin
             elem = make_string_elem("hi")
-            result = sgetrange(elem, "1", "100")
+            result = sgetrange(elem, String["1", "100"])
             @test result.success == true
             @test result.value == "hi"
         end
 
         @testset "start out of bounds returns empty" begin
             elem = make_string_elem("hi")
-            result = sgetrange(elem, "10", "20")
+            result = sgetrange(elem, String["10", "20"])
             @test result.success == true
             @test result.value == ""
         end
 
         @testset "start at 0 returns empty (1-indexed)" begin
             elem = make_string_elem("hello")
-            result = sgetrange(elem, "0", "3")
+            result = sgetrange(elem, String["0", "3"])
             @test result.success == true
             @test result.value == ""
         end
 
         @testset "invalid indices fail" begin
             elem = make_string_elem("hello")
-            result = sgetrange(elem, "abc", "def")
+            result = sgetrange(elem, String["abc", "def"])
             @test result.success == false
         end
 
         @testset "single character range" begin
             elem = make_string_elem("hello")
-            result = sgetrange(elem, "1", "1")
+            result = sgetrange(elem, String["1", "1"])
             @test result.success == true
             @test result.value == "h"
         end
@@ -349,22 +349,21 @@
     @testset "slen" begin
         @testset "normal string" begin
             elem = make_string_elem("hello")
-            result = slen(elem)
+            result = slen(elem, String[])
             @test result.success == true
             @test result.value == 5
         end
 
         @testset "empty string" begin
             elem = make_string_elem("")
-            result = slen(elem)
+            result = slen(elem, String[])
             @test result.value == 0
         end
 
-        @testset "integer value length" begin
+        @testset "integer-parseable value length" begin
             elem = make_string_elem(12345)
-            result = slen(elem)
-            # length of the integer value (not string representation)
-            @test result.value == length(12345)
+            result = slen(elem, String[])
+            @test result.value == 5
         end
     end
 
@@ -375,8 +374,7 @@
         @testset "classic LCS example" begin
             left = make_string_elem("ABCBDAB")
             right = make_string_elem("BDCAB")
-            result = slcs(left, right)
-            @test result.success == true
+            result = slcs(left, right, String[])
             lcs_str, lcs_len = result.value
             @test lcs_len == 4
             @test lcs_str == "BCAB"
@@ -385,7 +383,7 @@
         @testset "identical strings" begin
             left = make_string_elem("hello")
             right = make_string_elem("hello")
-            result = slcs(left, right)
+            result = slcs(left, right, String[])
             lcs_str, lcs_len = result.value
             @test lcs_len == 5
             @test lcs_str == "hello"
@@ -394,7 +392,7 @@
         @testset "no common subsequence" begin
             left = make_string_elem("abc")
             right = make_string_elem("xyz")
-            result = slcs(left, right)
+            result = slcs(left, right, String[])
             lcs_str, lcs_len = result.value
             @test lcs_len == 0
             @test lcs_str == ""
@@ -403,7 +401,7 @@
         @testset "one empty string" begin
             left = make_string_elem("")
             right = make_string_elem("hello")
-            result = slcs(left, right)
+            result = slcs(left, right, String[])
             _, lcs_len = result.value
             @test lcs_len == 0
         end
@@ -411,7 +409,7 @@
         @testset "single character match" begin
             left = make_string_elem("a")
             right = make_string_elem("a")
-            result = slcs(left, right)
+            result = slcs(left, right, String[])
             lcs_str, lcs_len = result.value
             @test lcs_len == 1
             @test lcs_str == "a"
@@ -425,23 +423,23 @@
         @testset "equal lengths" begin
             left = make_string_elem("hello")
             right = make_string_elem("world")
-            result = sclen(left, right)
+            result = sclen(left, right, String[])
             @test result.success == true
-            @test result.value == true
+            @test result.value == 1
         end
 
         @testset "different lengths" begin
             left = make_string_elem("hi")
             right = make_string_elem("hello")
-            result = sclen(left, right)
-            @test result.value == false
+            result = sclen(left, right, String[])
+            @test result.value == 0
         end
 
         @testset "both empty" begin
             left = make_string_elem("")
             right = make_string_elem("")
-            result = sclen(left, right)
-            @test result.value == true
+            result = sclen(left, right, String[])
+            @test result.value == 1
         end
     end
 

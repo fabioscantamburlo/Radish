@@ -8,6 +8,14 @@
 using Pkg
 Pkg.activate(".")
 
+using Logging
+# Enable info-level logging (use RADISH_DEBUG=1 env var for debug)
+if get(ENV, "RADISH_DEBUG", "") == "1"
+    global_logger(ConsoleLogger(stderr, Logging.Debug))
+else
+    global_logger(ConsoleLogger(stderr, Logging.Info))
+end
+
 include("Radish.jl")
 using .Radish
 

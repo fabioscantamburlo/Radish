@@ -336,7 +336,7 @@
     # =========================================================================
     @testset "ladd!" begin
         @testset "create list without TTL" begin
-            result = ladd!("first")
+            result = ladd!(String["first"])
             @test result.success == true
             @test result.element !== nothing
             @test result.element.datatype == :list
@@ -347,13 +347,13 @@
         end
 
         @testset "create list with valid TTL" begin
-            result = ladd!("first", "120")
+            result = ladd!(String["first", "120"])
             @test result.success == true
             @test result.element.ttl == 120
         end
 
         @testset "create list with invalid TTL" begin
-            result = ladd!("first", "notanumber")
+            result = ladd!(String["first", "notanumber"])
             @test result.success == false
             @test occursin("TTL", result.error)
         end
@@ -365,27 +365,20 @@
     @testset "lprepend!" begin
         @testset "prepend to existing list" begin
             elem = make_list_elem(["b", "c"])
-            result = lprepend!(elem, "a")
+            result = lprepend!(elem, String["a"])
             @test result.success == true
             @test to_vector(elem.value) == ["a", "b", "c"]
         end
 
-        @testset "prepend with TTL (ignored)" begin
-            elem = make_list_elem(["b"])
-            result = lprepend!(elem, "a", "60")
-            @test result.success == true
-            @test to_vector(elem.value) == ["a", "b"]
-        end
-
         @testset "prepend without element creates list" begin
-            result = lprepend!("newvalue")
+            result = lprepend!(String["newvalue"])
             @test result.success == true
             @test result.element !== nothing
             @test result.element.value.head.data == "newvalue"
         end
 
         @testset "prepend without element with TTL creates list" begin
-            result = lprepend!("newvalue", "60")
+            result = lprepend!(String["newvalue", "60"])
             @test result.success == true
             @test result.element.ttl == 60
         end
@@ -397,20 +390,13 @@
     @testset "lappend!" begin
         @testset "append to existing list" begin
             elem = make_list_elem(["a", "b"])
-            result = lappend!(elem, "c")
+            result = lappend!(elem, String["c"])
             @test result.success == true
             @test to_vector(elem.value) == ["a", "b", "c"]
         end
 
-        @testset "append with TTL (ignored)" begin
-            elem = make_list_elem(["a"])
-            result = lappend!(elem, "b", "60")
-            @test result.success == true
-            @test to_vector(elem.value) == ["a", "b"]
-        end
-
         @testset "append without element creates list" begin
-            result = lappend!("newvalue")
+            result = lappend!(String["newvalue"])
             @test result.success == true
             @test result.element !== nothing
         end
@@ -422,14 +408,13 @@
     @testset "lget" begin
         @testset "get list contents" begin
             elem = make_list_elem(["a", "b", "c"])
-            result = lget(elem)
-            @test result.success == true
+            result = lget(elem, String[])
             @test result.value == ["a", "b", "c"]
         end
 
         @testset "get single-element list" begin
             elem = make_list_elem(["only"])
-            result = lget(elem)
+            result = lget(elem, String[])
             @test result.value == ["only"]
         end
     end
@@ -440,14 +425,14 @@
     @testset "llen" begin
         @testset "multi-element list" begin
             elem = make_list_elem(["a", "b", "c"])
-            result = llen(elem)
+            result = llen(elem, String[])
             @test result.success == true
             @test result.value == 3
         end
 
         @testset "single-element list" begin
             elem = make_list_elem(["a"])
-            result = llen(elem)
+            result = llen(elem, String[])
             @test result.value == 1
         end
     end
@@ -458,35 +443,35 @@
     @testset "lrange" begin
         @testset "valid range" begin
             elem = make_list_elem(["a", "b", "c", "d", "e"])
-            result = lrange(elem, "2", "4")
-            @test result.success == true
+            result = lrange(elem, String["2", "4"])
+            @test result isa CommandDirect
             @test result.value == ["b", "c", "d"]
         end
 
         @testset "range beyond list length" begin
             elem = make_list_elem(["a", "b"])
-            result = lrange(elem, "1", "100")
-            @test result.success == true
+            result = lrange(elem, String["1", "100"])
+            @test result isa CommandDirect
             @test result.value == ["a", "b"]
         end
 
         @testset "start out of bounds" begin
             elem = make_list_elem(["a", "b"])
-            result = lrange(elem, "10", "20")
-            @test result.success == true
+            result = lrange(elem, String["10", "20"])
+            @test result isa CommandDirect
             @test result.value == []
         end
 
         @testset "invalid indices" begin
             elem = make_list_elem(["a"])
-            result = lrange(elem, "abc", "def")
+            result = lrange(elem, String["abc", "def"])
             @test result.success == false
         end
 
         @testset "single element range" begin
             elem = make_list_elem(["a", "b", "c"])
-            result = lrange(elem, "2", "2")
-            @test result.success == true
+            result = lrange(elem, String["2", "2"])
+            @test result isa CommandDirect
             @test result.value == ["b"]
         end
     end
@@ -497,14 +482,14 @@
     @testset "ltrimr!" begin
         @testset "trim right" begin
             elem = make_list_elem(["a", "b", "c", "d"])
-            result = ltrimr!(elem, "2")
+            result = ltrimr!(elem, String["2"])
             @test result.success == true
             @test to_vector(elem.value) == ["a", "b"]
         end
 
         @testset "invalid value fails" begin
             elem = make_list_elem(["a", "b"])
-            result = ltrimr!(elem, "abc")
+            result = ltrimr!(elem, String["abc"])
             @test result.success == false
         end
     end
@@ -512,14 +497,14 @@
     @testset "ltriml!" begin
         @testset "trim left" begin
             elem = make_list_elem(["a", "b", "c", "d"])
-            result = ltriml!(elem, "2")
+            result = ltriml!(elem, String["2"])
             @test result.success == true
             @test to_vector(elem.value) == ["c", "d"]
         end
 
         @testset "invalid value fails" begin
             elem = make_list_elem(["a", "b"])
-            result = ltriml!(elem, "abc")
+            result = ltriml!(elem, String["abc"])
             @test result.success == false
         end
     end
@@ -530,8 +515,7 @@
     @testset "lpop!" begin
         @testset "pop from tail" begin
             elem = make_list_elem(["a", "b", "c"])
-            result = lpop!(elem)
-            @test result.success == true
+            result = lpop!(elem, String[])
             @test result.value == "c"
             @test elem.value.len == 2
             @test to_vector(elem.value) == ["a", "b"]
@@ -539,7 +523,7 @@
 
         @testset "pop last element" begin
             elem = make_list_elem(["only"])
-            result = lpop!(elem)
+            result = lpop!(elem, String[])
             @test result.value == "only"
             @test elem.value.len == 0
         end
@@ -548,8 +532,7 @@
     @testset "ldequeue!" begin
         @testset "dequeue from head" begin
             elem = make_list_elem(["a", "b", "c"])
-            result = ldequeue!(elem)
-            @test result.success == true
+            result = ldequeue!(elem, String[])
             @test result.value == "a"
             @test elem.value.len == 2
             @test to_vector(elem.value) == ["b", "c"]
@@ -557,7 +540,7 @@
 
         @testset "dequeue last element" begin
             elem = make_list_elem(["only"])
-            result = ldequeue!(elem)
+            result = ldequeue!(elem, String[])
             @test result.value == "only"
             @test elem.value.len == 0
         end
@@ -570,7 +553,7 @@
         @testset "move list into another" begin
             left = make_list_elem(["a", "b"])
             right = make_list_elem(["c", "d"])
-            result = lmove!(left, right)
+            result = lmove!(left, right, String[])
             @test result.success == true
             @test to_vector(left.value) == ["a", "b", "c", "d"]
             @test right.value.len == 0

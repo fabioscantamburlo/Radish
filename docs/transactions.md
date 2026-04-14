@@ -111,7 +111,7 @@ sequenceDiagram
     participant Dispatcher as execute!
     participant Router as route_command
     participant Lock as ShardedLock
-    participant Context as RadishContext
+    participant Context as RadishStore
 
     Client->>Dispatcher: EXEC
     Dispatcher->>Dispatcher: Extract all keys from queued commands

@@ -3,6 +3,7 @@ using Logging
 using StatsBase
 using Sockets
 using ConcurrentUtilities
+using Base.Threads: @spawn
 
 export RadishElement, S_PALETTE, LL_PALETTE
 export start_server
@@ -19,6 +20,25 @@ const AOF_EXCLUDED_OPS = union(READ_OPS, Set(["PING", "QUIT", "EXIT", "BGSAVE", 
 # ============================================================================
 
 """
+Background task: AOF periodic flusher for "everysec" sync policy.
+Flushes the AOF IOStream once per second. Only runs when aof_sync_policy == "everysec".
+"""
+function async_aof_flusher(aof::AOFState)
+    while true
+        try
+            sleep(1.0)
+            lock(aof.lock) do
+                if aof.io !== nothing && isopen(aof.io)
+                    flush(aof.io)
+                end
+            end
+        catch e
+            @error "AOF flusher error: $e"
+        end
+    end
+end
+
+"""
 Background task: Async syncer for persistence (sharded RDB)
 - Runs every SYNC_INTERVAL seconds
 - Pops dirty changes atomically from the tracker
@@ -26,7 +46,7 @@ Background task: Async syncer for persistence (sharded RDB)
 - Saves only dirty keys to their respective shard files
 - Truncates AOF after each successful snapshot sync
 """
-function async_syncer(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyTracker, aof::AOFState)
+function async_syncer(store::RadishStore, db_lock::ShardedLock, tracker::DirtyTracker, aof::AOFState)
     while true
         try
             sleep(CONFIG[].sync_interval_sec)
@@ -43,10 +63,10 @@ function async_syncer(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyTr
 
             # Determine affected shard IDs
             dirty_shard_set = Set{Int}()
-            for key in modified
+            for key in keys(modified)
                 push!(dirty_shard_set, snapshot_shard_id(key))
             end
-            for key in deleted
+            for key in keys(deleted)
                 push!(dirty_shard_set, snapshot_shard_id(key))
             end
             sorted_shards = sort(collect(dirty_shard_set))
@@ -57,7 +77,7 @@ function async_syncer(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyTr
             end
 
             try
-                count = save_snapshot_shards!(ctx, modified, deleted)
+                count = save_snapshot_shards!(store, modified, deleted)
                 if count > 0
                     @info "Syncer: Saved $count entries across $(length(sorted_shards)) shards"
                 end
@@ -82,60 +102,82 @@ Background task: Async cleaner for TTL expiration
 - Samples keys and removes expired ones
 - Marks deleted keys in tracker for persistence
 """
-function async_cleaner(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyTracker)
+function async_cleaner(store::RadishStore, db_lock::ShardedLock, tracker::DirtyTracker)
     while true
         try
-            # Snapshot keys without locks for performance
-            all_keys = collect(keys(ctx))
+            cfg = CONFIG[]
 
-            if isempty(all_keys)
-                sleep(CONFIG[].cleaner_interval_sec)
+            # Collect only TTL keys by iterating typed dicts directly (OPTIM 2.1)
+            # Skips non-TTL keys entirely — no collect(store_keys) allocation
+            ttl_keys = Tuple{String, Symbol}[]
+            for (key, elem) in store.strings
+                elem.expires_at !== nothing && push!(ttl_keys, (key, :string))
+            end
+            for (key, elem) in store.lists
+                elem.expires_at !== nothing && push!(ttl_keys, (key, :list))
+            end
+
+            if isempty(ttl_keys)
+                sleep(cfg.cleaner_interval_sec)
                 continue
             end
 
-            all_key_len = length(all_keys)
-            cfg = CONFIG[]
-            # Sample keys randomly, or all if below threshold
-            if all_key_len < cfg.sampling_threshold
-                sampled_keys = all_keys
+            # Sample from TTL keys only
+            if length(ttl_keys) < cfg.sampling_threshold
+                sampled = ttl_keys
             else
-                sample_size = max(1, round(Int, cfg.sample_percentage * length(all_keys)))
-                sampled_keys = sample(all_keys, sample_size, replace=false)
+                sample_size = max(1, round(Int, cfg.sample_percentage * length(ttl_keys)))
+                sampled = sample(ttl_keys, sample_size, replace=false)
             end
 
-            # Group keys by shard
-            keys_by_shard = Dict{Int, Vector{String}}()
-            for key in sampled_keys
+            # Group by shard
+            keys_by_shard = Dict{Int, Vector{Tuple{String, Symbol}}}()
+            for (key, dt) in sampled
                 shard = shard_id(db_lock, key)
                 if !haskey(keys_by_shard, shard)
-                    keys_by_shard[shard] = String[]
+                    keys_by_shard[shard] = Tuple{String, Symbol}[]
                 end
-                push!(keys_by_shard[shard], key)
+                push!(keys_by_shard[shard], (key, dt))
             end
 
             # Process one shard at a time
             shard_list = sort(collect(Base.keys(keys_by_shard)))
             total_cleaned = 0
+            t = now()  # Cache once per cleaner cycle (OPTIM 2.7)
 
-            @debug "Cleaner: checking $(length(sampled_keys)) keys across $(length(shard_list)) shards"
+            @debug "Cleaner: checking $(length(sampled)) TTL keys across $(length(shard_list)) shards"
 
             for shard in shard_list
-                Base.lock(db_lock.shards[shard])
-
+                # Phase 1: read-lock to identify expired keys (OPTIM 2.2)
+                expired_in_shard = Tuple{String, Symbol}[]
+                readlock(db_lock.shards[shard])
                 try
-                    for key in keys_by_shard[shard]
-                        if haskey(ctx, key)
-                            elem = ctx[key]
-                            if elem.ttl !== nothing && now() > elem.tinit + Second(elem.ttl)
-                                delete!(ctx, key)
-                                # Mark as deleted for persistence
-                                mark_deleted!(tracker, key)
-                                total_cleaned += 1
-                            end
+                    for (key, dt) in keys_by_shard[shard]
+                        elem = store_get_typed_key(store, dt, key)
+                        if elem !== nothing && elem.expires_at !== nothing && t > elem.expires_at
+                            push!(expired_in_shard, (key, dt))
                         end
                     end
                 finally
-                    Base.unlock(db_lock.shards[shard])
+                    readunlock(db_lock.shards[shard])
+                end
+
+                # Phase 2: write-lock only if there are keys to delete
+                if !isempty(expired_in_shard)
+                    Base.lock(db_lock.shards[shard])
+                    try
+                        for (key, dt) in expired_in_shard
+                            # Re-check under write lock (key may have been modified/deleted)
+                            elem = store_get_typed_key(store, dt, key)
+                            if elem !== nothing && elem.expires_at !== nothing && t > elem.expires_at
+                                store_delete!(store, key)
+                                mark_deleted!(tracker, key, dt)
+                                total_cleaned += 1
+                            end
+                        end
+                    finally
+                        Base.unlock(db_lock.shards[shard])
+                    end
                 end
             end
 
@@ -143,7 +185,7 @@ function async_cleaner(ctx::RadishContext, db_lock::ShardedLock, tracker::DirtyT
                 @info "Cleaner: removed $total_cleaned expired keys"
             end
 
-            sleep(CONFIG[].cleaner_interval_sec)
+            sleep(cfg.cleaner_interval_sec)
 
         catch e
             @error "Cleaner error: $e"
@@ -156,7 +198,7 @@ end
 # Client Handler
 # ============================================================================
 
-function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::ShardedLock,
+function handle_client(sock::TCPSocket, store::RadishStore, db_lock::ShardedLock,
                        tracker::DirtyTracker, aof::AOFState, client_id::Int)
     @info "Client #$client_id connected from $(getpeername(sock))"
 
@@ -164,14 +206,14 @@ function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::ShardedLock
         # Send welcome message
         write(sock, "+Welcome to Radish Server\r\n")
         session = ClientSession()
+        reader = RESPReader(sock)
 
         while isopen(sock)
-            # Read RESP command from socket
-            cmd = read_resp_command(sock)
+            # Read RESP command from buffered reader
+            cmd = read_resp_command(reader)
 
             if cmd === nothing
-                write(sock, "-ERR Invalid command format\r\n")
-                continue
+                break
             end
 
             # AOF Write-Ahead Logging
@@ -193,7 +235,7 @@ function handle_client(sock::TCPSocket, ctx::RadishContext, db_lock::ShardedLock
             end
 
             # Execute via dispatcher with tracker
-            result = execute!(ctx, db_lock, cmd, session; tracker=tracker)
+            result = execute!(store, db_lock, cmd, session; tracker=tracker)
 
             # Write RESP response back
             write_resp_response(sock, result)
@@ -230,29 +272,29 @@ function start_server(host::String=CONFIG[].host, port::Int=CONFIG[].port)
     ensure_persistence_dirs!()
 
     # Initialize context, lock, dirty tracker, and AOF
-    ctx = RadishContext()
+    store = RadishStore()
     db_lock = ShardedLock(cfg.num_shards)
     tracker = DirtyTracker()
     aof = AOFState(aof_path(cfg))
 
     # Load snapshot from sharded RDB files
     println("Loading snapshot...")
-    loaded_count = load_snapshot!(ctx)
+    loaded_count = load_snapshot!(store)
     if loaded_count > 0
         println("Restored $loaded_count keys from snapshot")
     else
         println("Starting with empty database")
         # Seed test data only if no snapshot
-        radd!(ctx, "author", sadd, "https://github.com/fabioscantamburlo"; tracker=tracker) # EASTER EGG!
+        radd!(store.strings, "author", sadd, String["https://github.com/fabioscantamburlo"]; tracker=tracker)
+        store.keytype["author"] = :string
     end
 
     # Replay AOF if exists (crash recovery)
     println("Checking for AOF replay...")
-    aof_count = replay_aof!(ctx, db_lock)
+    aof_count = replay_aof!(store, db_lock)
     if aof_count > 0
         println("Replayed $aof_count commands from AOF")
-        # After replay, save a fresh snapshot and clear AOF
-        save_full_snapshot!(ctx, tracker)
+        save_full_snapshot!(store, tracker)
         open(aof_path(cfg), "w") do f end
         println("Post-replay snapshot saved, AOF cleared")
     end
@@ -262,8 +304,12 @@ function start_server(host::String=CONFIG[].host, port::Int=CONFIG[].port)
 
     # Start background tasks
     println("Starting background tasks...")
-    @async async_cleaner(ctx, db_lock, tracker)
-    @async async_syncer(ctx, db_lock, tracker, aof)
+    @async async_cleaner(store, db_lock, tracker)
+    @async async_syncer(store, db_lock, tracker, aof)
+    if cfg.aof_sync_policy == "everysec"
+        @async async_aof_flusher(aof)
+        println("  AOF flusher: every 1s (everysec policy)")
+    end
 
     # Start TCP server
     server = listen(IPv4(host), port)
@@ -299,14 +345,14 @@ function start_server(host::String=CONFIG[].host, port::Int=CONFIG[].port)
         while true
             sock = accept(server)
             client_counter += 1
-            @async handle_client(sock, ctx, db_lock, tracker, aof, client_counter)
+            @spawn handle_client(sock, store, db_lock, tracker, aof, client_counter)
         end
     catch e
         if isa(e, InterruptException)
             println("\nShutting down Radish server...")
             # Save final snapshot before exit
             println("Saving final snapshot...")
-            save_full_snapshot!(ctx, tracker)
+            save_full_snapshot!(store, tracker)
             # Close and remove AOF (snapshot is complete)
             aof_close!(aof)
             aof_file = aof_path(cfg)

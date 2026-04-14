@@ -33,6 +33,13 @@ struct RadishConfig
 
     # Data limits
     list_display_limit::Int
+
+    # Client defaults
+    pipeline_batch::Int
+    pipeline_flush_ms::Int
+
+    # AOF sync policy: "always" (flush every command), "everysec" (flush every second), "no" (OS decides)
+    aof_sync_policy::String
 end
 
 """Derived paths from the config."""
@@ -62,6 +69,7 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
     conc = get(raw, "concurrency", Dict())
     ttl = get(raw, "ttl_cleanup", Dict())
     dl = get(raw, "data_limits", Dict())
+    cl = get(raw, "client", Dict())
 
     # Resolve num_shards with backward compatibility
     num_shards = get(conc, "num_shards",
@@ -87,6 +95,11 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
         Float64(get(ttl, "sample_percentage", 0.10)),
         # Data limits
         get(dl, "list_display_limit", 50),
+        # Client defaults
+        get(cl, "pipeline_batch", 1000),
+        get(cl, "pipeline_flush_ms", 5),
+        # AOF sync policy
+        get(pers, "aof_sync_policy", "always"),
     )
 end
 

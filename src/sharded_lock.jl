@@ -9,20 +9,20 @@ end
 
 ShardedLock(n::Int=256) = ShardedLock([ReadWriteLock() for _ in 1:n], n)
 
-shard_id(lock::ShardedLock, key::String) = (hash(key) % lock.num_shards) + 1
+shard_id(lock::ShardedLock, key::String)::Int = (hash(key) % lock.num_shards) + 1
 
-# Single key read
-function acquire_read!(lock::ShardedLock, key::String)
+# Single key read — returns shard ID directly (no Vector allocation)
+function acquire_read!(lock::ShardedLock, key::String)::Int
     id = shard_id(lock, key)
     readlock(lock.shards[id])
-    return [id]
+    return id
 end
 
-# Single key write
-function acquire_write!(lock::ShardedLock, key::String)
+# Single key write — returns shard ID directly (no Vector allocation)
+function acquire_write!(lock::ShardedLock, key::String)::Int
     id = shard_id(lock, key)
     Base.lock(lock.shards[id])
-    return [id]
+    return id
 end
 
 # Multi-key read (ordered)
@@ -43,14 +43,24 @@ function acquire_write!(lock::ShardedLock, key_list::Vector{String})
     return shard_ids
 end
 
-# Release read locks (reverse order)
+# Release single shard read lock
+function release_read!(lock::ShardedLock, shard_id::Int)
+    readunlock(lock.shards[shard_id])
+end
+
+# Release single shard write lock
+function release_write!(lock::ShardedLock, shard_id::Int)
+    Base.unlock(lock.shards[shard_id])
+end
+
+# Release read locks (reverse order) — multi-shard
 function release_read!(lock::ShardedLock, shard_ids::Vector)
     for id in reverse(shard_ids)
         readunlock(lock.shards[id])
     end
 end
 
-# Release write locks (reverse order)
+# Release write locks (reverse order) — multi-shard
 function release_write!(lock::ShardedLock, shard_ids::Vector)
     for id in reverse(shard_ids)
         Base.unlock(lock.shards[id])

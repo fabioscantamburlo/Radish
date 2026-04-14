@@ -34,65 +34,48 @@ function DLinkedStartEnd(value::T) where T
 end
 
 
-"""Function used to create a list of 1 element. It's the main command to create a list.
-"""
-function ladd!(value::AbstractString)
-    new_element =  DLinkedStartEnd(value)
-    elem = RadishElement(new_element, nothing, now(), :list)
-    return CommandCreate(elem)
-end
-
-"""Function used to create a list of 1 element. It's the main command to create a list.
-In this version ttl is implemented, ladd! takes care of converting ttl to Int
-"""
-function ladd!(value::AbstractString, ttl::AbstractString)
-    ttl_p = tryparse(Int, ttl)
-    if isa(ttl_p, Nothing)
-        return CommandError("TTL must be a valid integer, got '$ttl'")
+"""Function used to create a list element — dispatches on args length for optional TTL."""
+function ladd!(args::Vector{String})
+    if length(args) == 2
+        value = args[1]
+        ttl = args[2]
+        ttl_p = tryparse(Int, ttl)
+        if isa(ttl_p, Nothing)
+            return CommandError("TTL must be a valid integer, got '$ttl'")
+        end
+        new_element = DLinkedStartEnd(value)
+        elem = RadishElement(new_element, ttl_p, now(), :list)
+        return CommandCreate(elem)
+    else
+        value = args[1]
+        new_element = DLinkedStartEnd(value)
+        elem = RadishElement(new_element, nothing, now(), :list)
+        return CommandCreate(elem)
     end
-    new_element = DLinkedStartEnd(value)
-    elem = RadishElement(new_element, ttl_p, now(), :list)
-    return CommandCreate(elem)
-end 
+end
 
 """
-    lprepend!(elem::RadishElement, value::AbstractString)
+    lprepend!(elem::RadishElement, args::Vector{String})
 
-Prepend a value to the list.
+Prepend a value to the list (modifier path).
 """
-function lprepend!(elem::RadishElement, value::AbstractString)
-    @debug "Executing lprepend! with elements '$elem' , '$value' "
+function lprepend!(elem::RadishElement, args::Vector{String})
+    value = args[1]
+    @debug "Executing lprepend!" elem=elem value=value
     push!(elem.value, value)
-    return CommandSuccess(true)
+    return CommandSuccess(1)
 end
 
-"""#2) lprepend! with radish element, value and ttl -> Push into the list ttl has no effect
-TTL is added to do not break code in case of the user does not know if list already exists
-and wants to create TTL in case does not exist the element.
-"""
-function lprepend!(elem::RadishElement, value::AbstractString, ttl::AbstractString)
-    @debug "Executing lprepend! with elements '$elem' , '$value' '$ttl"
-    @warn "Received ttl while prepending, ttl will have no effect"
-    push!(elem.value, value)
-    return CommandSuccess(true)
-end
-
-"""#3) lprepend! without RadishElement, with value -> create a list forwarded to method ladd!"""
-function lprepend!(value::AbstractString)
-    @debug "Executing lprepend! with elements '$value' "
-    return ladd!(value)
-end
-
-"""#4) lprepend! without RadishElement, with value and ttl -> create a list forwarded to method ladd! with ttl."""
-function lprepend!(value::AbstractString, ttl::AbstractString)
-    @debug "Executing lprepend! with elements '$value' '$ttl"
-    return ladd!(value, ttl)
+"""lprepend! creator path — called via radd! when key doesn't exist."""
+function lprepend!(args::Vector{String})
+    @debug "Executing lprepend! creator"
+    return ladd!(args)
 end
 
 """Return value of the RadishElement (the actual list) 
 """
-function lget(elem::RadishElement)
-    return CommandSuccess(_lget(elem.value))
+function lget(elem::RadishElement, args::Vector{String})
+    return CommandDirect(_lget(elem.value))
 end
 
 """Main function to to add on top of the list 
@@ -136,39 +119,21 @@ end
 
 
 """
-# There are 4 ways of dispatching append operations
+    lappend!(elem::RadishElement, args::Vector{String})
 
-lappend!(elem::RadishElement, value::AbstractString)
-
-Append a value to the list.
+Append a value to the list (modifier path).
 """
-function lappend!(elem::RadishElement, value::AbstractString)
-    @debug "Executing lappend! with elements '$elem' , '$value' "
+function lappend!(elem::RadishElement, args::Vector{String})
+    value = args[1]
+    @debug "Executing lappend!" elem=elem value=value
     append!(elem.value, value)
-    return CommandSuccess(true)
+    return CommandSuccess(1)
 end
 
-"""#2) lappend! with radish element, value and ttl -> Append into the list ttl has no effect
-TTL is added to do not break code in case of the user does not know if list already exists
-and wants to create TTL in case does not exist the element.
-"""
-function lappend!(elem::RadishElement, value::AbstractString, ttl::AbstractString)
-    @debug "Executing lappend! with elements '$elem' , '$value' '$ttl"
-    @warn "Received ttl while appending, ttl will have no effect"
-    append!(elem.value, value)
-    return CommandSuccess(true)
-end
-
-"""#3) lappend! without RadishElement, with value -> create a list forwarded to method ladd!"""
-function lappend!(value::AbstractString)
-    @debug "Executing lappend! with elements '$value' "
-    return ladd!(value)
-end
-
-"""#4) lappend! without RadishElement, with value and ttl -> create a list forwarded to method ladd! with ttl."""
-function lappend!(value::AbstractString, ttl::AbstractString)
-    @debug "Executing lappend! with elements '$value' '$ttl"
-    return ladd!(value, ttl)
+"""lappend! creator path — called via radd! when key doesn't exist."""
+function lappend!(args::Vector{String})
+    @debug "Executing lappend! creator"
+    return ladd!(args)
 end
 
 """Main function to trimright a DLinkedStartEnd.
@@ -177,14 +142,14 @@ It returns the list trimmed on the right by value
 function _ltrimr!(list::DLinkedStartEnd, value::Int)
     
     if value == 0
-        @warn "While trimming a list, value must be > 0 - got '$value' "
+        @warn "While trimming a list, value must be > 0" value=value
         return
     end
     iterator = 1
     j = list.head
     len = list.len
     if len <= value
-        @warn "Trimming a list of len '$len' to '$value' - nothing changes"
+        @warn "Trimming a list — nothing changes" len=len value=value
         return
     end
 
@@ -202,15 +167,16 @@ end
 
 """Function to execute trimming right operation on the Radishelement
 """
-function ltrimr!(elem::RadishElement, value:: AbstractString)
-    @debug "Executing ltrimr! with elements '$elem' '$value' "
+function ltrimr!(elem::RadishElement, args::Vector{String})
+    value = args[1]
+    @debug "Executing ltrimr!" elem=elem value=value
     value_n = tryparse(Int, value)
     if isa(value_n, Nothing)
         return CommandError("Value '$value' is not an integer")
     end
 
     _ltrimr!(elem.value, value_n)
-    return CommandSuccess(true)
+    return CommandSuccess(1)
 end
 
 
@@ -220,14 +186,14 @@ It returns the list trimmed on the left by value
 function _ltriml!(list::DLinkedStartEnd, value::Int)
     
     if value == 0
-        @warn "While trimming a list, value must be > 0 - got '$value' "
+        @warn "While trimming a list, value must be > 0" value=value
         return
     end
     iterator = 1
     j = list.tail
     len = list.len
     if len <= value
-        @warn "Trimming a list of len '$len' to '$value' - nothing changes"
+        @warn "Trimming a list — nothing changes" len=len value=value
         return
     end
 
@@ -243,15 +209,16 @@ end
 
 """Function to execute trimming left operation on the Radishelement
 """
-function ltriml!(elem::RadishElement, value:: AbstractString)
-    @debug "Executing ltriml! with elements '$elem' '$value' "
+function ltriml!(elem::RadishElement, args::Vector{String})
+    value = args[1]
+    @debug "Executing ltriml!" elem=elem value=value
     value_n = tryparse(Int, value)
     if isa(value_n, Nothing)
         return CommandError("Value '$value' is not an integer")
     end
 
     _ltriml!(elem.value, value_n)
-    return CommandSuccess(true)
+    return CommandSuccess(1)
 end
 
 """Helper function to traverse DLinkedStartEnd backwards
@@ -270,7 +237,7 @@ It compose the list materializing it into a julia standard list."""
 function _compose_linked_list_forward(list::DLinkedStartEnd, limit::Int)
 
     iterator = 1
-    return_list = []
+    return_list = String[]
     j = list.head
     while j !== nothing && iterator <= limit
         push!(return_list, j.data)
@@ -284,7 +251,7 @@ end
 It compose the list materializing it into a julia standard list."""
 function _compose_linked_list_forward(list::DLinkedStartEnd, start_s::Int, end_s::Int)
     iterator = 1
-    return_list = []
+    return_list = String[]
     j = list.head
     while j !== nothing && iterator <= end_s
         if iterator >= start_s
@@ -325,7 +292,7 @@ end
 
 """Wrapper to the len of RadishElement by calling _llen on DLinkedStartEnd
 """
-function llen(elem::RadishElement)
+function llen(elem::RadishElement, args::Vector{String})
     return CommandSuccess(_llen(elem.value))
 end
 
@@ -340,21 +307,23 @@ function _lrange(list::DLinkedStartEnd, start_s::AbstractString, end_s::Abstract
     
     # Bounds checking
     if start_s < 1 || start_s > list.len
-        return []
+        return String[]
     end
     
     return_value = _compose_linked_list_forward(list, start_s, end_s)
     return return_value
 end
 
-"""Wrapper for _lrange command on the RadishElement with start_s and end_s
+"""Wrapper for _lrange command on the RadishElement with args vector
 """
-function lrange(elem::RadishElement, start_s::AbstractString, end_s::AbstractString)
+function lrange(elem::RadishElement, args::Vector{String})
+    start_s = args[1]
+    end_s = args[2]
     result = _lrange(elem.value, start_s, end_s)
     if result === nothing
         return CommandError("Invalid range indices")
     end
-    return CommandSuccess(result)
+    return CommandDirect(result)
 end
 
 """ Helper function to operate on DLinkedStartEnd and 
@@ -398,10 +367,10 @@ end
 """Wrapper function of lmove command to operate on Radishelement
 Move list 2 into list 1 and delete empty object.
 """
-function lmove!(listl::RadishElement, listr::RadishElement)
-    @debug "Calling _lmove! with args '$listl', '$listr' "
+function lmove!(listl::RadishElement, listr::RadishElement, args::Vector{String})
+    @debug "Calling _lmove!" listl=listl listr=listr
     _lmove!(listl.value, listr.value)
-    return CommandSuccess(true)
+    return CommandSuccess(1)
 end
 
 # TODO: CREATE WRAPPER AND EXPOSE COMMAND
@@ -477,15 +446,15 @@ function Base.pop!(list::DLinkedStartEnd{T}) where T
 end
 
 """Wrapper function for __dequeue! to operate on RadishElement"""
-function ldequeue!(element::RadishElement)
+function ldequeue!(element::RadishElement, args::Vector{String})
     res = _dequeue!(element.value)
-    return CommandSuccess(res)
+    return CommandDirect(res)
 end
 
 """Wrapper function for pop! and operate on RadishElement"""
-function lpop!(element::RadishElement)
+function lpop!(element::RadishElement, args::Vector{String})
     res = pop!(element.value)
-    return CommandSuccess(res)
+    return CommandDirect(res)
 end
 
 """Check if list element is empty.

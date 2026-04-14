@@ -1,6 +1,6 @@
 # Radish TODO - Remaining Items
 
-> Last updated: CLI improvements, config unification, simulator progress logging
+> Last updated: RadishElement{T} rework completed — typed store, parametric elements, 8x hot path improvement
 
 ---
 
@@ -102,6 +102,20 @@
 - ✅ Adaptive report intervals (~20 updates per worker regardless of workload size)
 - ✅ Summary boxes at end of each phase
 - ✅ Tiered make targets: `simload-light`/`heavy`/`vheavy`, `simrun-light`/`heavy`/`vheavy`
+
+### RadishElement{T} Rework
+- ✅ Parametric `RadishElement{T}` — fully typed, zero boxing on value access
+- ✅ `RadishStore` with typed dictionaries (`strings`, `lists`) + `keytype` index
+- ✅ Global key-to-type index enforces Redis-compatible one-key-one-type behavior
+- ✅ Hypercommands operate on typed sub-dicts — Julia compiles specialized code per type
+- ✅ Meta commands operate on `RadishStore` using `store_*` helper functions
+- ✅ `DirtyTracker` tracks `key => datatype` (Dict instead of Set) for type-aware syncing
+- ✅ String values always stored as `String` — integer parsing is dynamic (Redis behavior)
+- ✅ Eliminated `string(elem.value)` conversions in INCR/APPEND/LCS (no more double-parse)
+- ✅ Removed `isa(elem.value, AbstractString)` checks in padding (value is always String)
+- ✅ Internal benchmark suite (`test/bench_internals.jl`) with `make bench` target
+- ✅ Hot path improvement: `rmodify!` + `sincr!` went from 556 ns to 66 ns (8.4x faster)
+- ✅ All 424 tests passing
 
 ---
 

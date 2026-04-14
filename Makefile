@@ -87,8 +87,104 @@ clean:          ## Remove containers, networks and volumes (wipes persisted data
 
 # ─── Utilities ────────────────────────────────────────────────────────────────
 
+smoke-test:     ## Run end-to-end smoke test (rebuild Docker, test every command)
+	python3 scripts/smoke_test.py
+
+bench-compare:  ## Compare two benchmark files (BEFORE=... AFTER=...)
+	@python3 scripts/bench_compare.py $(BEFORE) $(AFTER)
+
+bench:          ## Run internal benchmarks and save to benchmarks/<id>_<timestamp>.txt
+	@mkdir -p benchmarks
+	@BENCH_ID="$${BENCH_ID:-$$(date +%Y%m%d_%H%M%S)}"; \
+	OUTFILE="benchmarks/$${BENCH_ID}.txt"; \
+	echo "Running benchmarks → $$OUTFILE"; \
+	BENCH_ID="$$BENCH_ID" julia --project=. test/bench_internals.jl | tee "$$OUTFILE"; \
+	echo ""; \
+	echo "Saved to $$OUTFILE"
+
+test:           ## Run unit tests (strings, lists, hypercommands, meta commands)
+	julia --project=. test/runtests.jl
+
+test-all:       ## Run unit tests + smoke test
+	@echo "── Unit Tests ──────────────────────────────────────"
+	julia --project=. test/runtests.jl
+	@echo ""
+	@echo "── Smoke Test ──────────────────────────────────────"
+	python3 scripts/smoke_test.py
+
+bench-system:   ## Run system benchmarks (Level 2, 4 threads) and save to benchmarks/
+	@mkdir -p benchmarks
+	@BENCH_ID="$${BENCH_ID:-system_$$(date +%Y%m%d_%H%M%S)}"; \
+	OUTFILE="benchmarks/$${BENCH_ID}.txt"; \
+	echo "Running system benchmarks (4 threads) → $$OUTFILE"; \
+	BENCH_ID="$$BENCH_ID" julia --threads=4 --project=. test/bench_system.jl | tee "$$OUTFILE"; \
+	echo ""; \
+	echo "Saved to $$OUTFILE"
+
+bench-all:      ## Run all benchmarks (internal + system) and save to benchmarks/
+	@mkdir -p benchmarks
+	@TS="$$(date +%Y%m%d_%H%M%S)"; \
+	echo "── Internal Benchmarks (Level 0/1) ──────────────────"; \
+	BENCH_ID="all_internals_$$TS" julia --project=. test/bench_internals.jl | tee "benchmarks/all_internals_$$TS.txt"; \
+	echo ""; \
+	echo "── System Benchmarks (Level 2) ──────────────────────"; \
+	BENCH_ID="all_system_$$TS" julia --threads=4 --project=. test/bench_system.jl | tee "benchmarks/all_system_$$TS.txt"; \
+	echo ""; \
+	echo "Saved to benchmarks/all_internals_$$TS.txt and benchmarks/all_system_$$TS.txt"
+
+bench-net:      ## Run network benchmarks (Level 3, requires Docker)
+	python3 scripts/bench_net.py
+
 ps:             ## Show status of all Radish containers
 	$(DC) ps -a
+
+storage:        ## Show AOF and snapshot file sizes inside the server container
+	@echo "── Persistence Storage ──────────────────────────────"
+	@docker compose exec radish-server sh -c '\
+		echo "AOF:"; \
+		AOF=/app/persistence/aof/radish.aof; \
+		if [ -f "$$AOF" ]; then \
+			SIZE=$$(ls -lh $$AOF | awk "{print \$$5}"); \
+			LINES=$$(wc -l < $$AOF); \
+			echo "  $$AOF: $$SIZE ($$LINES lines)"; \
+		else \
+			echo "  (no AOF file)"; \
+		fi; \
+		echo ""; \
+		echo "Snapshots:"; \
+		SNAP_DIR=/app/persistence/snapshots; \
+		if [ -d "$$SNAP_DIR" ]; then \
+			COUNT=$$(ls -1 $$SNAP_DIR/*.rdb 2>/dev/null | wc -l); \
+			SIZE=$$(du -sh $$SNAP_DIR 2>/dev/null | cut -f1); \
+			echo "  $$COUNT shard files, $$SIZE total"; \
+		else \
+			echo "  (no snapshots directory)"; \
+		fi' 2>/dev/null || echo "  Server container not running. Start with: make server"
+
+storage-watch:  ## Live-refresh storage sizes every second (Ctrl+C to stop)
+	@while true; do \
+		printf "\033[2J\033[H"; \
+		echo "── Persistence Storage (live) ── $$(date +%H:%M:%S) ──"; \
+		echo ""; \
+		docker compose exec -T radish-server sh -c '\
+			AOF=/app/persistence/aof/radish.aof; \
+			if [ -f "$$AOF" ]; then \
+				SIZE=$$(ls -lh $$AOF | awk "{print \$$5}"); \
+				LINES=$$(wc -l < $$AOF); \
+				echo "  AOF: $$SIZE ($$LINES lines)"; \
+			else \
+				echo "  AOF: (no file)"; \
+			fi; \
+			SNAP_DIR=/app/persistence/snapshots; \
+			if [ -d "$$SNAP_DIR" ]; then \
+				COUNT=$$(ls -1 $$SNAP_DIR/*.rdb 2>/dev/null | wc -l); \
+				SIZE=$$(du -sh $$SNAP_DIR 2>/dev/null | cut -f1); \
+				echo "  Snapshots: $$COUNT shards, $$SIZE total"; \
+			else \
+				echo "  Snapshots: (none)"; \
+			fi' 2>/dev/null || echo "  Server not running."; \
+		sleep 1; \
+	done
 
 logs:           ## Tail logs for all running containers (Ctrl+C to stop)
 	$(DC) logs -f
@@ -97,9 +193,10 @@ help:           ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*##"}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-.PHONY: build rebuild server server-logs server-stop client \
+.PHONY: build rebuild server server-logs server-stop client smoke-test bench-compare \
         simulator simload simrun \
         simload-light simload-heavy simload-vheavy \
         simrun-light simrun-heavy simrun-vheavy \
         docs-build docs docs-bg docs-logs docs-stop \
-        down clean ps logs help
+        down clean ps storage storage-watch logs help \
+        test test-all bench bench-system bench-all bench-net

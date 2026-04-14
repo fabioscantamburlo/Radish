@@ -29,13 +29,17 @@ See the full documentation here: [Radish Documentation](https://fabioscantamburl
 
 ## Architecture Overview
 
-At its core, Radish stores everything in a single dictionary:
+Radish uses a **typed store** — one fully-typed dictionary per data type, unified behind a `RadishStore` with a global key index:
 
 ```julia
-RadishContext = Dict{String, RadishElement}
+mutable struct RadishStore
+    strings::Dict{String, RadishElement{String}}
+    lists::Dict{String, RadishElement{DLinkedStartEnd{String}}}
+    keytype::Dict{String, Symbol}   # global key → type index
+end
 ```
 
-Every value is wrapped in a `RadishElement` carrying metadata (value, TTL, creation time, data type). Commands flow through a **delegation pattern** with two layers: **Hypercommands** (generic operations like `get`, `add`, `remove`) and **Type commands** (concrete implementations per data type). A dispatcher resolves each client request and routes it to the correct type command — making new data types straightforward to add.
+Every value is wrapped in a parametric `RadishElement{T}` carrying metadata (value, TTL, creation time, data type). Julia compiles specialized code for each concrete type — no boxing, no dynamic dispatch on the hot path. Commands flow through a **delegation pattern** with two layers: **Hypercommands** (generic operations like `get`, `add`, `remove`) and **Type commands** (concrete implementations per data type). A dispatcher resolves each client request and routes it to the correct type command — making new data types straightforward to add.
 
 ---
 
@@ -157,7 +161,7 @@ Full documentation is available at the project's GitHub Pages site, covering eac
 
 🔴 **High priority** — unit tests, integration/Docker tests
 
-🟡 **Medium priority** — dispatcher refactor (`resolve_locks` / `route_command`), `INFO` command
+🟡 **Medium priority** — `INFO` command
 
 🟢 **Low priority** — hash maps, sets, sorted sets, Python client, observability, performance
 

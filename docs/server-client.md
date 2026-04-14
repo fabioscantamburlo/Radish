@@ -22,7 +22,7 @@ When you run `julia server_runner.jl`, the server initializes in this order:
 graph TD
     subgraph Init
         direction LR
-        Z["Load radish.yml"] --> A["Create directories"] --> B["RadishContext"] --> C["ShardedLock"] --> D["DirtyTracker"]
+        Z["Load radish.yml"] --> A["Create directories"] --> B["RadishStore"] --> C["ShardedLock"] --> D["DirtyTracker"]
     end
 
     subgraph Recovery
@@ -200,7 +200,7 @@ julia client_runner.jl
 julia client_runner.jl
 ```
 
-All clients share the same `RadishContext`. The [sharded locking](concurrency) system ensures safe concurrent access. Each client has an independent `ClientSession`, so one client's transaction doesn't affect another.
+All clients share the same `RadishStore`. The [sharded locking](concurrency) system ensures safe concurrent access. Each client has an independent `ClientSession`, so one client's transaction doesn't affect another.
 
 ---
 

@@ -47,3 +47,11 @@ ttl_cleanup:
 # -----------------------------------------------------------------------------
 data_limits:
   list_display_limit: 50     # Max elements returned by L_GET (0 = unlimited)
+
+# -----------------------------------------------------------------------------
+# Client Defaults
+# -----------------------------------------------------------------------------
+# Recommended defaults for clients connecting to this server.
+client:
+  pipeline_batch: 1000         # Commands per pipeline batch (0 = no pipelining)
+  pipeline_flush_ms: 5        # Flush after this many ms even if batch not full (0 = no time limit)

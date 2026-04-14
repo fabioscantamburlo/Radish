@@ -25,4 +25,4 @@ EXPOSE 9000
 LABEL description="Radish In-Memory Database Server"
 
 # Run the server (0.0.0.0 to accept connections from other containers)
-CMD ["julia", "--project=.", "server_runner.jl", "0.0.0.0", "9000"]
+CMD ["julia", "--threads=auto", "--project=.", "server_runner.jl", "0.0.0.0", "9000"]

@@ -1,168 +1,311 @@
+# =============================================================================
 # RESP (Redis Serialization Protocol) implementation
+#
+# Server-side:
+#   - Read: RESPReader with 16KB buffer — reduces syscalls from 5-7 per command
+#     to ~1 by reading large chunks and parsing from memory.
+#   - Write: IOBuffer — one write() syscall per response regardless of size.
+#
+# Client-side: unchanged (interactive CLI doesn't need buffering).
+# =============================================================================
+
 using Sockets
 
-export read_resp_command, write_resp_response, read_resp_response, write_resp_command
+export RESPReader, read_resp_command, write_resp_response, read_resp_response, write_resp_command
 
-# Read RESP array from socket and parse into Command
-function read_resp_command(sock::TCPSocket)
-    line = rstrip(readline(sock))
-    
-    if isempty(line)
+# =============================================================================
+# RESPReader — Buffered reader for server-side RESP parsing
+# =============================================================================
+
+"""
+Buffered reader for RESP protocol. Reads large chunks from the socket
+into an internal buffer and parses from memory, reducing syscalls.
+"""
+mutable struct RESPReader
+    sock::TCPSocket
+    buf::Vector{UInt8}
+    pos::Int          # next byte to read (1-indexed)
+    len::Int          # number of valid bytes in buf
+end
+
+function RESPReader(sock::TCPSocket; capacity::Int=16384)
+    RESPReader(sock, Vector{UInt8}(undef, capacity), 1, 0)
+end
+
+"""Ensure at least `n` bytes are available in the buffer. Refills from socket if needed."""
+function _ensure!(reader::RESPReader, n::Int)
+    available = reader.len - reader.pos + 1
+    while available < n
+        # Compact: move unread bytes to start
+        if reader.pos > 1
+            remaining = reader.len - reader.pos + 1
+            if remaining > 0
+                copyto!(reader.buf, 1, reader.buf, reader.pos, remaining)
+            end
+            reader.pos = 1
+            reader.len = remaining
+        end
+        # Grow buffer if needed
+        needed = n - (reader.len - reader.pos + 1)
+        if reader.len + needed > length(reader.buf)
+            resize!(reader.buf, max(length(reader.buf) * 2, reader.len + needed))
+        end
+        # Read at least 1 byte (blocking)
+        byte = read(reader.sock, UInt8)
+        reader.len += 1
+        reader.buf[reader.len] = byte
+        # Try to read more if available (non-blocking via bytesavailable)
+        extra = bytesavailable(reader.sock)
+        if extra > 0
+            space = length(reader.buf) - reader.len
+            to_read = min(extra, space)
+            if to_read > 0
+                actual = readbytes!(reader.sock, @view(reader.buf[reader.len+1:reader.len+to_read]), to_read)
+                reader.len += actual
+            end
+        end
+        available = reader.len - reader.pos + 1
+    end
+end
+
+"""Read a line (up to \\r\\n) from the buffer. Returns the line without \\r\\n.
+Returns nothing if the connection is closed."""
+function _readline!(reader::RESPReader)::Union{String, Nothing}
+    while true
+        # Scan for \r\n in current buffer
+        for i in reader.pos:reader.len-1
+            if reader.buf[i] == UInt8('\r') && reader.buf[i+1] == UInt8('\n')
+                line = String(reader.buf[reader.pos:i-1])
+                reader.pos = i + 2
+                return line
+            end
+        end
+        # Not found — need more data. Compact first.
+        if reader.pos > 1
+            remaining = reader.len - reader.pos + 1
+            if remaining > 0
+                copyto!(reader.buf, 1, reader.buf, reader.pos, remaining)
+            end
+            reader.pos = 1
+            reader.len = remaining
+        end
+        if reader.len + 1 > length(reader.buf)
+            resize!(reader.buf, length(reader.buf) * 2)
+        end
+        # Block on reading at least 1 byte
+        local byte::UInt8
+        try
+            byte = read(reader.sock, UInt8)
+        catch e
+            if isa(e, EOFError)
+                return nothing
+            end
+            rethrow(e)
+        end
+        reader.len += 1
+        reader.buf[reader.len] = byte
+        # Drain any additional available bytes
+        extra = bytesavailable(reader.sock)
+        if extra > 0
+            space = length(reader.buf) - reader.len
+            to_read = min(extra, space)
+            if to_read > 0
+                actual = readbytes!(reader.sock, @view(reader.buf[reader.len+1:reader.len+to_read]), to_read)
+                reader.len += actual
+            end
+        end
+    end
+end
+
+"""Read exactly `n` bytes from the buffer."""
+function _readbytes!(reader::RESPReader, n::Int)::String
+    _ensure!(reader, n)
+    data = String(reader.buf[reader.pos:reader.pos+n-1])
+    reader.pos += n
+    return data
+end
+
+"""Skip exactly `n` bytes in the buffer (e.g., for \\r\\n after bulk string)."""
+function _skip!(reader::RESPReader, n::Int)
+    _ensure!(reader, n)
+    reader.pos += n
+end
+
+# =============================================================================
+# Server-side: Read RESP command (buffered)
+# =============================================================================
+
+"""Read a RESP command from a buffered reader. Returns a Command or nothing."""
+function read_resp_command(reader::RESPReader)
+    line = _readline!(reader)
+
+    if line === nothing || isempty(line)
         return nothing
     end
-    
-    if !startswith(line, '*')
+
+    if line[1] != '*'
         error("Expected RESP array, got: $line")
     end
-    
+
     count = parse(Int, line[2:end])
     parts = String[]
-    
+
     for i in 1:count
-        # Read bulk string length
-        len_line = rstrip(readline(sock))
-        if !startswith(len_line, '$')
+        len_line = _readline!(reader)
+        if isempty(len_line) || len_line[1] != '$'
             error("Expected bulk string, got: $len_line")
         end
-        
+
         len = parse(Int, len_line[2:end])
-        
-        # Guard against excessively large payloads (512 MB limit, same as Redis)
+
         if len < 0 || len > 512 * 1024 * 1024
             error("Bulk string length out of bounds: $len")
         end
-        
-        # Read actual data
-        data = String(read(sock, len))
-        read(sock, 2)  # consume \r\n
-        
+
+        data = _readbytes!(reader, len)
+        _skip!(reader, 2)  # consume \r\n
+
         push!(parts, data)
     end
-    
-    # Parse into Command struct
+
     if isempty(parts)
         return nothing
     end
-    
+
     cmd_name = uppercase(parts[1])
-    
-    # Single-word commands or commands with only args (no key)
-    # PING, QUIT, EXIT, KLIST all have no key
+
     if length(parts) == 1
         return Command(cmd_name, nothing, String[])
     end
-    
-    # Multi-word: could be "KLIST 10" (no key, just arg) or "S_GET mykey" (has key)
-    # Heuristic: if command starts with S_ or L_, second part is key
-    # Meta commands (EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE) also take a key
+
     if startswith(cmd_name, "S_") || startswith(cmd_name, "L_") || cmd_name in ["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME"]
         key = parts[2]
         args = length(parts) > 2 ? parts[3:end] : String[]
         return Command(cmd_name, key, args)
     else
-        # No key, all remaining parts are args
         args = parts[2:end]
         return Command(cmd_name, nothing, args)
     end
 end
 
-# Write ExecuteResult as RESP to socket
+# Keep the old socket-based version for backward compatibility (AOF replay, etc.)
+function read_resp_command(sock::TCPSocket)
+    reader = RESPReader(sock)
+    return read_resp_command(reader)
+end
+
+# =============================================================================
+# Server-side: Write RESP response (buffered — single syscall)
+# =============================================================================
+
+"""Write an ExecuteResult as RESP to socket. Buffers the entire response
+in an IOBuffer and writes once — one syscall regardless of response size."""
 function write_resp_response(sock::TCPSocket, result::ExecuteResult)
+    buf = IOBuffer()
+    _encode_resp(buf, result)
+    write(sock, take!(buf))
+end
+
+function _encode_resp(buf::IOBuffer, result::ExecuteResult)
     if result.status == ERROR
-        # Error response
-        write(sock, "-ERR $(result.error)\r\n")
+        print(buf, "-ERR ", result.error, "\r\n")
     elseif result.status == KEY_NOT_FOUND
-        # Key not found - return nil
-        write(sock, "\$-1\r\n")
+        print(buf, "\$-1\r\n")
     elseif result.status == SUCCESS
-        # Success - format based on value type
-        if result.value === nothing
-            write(sock, "+OK\r\n")
-        elseif isa(result.value, Bool)
-            write(sock, result.value ? ":1\r\n" : ":0\r\n")
-        elseif isa(result.value, Integer)
-            write(sock, ":$(result.value)\r\n")
-        elseif isa(result.value, AbstractString)
-            write(sock, "\$$(length(result.value))\r\n$(result.value)\r\n")
-        elseif isa(result.value, Vector)
-            # Check if it's a vector of ExecuteResult (transaction result)
-            if !isempty(result.value) && isa(result.value[1], ExecuteResult)
-                # Transaction result: array of sub-results
-                write(sock, "*$(length(result.value))\r\n")
-                for sub_result in result.value
-                    write_resp_response(sock, sub_result)  # Recursive call
-                end
+        _encode_value(buf, result.value)
+    end
+end
+
+function _encode_value(buf::IOBuffer, ::Nothing)
+    print(buf, "+OK\r\n")
+end
+
+function _encode_value(buf::IOBuffer, value::Bool)
+    print(buf, value ? ":1\r\n" : ":0\r\n")
+end
+
+function _encode_value(buf::IOBuffer, value::Integer)
+    print(buf, ":", value, "\r\n")
+end
+
+function _encode_value(buf::IOBuffer, value::AbstractString)
+    print(buf, "\$", sizeof(value), "\r\n", value, "\r\n")
+end
+
+function _encode_value(buf::IOBuffer, value::Vector)
+    if !isempty(value) && isa(value[1], ExecuteResult)
+        print(buf, "*", length(value), "\r\n")
+        for sub_result in value
+            _encode_resp(buf, sub_result)
+        end
+    else
+        print(buf, "*", length(value), "\r\n")
+        for item in value
+            if isa(item, Tuple)
+                str = "$(item[1]) → $(item[2])"
+                print(buf, "\$", sizeof(str), "\r\n", str, "\r\n")
             else
-                # Regular array response
-                write(sock, "*$(length(result.value))\r\n")
-                for item in result.value
-                    if isa(item, Tuple)
-                        # For KLIST: (key, datatype)
-                        str = "$(item[1]) → $(item[2])"
-                        write(sock, "\$$(length(str))\r\n$(str)\r\n")
-                    else
-                        str = string(item)
-                        write(sock, "\$$(length(str))\r\n$(str)\r\n")
-                    end
-                end
-            end
-        elseif isa(result.value, Tuple)
-            # Tuple response (e.g., LCS)
-            write(sock, "*$(length(result.value))\r\n")
-            for item in result.value
                 str = string(item)
-                write(sock, "\$$(length(str))\r\n$(str)\r\n")
+                print(buf, "\$", sizeof(str), "\r\n", str, "\r\n")
             end
-        else
-            # Generic string conversion
-            str = string(result.value)
-            write(sock, "\$$(length(str))\r\n$(str)\r\n")
         end
     end
 end
 
-# Client-side: write command as RESP array
-function write_resp_command(sock::TCPSocket, line::AbstractString)
-    parts = split(strip(line), ' ', keepempty=false)
-    
-    # Write array header
-    write(sock, "*$(length(parts))\r\n")
-    
-    # Write each part as bulk string
-    for part in parts
-        write(sock, "\$$(length(part))\r\n$(part)\r\n")
+function _encode_value(buf::IOBuffer, value::Tuple)
+    print(buf, "*", length(value), "\r\n")
+    for item in value
+        str = string(item)
+        print(buf, "\$", sizeof(str), "\r\n", str, "\r\n")
     end
 end
 
-# Client-side: read RESP response and return formatted string
+function _encode_value(buf::IOBuffer, value)
+    str = string(value)
+    print(buf, "\$", sizeof(str), "\r\n", str, "\r\n")
+end
+
+# =============================================================================
+# Client-side: Write command as RESP array (buffered)
+# =============================================================================
+
+function write_resp_command(sock::TCPSocket, line::AbstractString)
+    parts = split(strip(line), ' ', keepempty=false)
+
+    buf = IOBuffer()
+    print(buf, "*", length(parts), "\r\n")
+    for part in parts
+        print(buf, "\$", sizeof(part), "\r\n", part, "\r\n")
+    end
+    write(sock, take!(buf))
+end
+
+# =============================================================================
+# Client-side: Read RESP response and format for display
+# =============================================================================
+
 function read_resp_response(sock::TCPSocket, in_array::Bool=false, add_prefix::Bool=true)
     line = readline(sock)
-    
-    if isempty(line)
-        return "Connection closed"
-    end
-    
-    # Remove trailing whitespace including \r
-    line = rstrip(line)
-    
 
     if isempty(line)
         return "Connection closed"
     end
-    
+
+    line = rstrip(line)
+
+    if isempty(line)
+        return "Connection closed"
+    end
+
     first_char = line[1]
-    
+
     if first_char == '+'
-        # Simple string
-        return in_array ? line[2:end] : line[2:end]
+        return line[2:end]
     elseif first_char == '-'
-        # Error
         return "❌ $(line[2:end])"
     elseif first_char == ':'
-        # Integer
         return in_array ? line[2:end] : (add_prefix ? "✅ $(line[2:end])" : line[2:end])
     elseif first_char == '$'
-        # Bulk string
         len = parse(Int, line[2:end])
         if len == -1
             return in_array ? "(nil)" : (add_prefix ? "✅ (nil)" : "(nil)")
@@ -170,19 +313,18 @@ function read_resp_response(sock::TCPSocket, in_array::Bool=false, add_prefix::B
         data = readline(sock)
         return in_array ? rstrip(data) : (add_prefix ? "✅ $(rstrip(data))" : rstrip(data))
     elseif first_char == '*'
-        # Array
         count = parse(Int, line[2:end])
         if count == 0
             return "[]"
         end
-        
+
         results = String[]
         for i in 1:count
-            # Recursively read each element (could be any RESP type)
-            element = read_resp_response(sock, true, add_prefix)  # Pass through add_prefix
+            element = read_resp_response(sock, true, add_prefix)
             push!(results, element)
         end
-        return in_array ? "[" * join(results, ", ") * "]" : (add_prefix ? "✅ [" * join(results, ", ") * "]" : "[" * join(results, ", ") * "]")
+        joined = join(results, ", ")
+        return in_array ? "[$joined]" : (add_prefix ? "✅ [$joined]" : "[$joined]")
     else
         return "Unknown RESP type: $first_char"
     end

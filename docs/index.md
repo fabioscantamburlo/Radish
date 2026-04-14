@@ -98,28 +98,34 @@ More data structures are coming at some point, I had the feeling that resolving 
 
 ## A quick look at the Architecture
 
-At its core, Radish stores everything in a single dictionary:
+At its core, Radish uses a **typed store** — one fully-typed dictionary per data type, unified behind a `RadishStore` with a global key index:
 
 ```julia
-RadishContext = Dict{String, RadishElement}
+mutable struct RadishStore
+    strings::Dict{String, RadishElement{String}}
+    lists::Dict{String, RadishElement{DLinkedStartEnd{String}}}
+    keytype::Dict{String, Symbol}   # global key → type index
+end
 ```
 
-Every value is wrapped in a `RadishElement` that carries metadata:
+Every value is wrapped in a parametric `RadishElement{T}` that carries metadata:
 
 ```mermaid
 classDiagram
-    class RadishContext {
-        Dict~String, RadishElement~
+    class RadishStore {
+        +strings: Dict~String, RadishElement~String~~
+        +lists: Dict~String, RadishElement~DLinkedStartEnd~~
+        +keytype: Dict~String, Symbol~
     }
 
-    class RadishElement {
-        +Any value -> Real value 
+    class RadishElement~T~ {
+        +T value
         +Union~Int, Nothing~ ttl
         +DateTime tinit
         +Symbol datatype
     }
 
-    RadishContext *-- RadishElement : contains
+    RadishStore *-- RadishElement : contains (typed dicts)
 ```
 
 Commands flow through a **delegation pattern** with two layers:

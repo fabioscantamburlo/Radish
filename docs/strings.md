@@ -85,22 +85,23 @@ This is implemented using dynamic programming and returns both the subsequence a
 
 ## Implementation Detail
 
-All string type commands receive the `RadishElement` and operate on its value. They follow a consistent pattern:
+All string values are stored as `String` — even when they represent integers. This matches Redis's behavior: values are bytes, and integer interpretation happens dynamically when needed (e.g., `S_INCR` parses the string, increments, and stores the result back as a string).
 
 ```julia
-# Read-only: return the element's value
+# Read-only: return the element's value (always a String)
 function sget(elem::RadishElement, args...)
     return CommandSuccess(elem.value)
 end
 
-# Mutating: modify the element in place and return a CommandResult
+# Mutating: parse as integer, increment, store back as string
 function sincr!(elem::RadishElement)
-    elem_n = tryparse(Int, string(elem.value))
+    elem_n = tryparse(Int, elem.value)
     if isa(elem_n, Nothing)
         return CommandError("Value '$(elem.value)' is not an integer")
     end
-    elem_n += 1
-    elem.value = string(elem_n)
+    elem.value = string(elem_n + 1)
     return CommandSuccess(true)
 end
 ```
+
+With parametric `RadishElement{String}`, Julia compiles fully specialized code for these functions — no boxing, no dynamic dispatch on value access.

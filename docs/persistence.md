@@ -93,13 +93,13 @@ To know *which* shards need updating, Radish maintains a `DirtyTracker`:
 
 ```julia
 mutable struct DirtyTracker
-    modified::Set{String}    # Keys that were added/modified
-    deleted::Set{String}     # Keys that were deleted
-    lock::ReentrantLock      # Thread safety
+    modified::Dict{String, Symbol}   # key => datatype at time of modification
+    deleted::Dict{String, Symbol}    # key => datatype at time of deletion
+    lock::ReentrantLock
 end
 ```
 
-Every hypercommand that modifies state calls `mark_dirty!(tracker, key)` or `mark_deleted!(tracker, key)`. The background syncer then **pops** these changes atomically and applies them to the snapshot files.
+Every hypercommand that modifies state calls `mark_dirty!(tracker, key, datatype)` or `mark_deleted!(tracker, key, datatype)`. The type is recorded so the syncer knows which typed dictionary to read from when serializing. The background syncer then **pops** these changes atomically and applies them to the snapshot files.
 
 This design means the server never blocks waiting for disk I/O during normal operation — dirty tracking is just a `Set` insertion.
 
@@ -168,12 +168,12 @@ Key design decisions:
 
 On startup, Radish recovers in two steps:
 
-1. **Load RDB snapshots** — reads all shard files and populates the `RadishContext`
+1. **Load RDB snapshots** — reads all shard files and populates the `RadishStore`
 2. **Replay AOF** — re-executes any commands logged since the last snapshot
 
 ```julia
-count = load_snapshot!(ctx)                    # Step 1
-aof_count = replay_aof!(ctx, db_lock)          # Step 2
+count = load_snapshot!(store)                    # Step 1
+aof_count = replay_aof!(store, db_lock)          # Step 2
 ```
 
 This guarantees that the database state after recovery is identical to what it was before the crash (up to the last AOF-logged command).
@@ -185,7 +185,7 @@ This guarantees that the database state after recovery is identical to what it w
 When the server receives `Ctrl+C`, it performs a full snapshot before exiting:
 
 ```julia
-save_full_snapshot!(ctx, tracker)
+save_full_snapshot!(store, tracker)
 ```
 
 This is a **full** snapshot (not incremental), ensuring that all data is captured. The AOF is then deleted since it's no longer needed.
