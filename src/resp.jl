@@ -131,6 +131,11 @@ function _skip!(reader::RESPReader, n::Int)
     reader.pos += n
 end
 
+"""Check if the reader has unprocessed data in its buffer (more commands may be waiting)."""
+function has_buffered_data(reader::RESPReader)::Bool
+    return reader.pos <= reader.len
+end
+
 # =============================================================================
 # Server-side: Read RESP command (buffered)
 # =============================================================================
@@ -203,6 +208,33 @@ in an IOBuffer and writes once — one syscall regardless of response size."""
 function write_resp_response(sock::TCPSocket, result::ExecuteResult)
     buf = IOBuffer()
     _encode_resp(buf, result)
+    write(sock, take!(buf))
+end
+
+"""Write an ExecuteResult using a pre-allocated IOBuffer (zero allocation)."""
+function write_resp_response(sock::TCPSocket, result::ExecuteResult, buf::IOBuffer)
+    seekstart(buf)
+    truncate(buf, 0)
+    _encode_resp(buf, result)
+    write(sock, take!(buf))
+end
+
+"""Write multiple ExecuteResults as RESP to socket in a single write syscall."""
+function write_resp_responses(sock::TCPSocket, results::Vector{ExecuteResult})
+    buf = IOBuffer()
+    for result in results
+        _encode_resp(buf, result)
+    end
+    write(sock, take!(buf))
+end
+
+"""Write multiple ExecuteResults using a pre-allocated IOBuffer (zero allocation)."""
+function write_resp_responses(sock::TCPSocket, results::Vector{ExecuteResult}, buf::IOBuffer)
+    seekstart(buf)
+    truncate(buf, 0)
+    for result in results
+        _encode_resp(buf, result)
+    end
     write(sock, take!(buf))
 end
 

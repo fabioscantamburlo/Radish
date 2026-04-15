@@ -1,6 +1,7 @@
 .DEFAULT_GOAL := help
 
 DC = docker compose
+RESULTS_DIR = benchmarks/results
 
 # ─── Build ────────────────────────────────────────────────────────────────────
 
@@ -21,8 +22,8 @@ server-logs:    ## Tail the Docker server logs (Ctrl+C to stop)
 server-stop:    ## Stop the Docker server
 	$(DC) stop radish-server
 
-server-native:  ## Start the server natively (no Docker, localhost:9000, 4 threads)
-	julia --threads=4 --project=. server_runner.jl
+server-native:  ## Start the server natively (no Docker, localhost:9000, 8 threads)
+	julia --threads=8 --project=. server_runner.jl
 
 # ─── Client ───────────────────────────────────────────────────────────────────
 
@@ -43,7 +44,6 @@ simload:            ## Load keys (default: 5k keys, 10 clients)
 simrun:             ## Run operations (default: 10k ops, 10 clients)
 	$(SIM) run $(SIM_HOST)
 
-# Tiered load targets — keys per type, 10 clients
 simload-light:      ## Load 100k keys per type (10 clients)
 	$(SIM) load $(SIM_HOST) --num-keys 100000
 
@@ -53,7 +53,6 @@ simload-heavy:      ## Load 1M keys per type (10 clients)
 simload-vheavy:     ## Load 10M keys per type (10 clients)
 	$(SIM) load $(SIM_HOST) --num-keys 10000000
 
-# Tiered run targets — ops per client, 10 clients
 simrun-light:       ## Run 100k ops per client (10 clients)
 	$(SIM) run $(SIM_HOST) --num-ops 100000
 
@@ -88,25 +87,13 @@ down:           ## Stop and remove all running containers
 clean:          ## Remove containers, networks and volumes (wipes persisted data!)
 	$(DC) --profile client --profile docs --profile simulator down -v
 
-# ─── Utilities ────────────────────────────────────────────────────────────────
-
-smoke-test:     ## Run end-to-end smoke test (rebuild Docker, test every command)
-	python3 scripts/smoke_test.py
-
-bench-compare:  ## Compare two benchmark files (BEFORE=... AFTER=...)
-	@python3 scripts/bench_compare.py $(BEFORE) $(AFTER)
-
-bench:          ## Run internal benchmarks and save to benchmarks/<id>_<timestamp>.txt
-	@mkdir -p benchmarks
-	@BENCH_ID="$${BENCH_ID:-$$(date +%Y%m%d_%H%M%S)}"; \
-	OUTFILE="benchmarks/$${BENCH_ID}.txt"; \
-	echo "Running benchmarks → $$OUTFILE"; \
-	BENCH_ID="$$BENCH_ID" julia --project=. test/bench_internals.jl | tee "$$OUTFILE"; \
-	echo ""; \
-	echo "Saved to $$OUTFILE"
+# ─── Testing ──────────────────────────────────────────────────────────────────
 
 test:           ## Run unit tests (strings, lists, hypercommands, meta commands)
 	julia --project=. test/runtests.jl
+
+smoke-test:     ## Run end-to-end smoke test (rebuild Docker, test every command)
+	python3 scripts/smoke_test.py
 
 test-all:       ## Run unit tests + smoke test
 	@echo "── Unit Tests ──────────────────────────────────────"
@@ -115,45 +102,89 @@ test-all:       ## Run unit tests + smoke test
 	@echo "── Smoke Test ──────────────────────────────────────"
 	python3 scripts/smoke_test.py
 
-bench-system:   ## Run system benchmarks (Level 2, 4 threads) and save to benchmarks/
-	@mkdir -p benchmarks
+validate:       ## Run all validation gates (unit tests + smoke test + internal bench + system bench)
+	@echo "══════════════════════════════════════════════════════"
+	@echo "  Radish Full Validation"
+	@echo "══════════════════════════════════════════════════════"
+	@echo ""
+	@echo "── 1/4 Unit Tests ──────────────────────────────────"
+	julia --project=. test/runtests.jl
+	@echo ""
+	@echo "── 2/4 Smoke Test (Docker) ─────────────────────────"
+	python3 scripts/smoke_test.py
+	@echo ""
+	@echo "── 3/4 Internal Benchmarks (Level 0/1) ─────────────"
+	@mkdir -p $(RESULTS_DIR)
+	@BENCH_ID="validate_internals_$$(date +%Y%m%d_%H%M%S)" julia --project=. benchmarks/bench_internals.jl | tee "$(RESULTS_DIR)/validate_internals_$$(date +%Y%m%d_%H%M%S).txt"
+	@echo ""
+	@echo "── 4/4 System Benchmarks (Level 2) ─────────────────"
+	@BENCH_ID="validate_system_$$(date +%Y%m%d_%H%M%S)" julia --threads=4 --project=. benchmarks/bench_system.jl | tee "$(RESULTS_DIR)/validate_system_$$(date +%Y%m%d_%H%M%S).txt"
+	@echo ""
+	@echo "══════════════════════════════════════════════════════"
+	@echo "  All validation gates passed."
+	@echo "══════════════════════════════════════════════════════"
+
+# ─── Benchmarks ───────────────────────────────────────────────────────────────
+#   Code:    benchmarks/*.jl, benchmarks/*.py  (version controlled)
+#   Results: benchmarks/results/               (gitignored)
+
+bench:          ## Run internal benchmarks (Level 0/1)
+	@mkdir -p $(RESULTS_DIR)
+	@BENCH_ID="$${BENCH_ID:-internals_$$(date +%Y%m%d_%H%M%S)}"; \
+	OUTFILE="$(RESULTS_DIR)/$${BENCH_ID}.txt"; \
+	echo "Running internal benchmarks → $$OUTFILE"; \
+	BENCH_ID="$$BENCH_ID" julia --project=. benchmarks/bench_internals.jl | tee "$$OUTFILE"; \
+	echo "Saved to $$OUTFILE"
+
+bench-system:   ## Run system benchmarks (Level 2, 4 threads)
+	@mkdir -p $(RESULTS_DIR)
 	@BENCH_ID="$${BENCH_ID:-system_$$(date +%Y%m%d_%H%M%S)}"; \
-	OUTFILE="benchmarks/$${BENCH_ID}.txt"; \
-	echo "Running system benchmarks (4 threads) → $$OUTFILE"; \
-	BENCH_ID="$$BENCH_ID" julia --threads=4 --project=. test/bench_system.jl | tee "$$OUTFILE"; \
-	echo ""; \
+	OUTFILE="$(RESULTS_DIR)/$${BENCH_ID}.txt"; \
+	echo "Running system benchmarks → $$OUTFILE"; \
+	BENCH_ID="$$BENCH_ID" julia --threads=4 --project=. benchmarks/bench_system.jl | tee "$$OUTFILE"; \
+	echo "Saved to $$OUTFILE"
+
+bench-net:      ## Run network benchmarks over Docker (Level 3)
+	@mkdir -p $(RESULTS_DIR)
+	@OUTFILE="$(RESULTS_DIR)/net_docker_$$(date +%Y%m%d_%H%M%S).txt"; \
+	echo "Running Docker network benchmarks → $$OUTFILE"; \
+	python3 benchmarks/bench_net.py | tee "$$OUTFILE"; \
+	echo "Saved to $$OUTFILE"
+
+bench-native:   ## Run network benchmarks against native server (start server-native first)
+	@mkdir -p $(RESULTS_DIR)
+	@OUTFILE="$(RESULTS_DIR)/net_native_$$(date +%Y%m%d_%H%M%S).txt"; \
+	echo "Running native network benchmarks → $$OUTFILE"; \
+	python3 benchmarks/bench_net.py --native | tee "$$OUTFILE"; \
 	echo "Saved to $$OUTFILE"
 
 bench-local:    ## Run local benchmarks (internal + system, no Docker needed)
-	@mkdir -p benchmarks
+	@mkdir -p $(RESULTS_DIR)
 	@TS="$$(date +%Y%m%d_%H%M%S)"; \
 	echo "── Internal Benchmarks (Level 0/1) ──────────────────"; \
-	BENCH_ID="local_internals_$$TS" julia --project=. test/bench_internals.jl | tee "benchmarks/local_internals_$$TS.txt"; \
+	BENCH_ID="local_internals_$$TS" julia --project=. benchmarks/bench_internals.jl | tee "$(RESULTS_DIR)/local_internals_$$TS.txt"; \
 	echo ""; \
 	echo "── System Benchmarks (Level 2) ──────────────────────"; \
-	BENCH_ID="local_system_$$TS" julia --threads=4 --project=. test/bench_system.jl | tee "benchmarks/local_system_$$TS.txt"; \
-	echo ""; \
-	echo "Saved to benchmarks/local_*_$$TS.txt"
-
-bench-net:      ## Run network benchmarks over Docker (Level 3)
-	python3 scripts/bench_net.py
-
-bench-native:   ## Run network benchmarks against native server (start server-native first)
-	python3 scripts/bench_net.py --native
+	BENCH_ID="local_system_$$TS" julia --threads=4 --project=. benchmarks/bench_system.jl | tee "$(RESULTS_DIR)/local_system_$$TS.txt"; \
+	echo "Saved to $(RESULTS_DIR)/local_*_$$TS.txt"
 
 bench-all:      ## Run ALL benchmarks (internal + system + network/Docker)
-	@mkdir -p benchmarks
+	@mkdir -p $(RESULTS_DIR)
 	@TS="$$(date +%Y%m%d_%H%M%S)"; \
 	echo "── Internal Benchmarks (Level 0/1) ──────────────────"; \
-	BENCH_ID="all_internals_$$TS" julia --project=. test/bench_internals.jl | tee "benchmarks/all_internals_$$TS.txt"; \
+	BENCH_ID="all_internals_$$TS" julia --project=. benchmarks/bench_internals.jl | tee "$(RESULTS_DIR)/all_internals_$$TS.txt"; \
 	echo ""; \
 	echo "── System Benchmarks (Level 2) ──────────────────────"; \
-	BENCH_ID="all_system_$$TS" julia --threads=4 --project=. test/bench_system.jl | tee "benchmarks/all_system_$$TS.txt"; \
+	BENCH_ID="all_system_$$TS" julia --threads=4 --project=. benchmarks/bench_system.jl | tee "$(RESULTS_DIR)/all_system_$$TS.txt"; \
 	echo ""; \
 	echo "── Network Benchmarks (Level 3) ─────────────────────"; \
-	python3 scripts/bench_net.py | tee "benchmarks/all_net_$$TS.txt"; \
-	echo ""; \
-	echo "Saved to benchmarks/all_*_$$TS.txt"
+	python3 benchmarks/bench_net.py | tee "$(RESULTS_DIR)/all_net_$$TS.txt"; \
+	echo "Saved to $(RESULTS_DIR)/all_*_$$TS.txt"
+
+bench-compare:  ## Compare two benchmark result files (BEFORE=... AFTER=...)
+	@python3 scripts/bench_compare.py $(BEFORE) $(AFTER)
+
+# ─── Utilities ────────────────────────────────────────────────────────────────
 
 ps:             ## Show status of all Radish containers
 	$(DC) ps -a
@@ -213,10 +244,12 @@ help:           ## Show this help message
 	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) \
 		| awk 'BEGIN {FS = ":.*##"}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
 
-.PHONY: build rebuild server server-logs server-stop client smoke-test bench-compare \
+.PHONY: build rebuild server server-logs server-stop server-native client \
         simulator simload simrun \
         simload-light simload-heavy simload-vheavy \
         simrun-light simrun-heavy simrun-vheavy \
         docs-build docs docs-bg docs-logs docs-stop \
-        down clean ps storage storage-watch logs help \
-        test test-all bench bench-system bench-local bench-net bench-native bench-all
+        down clean \
+        test smoke-test test-all validate \
+        bench bench-system bench-net bench-native bench-local bench-all bench-compare \
+        ps storage storage-watch logs help

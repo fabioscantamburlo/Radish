@@ -39,8 +39,9 @@ radish.aof
 # Jekyll build output
 docs/_site/
 
-# Benchmark results
-benchmarks/
+# Benchmark results (generated output, not code)
+benchmarks/results/
+!benchmarks/results/.gitkeep
 
 # Kiro specs and config
 .kiro/

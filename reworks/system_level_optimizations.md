@@ -176,6 +176,37 @@ phase. The line is kept as-is for unmodified keys (no re-serialization).
 
 ---
 
+## Phase 3 — Level 3 Optimizations
+
+#### 3.2a — Batch-aware response writing
+
+**Files changed:** `src/server.jl`, `src/resp.jl`
+
+**Problem:** When a client pipelines N commands, the server parsed and executed them
+one at a time, writing each response with a separate `write()` syscall. N commands =
+N syscalls for responses.
+
+**Solution:**
+- Added `has_buffered_data(reader)` to detect when more commands are waiting in the
+  RESPReader buffer (pipelined by client).
+- `handle_client` now has two paths:
+  - **Single-command path** (no buffered data): identical to before, no regression.
+  - **Batch path** (buffered data detected): reads all available commands into a vector,
+    batch-appends write commands to AOF, executes all, encodes all responses into one
+    IOBuffer, single `write()` syscall.
+- Added `write_resp_responses(sock, results::Vector{ExecuteResult})` for batch encoding.
+
+**Measured (native, no Docker):**
+| Benchmark | Before | After | Change |
+|---|---|---|---|
+| S_GET pipeline batch=50 | 21.8k ops/s | 39.8k ops/s | **+82%** |
+| S_GET pipeline batch=100 | 21.1k ops/s | 38.9k ops/s | **+85%** |
+| S_GET pipeline batch=500 | 27.7k ops/s | 48.4k ops/s | **+75%** |
+| mixed pipeline batch=100 | 20.8k ops/s | 35.6k ops/s | **+72%** |
+| Single-client latency | 7.7k ops/s | 7.4k ops/s | ~same (no regression) |
+
+---
+
 ## Validation
 
 All changes validated at each step through four gates:

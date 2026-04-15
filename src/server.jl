@@ -203,53 +203,106 @@ function handle_client(sock::TCPSocket, store::RadishStore, db_lock::ShardedLock
     @info "Client #$client_id connected from $(getpeername(sock))"
 
     try
+        # Disable Nagle's algorithm — send responses immediately, don't buffer
+        Sockets.nagle(sock, false)
+
         # Send welcome message
         write(sock, "+Welcome to Radish Server\r\n")
         session = ClientSession()
         reader = RESPReader(sock)
+        resp_buf = IOBuffer()  # Pre-allocated response buffer, reused per command/batch
 
         while isopen(sock)
-            # Read RESP command from buffered reader
+            # Read first command (blocks until data arrives)
             cmd = read_resp_command(reader)
-
             if cmd === nothing
                 break
             end
 
-            # AOF Write-Ahead Logging
-            if !(cmd.name in AOF_EXCLUDED_OPS)
-                if !session.in_transaction
-                    # Normal write command: log to AOF before execution
-                    aof_append!(aof, cmd)
+            # Check if more commands are buffered (pipelined by client)
+            if has_buffered_data(reader)
+                # ── Batch path: multiple commands in buffer ──────────────
+                batch = Command[cmd]
+                while has_buffered_data(reader)
+                    next_cmd = read_resp_command(reader)
+                    next_cmd === nothing && break
+                    push!(batch, next_cmd)
                 end
-                # In transaction mode: don't log yet, commands are queued.
-                # They will be logged when EXEC is called (see below).
-            end
 
-            # When EXEC is called, log all queued write commands to AOF
-            if cmd.name == "EXEC" && session.in_transaction && !isempty(session.queued_commands)
-                write_cmds = filter(c -> !(c.name in AOF_EXCLUDED_OPS), session.queued_commands)
+                # Cache now() once for the entire batch
+                t = now()
+
+                # AOF: batch-append all write commands at once
+                write_cmds = Command[]
+                for c in batch
+                    if !(c.name in AOF_EXCLUDED_OPS) && !session.in_transaction
+                        push!(write_cmds, c)
+                    end
+                end
                 if !isempty(write_cmds)
                     aof_append_batch!(aof, write_cmds)
                 end
-            end
 
-            # Execute via dispatcher with tracker
-            result = execute!(store, db_lock, cmd, session; tracker=tracker)
+                # Execute all commands, collect results
+                results = ExecuteResult[]
+                should_close = false
+                for c in batch
+                    # Handle EXEC AOF logging
+                    if c.name == "EXEC" && session.in_transaction && !isempty(session.queued_commands)
+                        exec_writes = filter(qc -> !(qc.name in AOF_EXCLUDED_OPS), session.queued_commands)
+                        if !isempty(exec_writes)
+                            aof_append_batch!(aof, exec_writes)
+                        end
+                    end
 
-            # Write RESP response back
-            write_resp_response(sock, result)
+                    result = execute!(store, db_lock, c, session; tracker=tracker, t=t)
+                    push!(results, result)
 
-            # Close connection on QUIT/EXIT
-            if cmd.name == "QUIT" || cmd.name == "EXIT"
-                break
+                    if c.name == "QUIT" || c.name == "EXIT"
+                        should_close = true
+                        break
+                    end
+                end
+
+                # Write all responses in a single syscall
+                write_resp_responses(sock, results, resp_buf)
+
+                if should_close
+                    break
+                end
+            else
+                # ── Single command path (no pipelining) ──────────────────
+                # AOF Write-Ahead Logging
+                if !(cmd.name in AOF_EXCLUDED_OPS)
+                    if !session.in_transaction
+                        aof_append!(aof, cmd)
+                    end
+                end
+
+                # Handle EXEC AOF logging
+                if cmd.name == "EXEC" && session.in_transaction && !isempty(session.queued_commands)
+                    write_cmds = filter(c -> !(c.name in AOF_EXCLUDED_OPS), session.queued_commands)
+                    if !isempty(write_cmds)
+                        aof_append_batch!(aof, write_cmds)
+                    end
+                end
+
+                # Execute via dispatcher with tracker
+                result = execute!(store, db_lock, cmd, session; tracker=tracker)
+
+                # Write RESP response back
+                write_resp_response(sock, result, resp_buf)
+
+                # Close connection on QUIT/EXIT
+                if cmd.name == "QUIT" || cmd.name == "EXIT"
+                    break
+                end
             end
         end
     catch e
         if isa(e, EOFError)
             @info "Client #$client_id disconnected"
         elseif isa(e, Base.IOError) && (e.code == -32 || e.code == -104)
-            # Broken pipe (-32) or connection reset (-104) - client disconnected, this is normal
             @info "Client #$client_id disconnected (broken pipe)"
         else
             @warn "Client #$client_id error: $e"

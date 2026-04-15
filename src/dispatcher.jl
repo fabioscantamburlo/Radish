@@ -134,11 +134,11 @@ Single hash lookup via COMMAND_TABLE. Handles key validation, type validation, a
 Does NOT acquire locks — the caller is responsible for that.
 """
 function route_command(store::RadishStore, cmd::Command;
-                       tracker::Union{DirtyTracker, Nothing}=nothing)
+                       tracker::Union{DirtyTracker, Nothing}=nothing,
+                       t::DateTime=now())
     cmd_name = cmd.name
     cmd_key = cmd.key
     cmd_args = cmd.args
-    t = now()  # Cache once per command
 
     try
         entry = get(COMMAND_TABLE, cmd_name, nothing)
@@ -310,7 +310,8 @@ end
 # =============================================================================
 
 function execute!(store::RadishStore, db_lock::ShardedLock, cmd::Command, session::ClientSession;
-                  tracker::Union{DirtyTracker, Nothing}=nothing)
+                  tracker::Union{DirtyTracker, Nothing}=nothing,
+                  t::DateTime=now())
     cmd_name = cmd.name
 
     # --- Transaction lifecycle commands (no locks needed) ---
@@ -333,7 +334,7 @@ function execute!(store::RadishStore, db_lock::ShardedLock, cmd::Command, sessio
         if !session.in_transaction
             return ExecuteResult(ERROR, nothing, "EXEC without MULTI")
         end
-        return execute_transaction!(store, db_lock, session; tracker=tracker)
+        return execute_transaction!(store, db_lock, session; tracker=tracker, t=t)
     end
 
     if cmd_name == "BGSAVE"
@@ -371,7 +372,7 @@ function execute!(store::RadishStore, db_lock::ShardedLock, cmd::Command, sessio
     shard_ids = acquire_locks!(db_lock, plan)
 
     try
-        return route_command(store, cmd; tracker=tracker)
+        return route_command(store, cmd; tracker=tracker, t=t)
     finally
         release_locks!(db_lock, plan, shard_ids)
     end
@@ -400,7 +401,8 @@ Execute a transaction: acquire write locks on all keys, then route each
 queued command through route_command (no per-command locking).
 """
 function execute_transaction!(store::RadishStore, db_lock::ShardedLock, session::ClientSession;
-                              tracker::Union{DirtyTracker, Nothing}=nothing)
+                              tracker::Union{DirtyTracker, Nothing}=nothing,
+                              t::DateTime=now())
     all_keys = extract_all_keys(session.queued_commands)
 
     shard_ids = if isempty(all_keys)
@@ -412,7 +414,7 @@ function execute_transaction!(store::RadishStore, db_lock::ShardedLock, session:
     results = ExecuteResult[]
     try
         for cmd in session.queued_commands
-            result = route_command(store, cmd; tracker=tracker)
+            result = route_command(store, cmd; tracker=tracker, t=t)
             push!(results, result)
         end
     finally
