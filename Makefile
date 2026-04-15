@@ -12,14 +12,17 @@ rebuild:        ## Force rebuild the image from scratch (no cache)
 
 # ─── Server ───────────────────────────────────────────────────────────────────
 
-server:         ## Start the server in the background
+server:         ## Start the Docker server in the background
 	$(DC) up -d radish-server
 
-server-logs:    ## Tail the server logs (Ctrl+C to stop)
+server-logs:    ## Tail the Docker server logs (Ctrl+C to stop)
 	$(DC) logs -f radish-server
 
-server-stop:    ## Stop the server
+server-stop:    ## Stop the Docker server
 	$(DC) stop radish-server
+
+server-native:  ## Start the server natively (no Docker, localhost:9000, 4 threads)
+	julia --threads=4 --project=. server_runner.jl
 
 # ─── Client ───────────────────────────────────────────────────────────────────
 
@@ -132,8 +135,11 @@ bench-local:    ## Run local benchmarks (internal + system, no Docker needed)
 	echo ""; \
 	echo "Saved to benchmarks/local_*_$$TS.txt"
 
-bench-net:      ## Run network benchmarks (Level 3, requires Docker)
+bench-net:      ## Run network benchmarks over Docker (Level 3)
 	python3 scripts/bench_net.py
+
+bench-native:   ## Run network benchmarks against native server (start server-native first)
+	python3 scripts/bench_net.py --native
 
 bench-all:      ## Run ALL benchmarks (internal + system + network/Docker)
 	@mkdir -p benchmarks
@@ -213,4 +219,4 @@ help:           ## Show this help message
         simrun-light simrun-heavy simrun-vheavy \
         docs-build docs docs-bg docs-logs docs-stop \
         down clean ps storage storage-watch logs help \
-        test test-all bench bench-system bench-local bench-net bench-all
+        test test-all bench bench-system bench-local bench-net bench-native bench-all

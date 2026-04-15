@@ -8,11 +8,11 @@ Measures end-to-end performance over real TCP/RESP:
   - Multi-client concurrent throughput
   - Command mix workloads
 
-Runs against a live Docker server. Starts/stops Docker automatically.
-
 Usage:
-    python3 scripts/bench_net.py
-    make bench-net
+    python3 scripts/bench_net.py              # Docker mode (starts/stops Docker)
+    python3 scripts/bench_net.py --native     # Native mode (expects server already running)
+    make bench-net                            # Docker mode
+    make bench-native                         # Native mode
 """
 
 import socket
@@ -242,7 +242,9 @@ def make_all_commands(n):
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
+    native_mode = "--native" in sys.argv
     bench_id = datetime.now().strftime("%Y%m%d_%H%M%S")
+    mode_label = "native (no Docker)" if native_mode else "Docker"
 
     print("=" * 78)
     print("  Radish Network Benchmarks (Level 3)")
@@ -250,34 +252,53 @@ def main():
     print()
     print(f"  Date: {datetime.now().isoformat()}")
     print(f"  Bench ID: {bench_id}")
+    print(f"  Mode: {mode_label}")
     print(f"  Keys: {fmt_num(NUM_KEYS)}")
     print(f"  Ops per bench: {fmt_num(OPS_PER_BENCH)}")
     print(f"  Trials: {TRIALS} (median)")
     print()
 
     try:
-        # ── Build & start ────────────────────────────────────────────────
-        print("── Building Docker image ─────────────────────────────────────────────────")
-        run_visible("docker compose build --quiet")
+        if native_mode:
+            # ── Native mode: expect server already running ───────────────
+            print("── Connecting to native server ───────────────────────────────────────────")
+            for i in range(1, 31):
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(2)
+                    s.connect((HOST, PORT))
+                    s.close()
+                    print(f"  Server reachable on {HOST}:{PORT}")
+                    break
+                except (ConnectionRefusedError, OSError):
+                    if i == 30:
+                        print(f"  Server not reachable on {HOST}:{PORT} after 30s")
+                        print(f"  Start it first: make server-native")
+                        sys.exit(1)
+                    time.sleep(1)
+        else:
+            # ── Docker mode: build & start ───────────────────────────────
+            print("── Building Docker image ─────────────────────────────────────────────────")
+            run_visible("docker compose build --quiet")
 
-        print("── Starting server ───────────────────────────────────────────────────────")
-        run_visible("docker compose up -d radish-server")
+            print("── Starting server ───────────────────────────────────────────────────────")
+            run_visible("docker compose up -d radish-server")
 
-        print("── Waiting for server to be healthy ──────────────────────────────────────")
-        for i in range(1, 91):
-            result = subprocess.run(
-                "docker inspect --format='{{.State.Health.Status}}' radish-server",
-                shell=True, capture_output=True, text=True,
-            )
-            status = result.stdout.strip().strip("'")
-            if status == "healthy":
-                print(f"  Server healthy after {i}s")
-                break
-            if i == 90:
-                print("  Server failed to become healthy after 90s")
-                cleanup()
-                sys.exit(1)
-            time.sleep(1)
+            print("── Waiting for server to be healthy ──────────────────────────────────────")
+            for i in range(1, 91):
+                result = subprocess.run(
+                    "docker inspect --format='{{.State.Health.Status}}' radish-server",
+                    shell=True, capture_output=True, text=True,
+                )
+                status = result.stdout.strip().strip("'")
+                if status == "healthy":
+                    print(f"  Server healthy after {i}s")
+                    break
+                if i == 90:
+                    print("  Server failed to become healthy after 90s")
+                    cleanup()
+                    sys.exit(1)
+                time.sleep(1)
 
         time.sleep(1)
 
@@ -385,7 +406,8 @@ def main():
         print()
 
     finally:
-        cleanup()
+        if not native_mode:
+            cleanup()
 
     print("=" * 78)
     print("  Benchmark complete.")
