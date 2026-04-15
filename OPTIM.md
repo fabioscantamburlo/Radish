@@ -3,16 +3,16 @@
 > A detailed review of performance characteristics across four levels:
 > language, data structures, system orchestration, and end-to-end behavior.
 >
-> Last updated after Phase 2 completion + Level 3 native baseline.
-> All Level 0, 1, and 2 optimizations complete. Level 3 in progress.
+> Last updated after Phase 3.2a — batch-aware pipeline processing.
+> All Level 0, 1, 2 optimizations complete. Level 3 in progress.
 >
 > **Key finding (Phase 1.5):** The 80-96% regressions reported in `compa.txt` were a
 > benchmark artifact — Julia's JIT dead-code-eliminated `now()` calls in the "before"
 > benchmark. See `reworks/optimnow.md`.
 >
 > **Key finding (Level 3):** The engine processes 2.2M ops/s in-process, but only 7.7k
-> ops/s over native TCP (single-client). Pipelining reaches 37k ops/s (2 clients).
-> The 60x gap between in-process and pipelined TCP is the next optimization target.
+> ops/s over native TCP (single-client). After 3.2a, pipelining reaches 43-48k ops/s
+> (single-client, batch=100-500), up from 21k. The remaining gap is the next target.
 
 ---
 
@@ -94,6 +94,15 @@ Results saved to `benchmarks/results/` (gitignored). Code in `benchmarks/` (trac
 | 3.3 | Multiple small socket writes per response | IOBuffer — single `write()` syscall | Structural |
 | 3.4 | RESP parsing one `readline` per line | RESPReader with 16KB buffer | Structural |
 
+### Phase 3.2a — Batch-Aware Pipeline Processing
+
+| # | Issue | Resolution | Measured Improvement |
+|---|-------|------------|---------------------|
+| 3.2a | Server processes pipelined commands one-at-a-time with separate `write()` per response | `has_buffered_data(reader)` detects pipelined commands; batch path: single `now()`, batch AOF append, all responses encoded into one IOBuffer, single `write()` syscall | S_GET pipeline batch=100: 21k → 43k ops/s (+105%) |
+| 3.5 | Nagle's algorithm delays small responses | `Sockets.nagle(sock, false)` — TCP_NODELAY on client sockets | Structural — eliminates 40ms Nagle delay on small writes |
+| 3.6 | `now()` called per-command even in pipeline batches | Single `now()` cached for entire batch, threaded through `execute!` → `route_command` → `execute_transaction!` via `t::DateTime` kwarg | Eliminates ~136 ns × N syscalls per batch |
+| 3.7 | New IOBuffer allocated per response | Pre-allocated `IOBuffer` per client session, reused via `seekstart`/`truncate` | Zero allocation per response write |
+
 ---
 
 ## Cumulative Results
@@ -126,13 +135,16 @@ Results saved to `benchmarks/results/` (gitignored). Code in `benchmarks/` (trac
 
 ### Level 3 — Network (native, no Docker)
 
-| Benchmark | Native | Docker | Docker overhead |
+| Benchmark | Before 3.2a | After 3.2a | Improvement |
 |---|---|---|---|
-| PING round-trip | 98 μs | 657 μs | 6.7x |
-| S_GET single-client | 129 μs (7.7k ops/s) | 625 μs (1.6k ops/s) | 4.8x |
-| S_GET pipeline batch=100 | 48 μs (21k ops/s) | 185 μs (5.4k ops/s) | 3.9x |
-| 2 clients pipelined | 27 μs (37k ops/s) | 167 μs (6k ops/s) | 6.2x |
-| 4 clients latency | 71 μs (14k ops/s) | 989 μs (1k ops/s) | 13.9x |
+| PING round-trip | 98 μs | 96 μs | ~same |
+| S_GET single-client | 129 μs (7.7k ops/s) | 126 μs (7.9k ops/s) | ~same (no regression) |
+| S_GET pipeline batch=100 | 48 μs (21k ops/s) | 23 μs (43k ops/s) | **+105%** |
+| S_GET pipeline batch=500 | 36 μs (28k ops/s) | 22 μs (46k ops/s) | **+64%** |
+| mixed pipeline batch=100 | 48 μs (21k ops/s) | 26 μs (38k ops/s) | **+81%** |
+| 2 clients pipelined | 27 μs (37k ops/s) | 21 μs (47k ops/s) | **+27%** |
+| 4 clients latency | 71 μs (14k ops/s) | 74 μs (14k ops/s) | ~same |
+| 8 clients latency | — | 134 μs (7.5k ops/s) | new benchmark |
 
 ### The Gap
 
@@ -140,9 +152,9 @@ Results saved to `benchmarks/results/` (gitignored). Code in `benchmarks/` (trac
 |---|---|---|
 | Raw engine (Level 0, cached t) | 40M ops/s | — |
 | Full dispatch (Level 2, single-thread) | 2.2M ops/s | 18x (locking + `now()` + routing) |
-| Native TCP, pipelined (Level 3, 2 clients) | 37k ops/s | 60x (RESP parse + TCP + task scheduler) |
-| Native TCP, single-client | 7.7k ops/s | 5x (no pipelining = RTT-bound) |
-| Docker TCP, single-client | 1.6k ops/s | 5x (VM bridge overhead) |
+| Native TCP, pipelined (Level 3, 2 clients) | 47k ops/s | 47x (RESP parse + TCP + task scheduler) |
+| Native TCP, pipelined (Level 3, single-client batch=100) | 43k ops/s | — |
+| Native TCP, single-client | 7.9k ops/s | 5.4x (no pipelining = RTT-bound) |
 
 ---
 
@@ -167,10 +179,11 @@ Heap allocation per S_LCS/S_COMPLEN/L_MOVE call. Fix: `@view` or pass full args.
 First command after startup is slow. Fix: `PackageCompiler.jl` system image.
 **Impact:** 🔴 High (perceived startup). **Effort:** Medium.
 
-#### 3.2 — Per-command TCP overhead (the 60x gap)
+#### 3.2 — Per-command TCP overhead (the 47x gap)
 
 **The problem:** The engine does 2.2M ops/s through `execute!`, but over native TCP
-with pipelining we get 37k ops/s. That's a 60x gap. The gap comes from:
+with pipelining we get 47k ops/s (2 clients). That's a 47x gap (down from 60x before
+3.2a). The remaining gap comes from:
 
 1. **RESP string allocations** — each bulk string in the parser creates a new `String`
    via `String(reader.buf[pos:pos+n-1])`. For S_GET with a 3-part command, that's 3
@@ -178,27 +191,30 @@ with pipelining we get 37k ops/s. That's a 60x gap. The gap comes from:
 
 2. **Julia task scheduler overhead** — each client runs in a `@spawn` task. Under
    concurrent load, the scheduler adds context-switch overhead. The bench_net results
-   show throughput *decreasing* from 4→8 clients (21k → 8.6k ops/s pipelined).
+   show throughput *decreasing* from 4→8 clients (25k → 7.5k ops/s pipelined).
 
-3. **Per-command `now()` syscall** — `route_command` calls `now()` on every command.
-   At 136 ns per call, this is 6% of the 2.2M ops/s budget. For the TCP path where
-   commands arrive in batches, a single `now()` per batch would suffice.
+3. **No server-side batch locking** — the batch path executes commands individually,
+   each acquiring its own lock. Commands targeting the same shard could share a single
+   lock acquisition.
 
-4. **No server-side pipeline awareness** — the server processes commands one at a time
-   from the RESPReader buffer. It could detect multiple commands in the buffer and
-   batch-process them (single `now()`, single lock acquisition for same-shard commands).
+**What 3.2a already fixed:**
+- Batch response writing (single `write()` syscall per batch)
+- Batch AOF append (single flush per batch)
+- Single `now()` per batch (threaded via `t::DateTime` kwarg)
+- TCP_NODELAY (eliminates Nagle delay)
+- Pre-allocated IOBuffer per client (zero alloc per response)
 
 **Realistic targets (native, no Docker):**
 
 | Scenario | Current | Target | How |
 |---|---|---|---|
-| Single-client, no pipeline | 7.7k ops/s | 10-15k ops/s | Reduce per-command overhead |
-| Single-client, pipeline batch=100 | 21k ops/s | 100-200k ops/s | Server-side batch awareness |
-| 2 clients, pipeline | 37k ops/s | 200-400k ops/s | Batch + reduced task overhead |
-| 4 clients, pipeline | 22k ops/s | 300-500k ops/s | Should scale, not degrade |
+| Single-client, no pipeline | 7.9k ops/s | 10-15k ops/s | Reduce per-command overhead |
+| Single-client, pipeline batch=100 | 43k ops/s | 100-200k ops/s | Batch locking, reduce allocs |
+| 2 clients, pipeline | 47k ops/s | 200-400k ops/s | Batch locking + reduced task overhead |
+| 4 clients, pipeline | 25k ops/s | 300-500k ops/s | Should scale, not degrade |
 
-**Impact:** 🔴 Very High — 5-10x improvement expected.
-**Effort:** Medium-High.
+**Impact:** 🔴 High — 2-5x improvement expected from remaining items.
+**Effort:** Medium.
 
 ---
 
@@ -236,11 +252,14 @@ with pipelining we get 37k ops/s. That's a 60x gap. The gap comes from:
 | 0.9 | `args[2:end]` slice | 🟢 Low | Very Low | Remaining |
 | 0.10 | LCS DP matrix | 🟢 Low | Low | Remaining |
 | 3.1 | PackageCompiler sysimage | 🔴 High | Medium | Remaining |
-| 3.2 | TCP per-command overhead (60x gap) | 🔴 Very High | Medium-High | Remaining |
+| 3.2 | TCP per-command overhead (47x gap) | 🔴 High | Medium | 3.2a done, 3.2b remaining |
+| 3.5 | TCP_NODELAY (Nagle delay) | 🟡 Medium | Very Low | ✅ Done |
+| 3.6 | Batch `now()` caching | 🟡 Medium | Low | ✅ Done |
+| 3.7 | Pre-allocated response IOBuffer | 🟢 Low | Very Low | ✅ Done |
 
-### Next: Level 3 Rework
+### Next: Level 3 Continued
 
-1. **3.2 — Close the 60x TCP gap** (the main event)
+1. **3.2b — Batch locking for same-shard pipelined commands** (close the 47x gap further)
 2. **3.1 — PackageCompiler sysimage** (startup latency)
 3. **0.9 — `args[2:end]` slice** (5-minute quick win)
 4. **0.10 — LCS rolling DP** (low priority)
