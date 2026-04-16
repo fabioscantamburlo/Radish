@@ -38,8 +38,8 @@ struct RadishConfig
     pipeline_batch::Int
     pipeline_flush_ms::Int
 
-    # AOF sync policy: "always" (flush every command), "everysec" (flush every second), "no" (OS decides)
-    aof_sync_policy::String
+    # AOF sync interval in milliseconds: 0 = flush every command, N>0 = flush every N ms
+    aof_sync_ms::Int
 end
 
 """Derived paths from the config."""
@@ -98,8 +98,8 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
         # Client defaults
         get(cl, "pipeline_batch", 1000),
         get(cl, "pipeline_flush_ms", 5),
-        # AOF sync policy
-        get(pers, "aof_sync_policy", "always"),
+        # AOF sync interval (ms): 0 = every command, N>0 = every N ms
+        get(pers, "aof_sync_ms", 1000),
     )
 end
 

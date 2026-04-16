@@ -20,13 +20,15 @@ const AOF_EXCLUDED_OPS = union(READ_OPS, Set(["PING", "QUIT", "EXIT", "BGSAVE", 
 # ============================================================================
 
 """
-Background task: AOF periodic flusher for "everysec" sync policy.
-Flushes the AOF IOStream once per second. Only runs when aof_sync_policy == "everysec".
+Background task: AOF periodic flusher.
+Flushes the AOF IOStream at the configured interval (aof_sync_ms).
+Only runs when aof_sync_ms > 0.
 """
 function async_aof_flusher(aof::AOFState)
+    interval_sec = CONFIG[].aof_sync_ms / 1000.0
     while true
         try
-            sleep(1.0)
+            sleep(interval_sec)
             lock(aof.lock) do
                 if aof.io !== nothing && isopen(aof.io)
                     flush(aof.io)
@@ -246,21 +248,29 @@ function handle_client(sock::TCPSocket, store::RadishStore, db_lock::ShardedLock
                 # Execute all commands, collect results
                 results = ExecuteResult[]
                 should_close = false
-                for c in batch
-                    # Handle EXEC AOF logging
-                    if c.name == "EXEC" && session.in_transaction && !isempty(session.queued_commands)
-                        exec_writes = filter(qc -> !(qc.name in AOF_EXCLUDED_OPS), session.queued_commands)
-                        if !isempty(exec_writes)
-                            aof_append_batch!(aof, exec_writes)
+
+                if can_batch_lock(batch, session)
+                    # ── Fast path: combined locking (OPTIM 3.2b) ────────
+                    results = execute_batch!(store, db_lock, batch, session; tracker=tracker, t=t)
+                    # Check for QUIT/EXIT in results (shouldn't happen — filtered by can_batch_lock)
+                else
+                    # ── Fallback: per-command execution (transactions, QUIT, etc.) ──
+                    for c in batch
+                        # Handle EXEC AOF logging
+                        if c.name == "EXEC" && session.in_transaction && !isempty(session.queued_commands)
+                            exec_writes = filter(qc -> !(qc.name in AOF_EXCLUDED_OPS), session.queued_commands)
+                            if !isempty(exec_writes)
+                                aof_append_batch!(aof, exec_writes)
+                            end
                         end
-                    end
 
-                    result = execute!(store, db_lock, c, session; tracker=tracker, t=t)
-                    push!(results, result)
+                        result = execute!(store, db_lock, c, session; tracker=tracker, t=t)
+                        push!(results, result)
 
-                    if c.name == "QUIT" || c.name == "EXIT"
-                        should_close = true
-                        break
+                        if c.name == "QUIT" || c.name == "EXIT"
+                            should_close = true
+                            break
+                        end
                     end
                 end
 
@@ -359,9 +369,9 @@ function start_server(host::String=CONFIG[].host, port::Int=CONFIG[].port)
     println("Starting background tasks...")
     @async async_cleaner(store, db_lock, tracker)
     @async async_syncer(store, db_lock, tracker, aof)
-    if cfg.aof_sync_policy == "everysec"
+    if cfg.aof_sync_ms > 0
         @async async_aof_flusher(aof)
-        println("  AOF flusher: every 1s (everysec policy)")
+        println("  AOF flusher: every $(cfg.aof_sync_ms)ms")
     end
 
     # Start TCP server

@@ -61,5 +61,6 @@ println("Running Radish test suite...\n")
 include("test_strings.jl")
 include("test_lists.jl")
 include("test_radishelem.jl")
+include("test_batch_locking.jl")
 
 println("\n✅ All tests passed!")

@@ -314,8 +314,8 @@ function aof_append!(aof::AOFState, cmd::Command)
                 print(io, ' ', arg)
             end
             println(io)
-            # Sync policy: "always" flushes every command, "everysec"/"no" skip per-command flush
-            if CONFIG[].aof_sync_policy == "always"
+            # Sync policy: 0 = flush every command, N>0 = deferred (flusher handles it)
+            if CONFIG[].aof_sync_ms == 0
                 flush(io)
             end
         end

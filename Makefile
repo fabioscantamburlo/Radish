@@ -184,6 +184,86 @@ bench-all:      ## Run ALL benchmarks (internal + system + network/Docker)
 bench-compare:  ## Compare two benchmark result files (BEFORE=... AFTER=...)
 	@python3 scripts/bench_compare.py $(BEFORE) $(AFTER)
 
+bench-diff:     ## Compare two full benchmark folders (BEFORE=dir AFTER=dir)
+	@if [ -z "$(BEFORE)" ] || [ -z "$(AFTER)" ]; then \
+		echo "Usage: make bench-diff BEFORE=benchmarks/results/full_<ts1> AFTER=benchmarks/results/full_<ts2>"; \
+		exit 1; \
+	fi
+	@echo "══════════════════════════════════════════════════════════════════════════"
+	@echo "  Comparing: $(BEFORE) → $(AFTER)"
+	@echo "══════════════════════════════════════════════════════════════════════════"
+	@FAIL=0; \
+	for f in $(BEFORE)/*.txt; do \
+		NAME=$$(basename "$$f"); \
+		if [ -f "$(AFTER)/$$NAME" ]; then \
+			echo ""; \
+			python3 scripts/bench_compare.py "$$f" "$(AFTER)/$$NAME" || FAIL=1; \
+		else \
+			echo ""; \
+			echo "  ⚠ $$NAME: no matching file in $(AFTER)"; \
+		fi; \
+	done; \
+	for f in $(AFTER)/*.txt; do \
+		NAME=$$(basename "$$f"); \
+		if [ ! -f "$(BEFORE)/$$NAME" ]; then \
+			echo ""; \
+			echo "  ⚠ $$NAME: new in $(AFTER) (no baseline)"; \
+		fi; \
+	done
+
+bench-full:     ## Run ALL benchmarks natively (no Docker): tests + Level 0-3 with auto server lifecycle
+	@echo "══════════════════════════════════════════════════════════════════════════"
+	@echo "  Radish Full Benchmark Suite (native, no Docker)"
+	@echo "  $$(date)"
+	@echo "══════════════════════════════════════════════════════════════════════════"
+	@TS=$$(date +%Y%m%d_%H%M%S); \
+	RUN_DIR="$(RESULTS_DIR)/full_$$TS"; \
+	mkdir -p "$$RUN_DIR"; \
+	echo "  Output: $$RUN_DIR/"; \
+	echo ""; \
+	echo "── 1/5 Unit Tests ────────────────────────────────────────────────────────"; \
+	julia --project=. test/runtests.jl; \
+	echo ""; \
+	echo "── 2/5 Internal Benchmarks (Level 0/1) ──────────────────────────────────"; \
+	BENCH_ID="full_internals_$$TS" julia --project=. benchmarks/bench_internals.jl \
+		| tee "$$RUN_DIR/internals.txt"; \
+	echo ""; \
+	echo "── 3/5 System Benchmarks (Level 2, 4 threads) ───────────────────────────"; \
+	BENCH_ID="full_system_$$TS" julia --threads=4 --project=. benchmarks/bench_system.jl \
+		| tee "$$RUN_DIR/system.txt"; \
+	echo ""; \
+	echo "── 4/5 Starting native server (8 threads) ───────────────────────────────"; \
+	julia --threads=8 --project=. server_runner.jl &  \
+	SERVER_PID=$$!; \
+	echo "  Server PID: $$SERVER_PID"; \
+	echo "  Waiting for server to be ready..."; \
+	for i in $$(seq 1 30); do \
+		if nc -z 127.0.0.1 9000 2>/dev/null; then \
+			echo "  Server ready after $${i}s"; \
+			break; \
+		fi; \
+		if [ $$i -eq 30 ]; then \
+			echo "  ERROR: Server failed to start after 30s"; \
+			kill $$SERVER_PID 2>/dev/null; \
+			exit 1; \
+		fi; \
+		sleep 1; \
+	done; \
+	echo ""; \
+	echo "── 5/5 Network Benchmarks (Level 3, native) ─────────────────────────────"; \
+	python3 benchmarks/bench_net.py --native \
+		| tee "$$RUN_DIR/net_native.txt"; \
+	echo ""; \
+	echo "── Stopping server ───────────────────────────────────────────────────────"; \
+	kill $$SERVER_PID 2>/dev/null; \
+	wait $$SERVER_PID 2>/dev/null; \
+	echo "  Server stopped."; \
+	echo ""; \
+	echo "══════════════════════════════════════════════════════════════════════════"; \
+	echo "  All benchmarks complete."; \
+	echo "  Results: $$RUN_DIR/"; \
+	echo "══════════════════════════════════════════════════════════════════════════"
+
 # ─── Utilities ────────────────────────────────────────────────────────────────
 
 ps:             ## Show status of all Radish containers
@@ -251,5 +331,5 @@ help:           ## Show this help message
         docs-build docs docs-bg docs-logs docs-stop \
         down clean \
         test smoke-test test-all validate \
-        bench bench-system bench-net bench-native bench-local bench-all bench-compare \
+        bench bench-system bench-net bench-native bench-local bench-all bench-full bench-compare bench-diff \
         ps storage storage-watch logs help
