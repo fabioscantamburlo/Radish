@@ -8,16 +8,18 @@ Measures end-to-end performance over real TCP/RESP:
   - Multi-client concurrent throughput
   - Command mix workloads
 
+The script only benchmarks — it expects a running server.
+Server lifecycle (Docker or native) is managed by the Makefile.
+
 Usage:
-    python3 scripts/bench_net.py              # Docker mode (starts/stops Docker)
-    python3 scripts/bench_net.py --native     # Native mode (expects server already running)
-    make bench-net                            # Docker mode
-    make bench-native                         # Native mode
+    python3 benchmarks/bench_net.py                                  # connect to 127.0.0.1:9000
+    RADISH_HOST=radish-server python3 benchmarks/bench_net.py        # connect to custom host
+    make bench-net                                                   # Docker: Makefile starts/stops server
+    make bench-net-native                                            # native: you start server first
 """
 
 import os
 import socket
-import subprocess
 import sys
 import time
 import random
@@ -30,21 +32,6 @@ PORT = int(os.environ.get("RADISH_PORT", "9000"))
 NUM_KEYS = 10_000
 OPS_PER_BENCH = 10_000
 TRIALS = 3
-
-
-# ── Docker helpers ───────────────────────────────────────────────────────────
-
-def run(cmd, check=True):
-    subprocess.run(cmd, shell=True, check=check, capture_output=True)
-
-
-def run_visible(cmd, check=True):
-    subprocess.run(cmd, shell=True, check=check)
-
-
-def cleanup():
-    print("\n── Cleaning up ─────────────────────────────────────────────────────────")
-    run("docker compose down --timeout 5", check=False)
 
 
 # ── RESP helpers ─────────────────────────────────────────────────────────────
@@ -243,9 +230,7 @@ def make_all_commands(n):
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
-    native_mode = "--native" in sys.argv
     bench_id = datetime.now().strftime("%Y%m%d_%H%M%S")
-    mode_label = "native (no Docker)" if native_mode else "Docker"
 
     print("=" * 78)
     print("  Radish Network Benchmarks (Level 3)")
@@ -253,162 +238,133 @@ def main():
     print()
     print(f"  Date: {datetime.now().isoformat()}")
     print(f"  Bench ID: {bench_id}")
-    print(f"  Mode: {mode_label}")
+    print(f"  Host: {HOST}:{PORT}")
     print(f"  Keys: {fmt_num(NUM_KEYS)}")
     print(f"  Ops per bench: {fmt_num(OPS_PER_BENCH)}")
     print(f"  Trials: {TRIALS} (median)")
     print()
 
-    try:
-        if native_mode:
-            # ── Native mode: expect server already running ───────────────
-            print("── Connecting to native server ───────────────────────────────────────────")
-            for i in range(1, 31):
-                try:
-                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
-                    s.settimeout(2)
-                    s.connect((HOST, PORT))
-                    s.close()
-                    print(f"  Server reachable on {HOST}:{PORT}")
-                    break
-                except (ConnectionRefusedError, OSError):
-                    if i == 30:
-                        print(f"  Server not reachable on {HOST}:{PORT} after 30s")
-                        print(f"  Start it first: make server-native")
-                        sys.exit(1)
-                    time.sleep(1)
-        else:
-            # ── Docker mode: build & start ───────────────────────────────
-            print("── Building Docker image ─────────────────────────────────────────────────")
-            run_visible("docker compose build --quiet")
+    # ── Wait for server ──────────────────────────────────────────────
+    print("── Connecting to server ──────────────────────────────────────────────────")
+    for i in range(1, 31):
+        try:
+            s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+            s.settimeout(2)
+            s.connect((HOST, PORT))
+            s.close()
+            print(f"  Server reachable on {HOST}:{PORT}")
+            break
+        except (ConnectionRefusedError, OSError):
+            if i == 30:
+                print(f"  Server not reachable on {HOST}:{PORT} after 30s")
+                print(f"  Start it first: make server  (Docker) or make server-native")
+                sys.exit(1)
+            time.sleep(1)
 
-            print("── Starting server ───────────────────────────────────────────────────────")
-            run_visible("docker compose up -d radish-server")
+    time.sleep(1)
 
-            print("── Waiting for server to be healthy ──────────────────────────────────────")
-            for i in range(1, 91):
-                result = subprocess.run(
-                    "docker inspect --format='{{.State.Health.Status}}' radish-server",
-                    shell=True, capture_output=True, text=True,
-                )
-                status = result.stdout.strip().strip("'")
-                if status == "healthy":
-                    print(f"  Server healthy after {i}s")
-                    break
-                if i == 90:
-                    print("  Server failed to become healthy after 90s")
-                    cleanup()
-                    sys.exit(1)
-                time.sleep(1)
-
-        time.sleep(1)
-
-        # ── Pre-populate ─────────────────────────────────────────────────
-        print(f"── Pre-populating {fmt_num(NUM_KEYS)} keys ──────────────────────────────────────────")
-        sock = connect()
-        for i in range(1, NUM_KEYS + 1):
-            send_resp(sock, "S_SET", f"str_{i}", f"value_{i}")
-            read_resp(sock)
-        print(f"  Loaded {fmt_num(NUM_KEYS)} string keys")
-        send_resp(sock, "QUIT")
+    # ── Pre-populate ─────────────────────────────────────────────────
+    print(f"── Pre-populating {fmt_num(NUM_KEYS)} keys ──────────────────────────────────────────")
+    sock = connect()
+    for i in range(1, NUM_KEYS + 1):
+        send_resp(sock, "S_SET", f"str_{i}", f"value_{i}")
         read_resp(sock)
-        sock.close()
-        print()
+    print(f"  Loaded {fmt_num(NUM_KEYS)} string keys")
+    send_resp(sock, "QUIT")
+    read_resp(sock)
+    sock.close()
+    print()
 
-        # ── 1. Single-client latency ─────────────────────────────────────
-        print("── Single-Client Latency (1 cmd → 1 response) ──────────────────────────")
+    # ── 1. Single-client latency ─────────────────────────────────────
+    print("── Single-Client Latency (1 cmd → 1 response) ──────────────────────────")
 
-        read_cmds = make_read_commands(OPS_PER_BENCH)
-        write_cmds = make_write_commands(OPS_PER_BENCH)
-        mixed_cmds = make_mixed_commands(OPS_PER_BENCH)
-        all_cmds = make_all_commands(OPS_PER_BENCH)
+    read_cmds = make_read_commands(OPS_PER_BENCH)
+    write_cmds = make_write_commands(OPS_PER_BENCH)
+    mixed_cmds = make_mixed_commands(OPS_PER_BENCH)
+    all_cmds = make_all_commands(OPS_PER_BENCH)
 
-        elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, read_cmds, OPS_PER_BENCH), s))
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, read_cmds, OPS_PER_BENCH), s))
+                        (connect())[0])
+    report("S_GET (read-only)", OPS_PER_BENCH, elapsed)
+
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, write_cmds, OPS_PER_BENCH), s))
+                        (connect())[0])
+    report("S_INCR (write-only)", OPS_PER_BENCH, elapsed)
+
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, mixed_cmds, OPS_PER_BENCH), s))
+                        (connect())[0])
+    report("mixed 90/10 read/write", OPS_PER_BENCH, elapsed)
+
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, all_cmds, OPS_PER_BENCH), s))
+                        (connect())[0])
+    report("all-commands mix", OPS_PER_BENCH, elapsed)
+
+    # PING (no key, no lock — measures pure round-trip)
+    ping_cmds = [("PING",)] * OPS_PER_BENCH
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, ping_cmds, OPS_PER_BENCH), s))
+                        (connect())[0])
+    report("PING (pure round-trip)", OPS_PER_BENCH, elapsed)
+
+    print()
+
+    # ── 2. Single-client pipelined ───────────────────────────────────
+    print("── Single-Client Pipelined (batch N → read N) ──────────────────────────")
+
+    for batch_size in [10, 50, 100, 500]:
+        elapsed = median_of(lambda bs=batch_size: (lambda s: (bench_pipeline(s, read_cmds, OPS_PER_BENCH, bs), s))
                             (connect())[0])
-        report("S_GET (read-only)", OPS_PER_BENCH, elapsed)
+        report(f"S_GET pipeline batch={batch_size}", OPS_PER_BENCH, elapsed)
 
-        elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, write_cmds, OPS_PER_BENCH), s))
+    print()
+
+    for batch_size in [10, 50, 100, 500]:
+        elapsed = median_of(lambda bs=batch_size: (lambda s: (bench_pipeline(s, mixed_cmds, OPS_PER_BENCH, bs), s))
                             (connect())[0])
-        report("S_INCR (write-only)", OPS_PER_BENCH, elapsed)
+        report(f"mixed 90/10 pipeline batch={batch_size}", OPS_PER_BENCH, elapsed)
 
-        elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, mixed_cmds, OPS_PER_BENCH), s))
-                            (connect())[0])
-        report("mixed 90/10 read/write", OPS_PER_BENCH, elapsed)
+    print()
 
-        elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, all_cmds, OPS_PER_BENCH), s))
-                            (connect())[0])
-        report("all-commands mix", OPS_PER_BENCH, elapsed)
+    # ── 3. Multi-client latency ──────────────────────────────────────
+    print("── Multi-Client Latency (1 cmd at a time per client) ───────────────────")
 
-        # PING (no key, no lock — measures pure round-trip)
-        ping_cmds = [("PING",)] * OPS_PER_BENCH
-        elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, ping_cmds, OPS_PER_BENCH), s))
-                            (connect())[0])
-        report("PING (pure round-trip)", OPS_PER_BENCH, elapsed)
+    ops_per_client = 5_000
 
-        print()
+    for num_clients in [1, 2, 4, 8]:
+        def single_cmd_worker(sock, n):
+            cmds = make_mixed_commands(n)
+            for parts in cmds:
+                send_resp(sock, *parts)
+                read_resp(sock)
 
-        # ── 2. Single-client pipelined ───────────────────────────────────
-        print("── Single-Client Pipelined (batch N → read N) ──────────────────────────")
+        elapsed = median_of(lambda nc=num_clients: bench_multi_client(nc, single_cmd_worker, ops_per_client))
+        total_ops = num_clients * ops_per_client
+        report(f"mixed 90/10 ({num_clients} clients)", total_ops, elapsed)
 
-        for batch_size in [10, 50, 100, 500]:
-            elapsed = median_of(lambda bs=batch_size: (lambda s: (bench_pipeline(s, read_cmds, OPS_PER_BENCH, bs), s))
-                                (connect())[0])
-            report(f"S_GET pipeline batch={batch_size}", OPS_PER_BENCH, elapsed)
+    print()
 
-        print()
+    # ── 4. Multi-client pipelined ────────────────────────────────────
+    print("── Multi-Client Pipelined (batch 100 per client) ───────────────────────")
 
-        for batch_size in [10, 50, 100, 500]:
-            elapsed = median_of(lambda bs=batch_size: (lambda s: (bench_pipeline(s, mixed_cmds, OPS_PER_BENCH, bs), s))
-                                (connect())[0])
-            report(f"mixed 90/10 pipeline batch={batch_size}", OPS_PER_BENCH, elapsed)
-
-        print()
-
-        # ── 3. Multi-client latency ──────────────────────────────────────
-        print("── Multi-Client Latency (1 cmd at a time per client) ───────────────────")
-
-        ops_per_client = 5_000
-
-        for num_clients in [1, 2, 4, 8]:
-            def single_cmd_worker(sock, n):
-                cmds = make_mixed_commands(n)
-                for parts in cmds:
-                    send_resp(sock, *parts)
+    for num_clients in [1, 2, 4, 8]:
+        def pipeline_worker(sock, n):
+            cmds = make_mixed_commands(n)
+            batch_size = 100
+            sent = 0
+            while sent < n:
+                batch = min(batch_size, n - sent)
+                buf = b""
+                for i in range(batch):
+                    buf += encode_resp(*cmds[(sent + i) % len(cmds)])
+                sock.sendall(buf)
+                for _ in range(batch):
                     read_resp(sock)
+                sent += batch
 
-            elapsed = median_of(lambda nc=num_clients: bench_multi_client(nc, single_cmd_worker, ops_per_client))
-            total_ops = num_clients * ops_per_client
-            report(f"mixed 90/10 ({num_clients} clients)", total_ops, elapsed)
+        elapsed = median_of(lambda nc=num_clients: bench_multi_client(nc, pipeline_worker, ops_per_client))
+        total_ops = num_clients * ops_per_client
+        report(f"mixed 90/10 pipeline ({num_clients} clients)", total_ops, elapsed)
 
-        print()
-
-        # ── 4. Multi-client pipelined ────────────────────────────────────
-        print("── Multi-Client Pipelined (batch 100 per client) ───────────────────────")
-
-        for num_clients in [1, 2, 4, 8]:
-            def pipeline_worker(sock, n):
-                cmds = make_mixed_commands(n)
-                batch_size = 100
-                sent = 0
-                while sent < n:
-                    batch = min(batch_size, n - sent)
-                    buf = b""
-                    for i in range(batch):
-                        buf += encode_resp(*cmds[(sent + i) % len(cmds)])
-                    sock.sendall(buf)
-                    for _ in range(batch):
-                        read_resp(sock)
-                    sent += batch
-
-            elapsed = median_of(lambda nc=num_clients: bench_multi_client(nc, pipeline_worker, ops_per_client))
-            total_ops = num_clients * ops_per_client
-            report(f"mixed 90/10 pipeline ({num_clients} clients)", total_ops, elapsed)
-
-        print()
-
-    finally:
-        if not native_mode:
-            cleanup()
+    print()
 
     print("=" * 78)
     print("  Benchmark complete.")
