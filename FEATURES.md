@@ -342,3 +342,17 @@ end
 - Raw terminal mode must be correctly restored/re-enabled across reconnects.
 - Any pending input buffered on the old socket is lost (acceptable — clients
   should assume commands after disconnect may or may not have been processed).
+
+
+
+
+# ARchit work
+If you want the 10-20x wins on concurrent throughput, you need architectural work:
+
+Multiple accept loops with SO_REUSEPORT — N independent listeners on the same port, each with its own client set. Kernel distributes connections. Largely eliminates the thread-1 accept bottleneck. Medium effort.
+
+Reduce lock granularity on hot shards — currently one RW lock per shard, but writes serialize fully. Lock-free hash maps for strings (epoch-based reclamation) or finer-grained buckets would help. Big effort.
+
+Dedicated I/O threads + worker pool — separate TCP reading (non-blocking with libuv or similar) from command execution. Commands flow through a lock-free MPSC to workers. Real work, likely rewrite of handle_client.
+
+Switch from @spawn-per-client to fiber-per-connection on fixed threads — cap the worker pool at N = num_cores, each thread handles many clients via poll/epoll. Julia doesn't have great native tooling for this.
