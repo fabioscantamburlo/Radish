@@ -7,15 +7,12 @@ RUN apt-get update \
 
 WORKDIR /app
 
-# Install Julia dependencies first (cache layer)
+# ── Layer 1: Dependencies (cached until Project.toml changes) ────────────────
 COPY Project.toml ./
-RUN julia --project=. -e 'using Pkg; Pkg.instantiate()'
+RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(; warn_loaded=false)' || true
 
-# Copy everything else
+# ── Layer 2: Source code (rebuilt on any code change, but fast — just a copy) ─
 COPY . .
-
-# Precompile dependencies
-RUN julia --project=. -e 'using Pkg; Pkg.precompile(; warn_loaded=false)' || true
 
 EXPOSE 9000
 
