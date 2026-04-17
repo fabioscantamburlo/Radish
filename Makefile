@@ -1,220 +1,160 @@
 .DEFAULT_GOAL := help
 
-DC = docker compose
-RESULTS_DIR = benchmarks/results
+DC           = docker compose
+RESULTS_DIR  = benchmarks/results
+RUNNER       = $(DC) --profile runner run --rm --build radish-runner
+JULIA_NATIVE = julia --project=.
+THREADS      ?= 4
 
-# ─── Build ────────────────────────────────────────────────────────────────────
+# =============================================================================
+#  Build
+# =============================================================================
 
-build:          ## Build (or rebuild) the radish Docker image
+build:              ## Build the radish Docker image
 	$(DC) build
 
-rebuild:        ## Force rebuild the image from scratch (no cache)
+rebuild:            ## Force rebuild (no cache)
 	$(DC) build --no-cache
 
-# ─── Server ───────────────────────────────────────────────────────────────────
+# =============================================================================
+#  Server
+# =============================================================================
 
-server:         ## Start the Docker server in the background
-	$(DC) up -d radish-server
+server:             ## Start server in Docker (background)
+	$(DC) up -d --build radish-server
 
-server-logs:    ## Tail the Docker server logs (Ctrl+C to stop)
-	$(DC) logs -f radish-server
-
-server-stop:    ## Stop the Docker server
+server-stop:        ## Stop Docker server
 	$(DC) stop radish-server
 
-server-native:  ## Start the server natively (no Docker, localhost:9000, 8 threads)
+server-logs:        ## Tail Docker server logs
+	$(DC) logs -f radish-server
+
+server-native:      ## Start server natively (no Docker, 8 threads)
 	julia --threads=8 --project=. server_runner.jl
 
-# ─── Client ───────────────────────────────────────────────────────────────────
+# =============================================================================
+#  Client
+# =============================================================================
 
-client:         ## Attach an interactive client to the running server
-	$(DC) --profile client run --rm radish-client
+client:             ## Attach interactive client (Docker, requires running server)
+	$(DC) --profile client run --rm --build radish-client
 
-# ─── Simulator ────────────────────────────────────────────────────────────────
+client-native:      ## Start client natively (no Docker)
+	$(JULIA_NATIVE) client_runner.jl
 
-SIM = $(DC) --profile simulator run --rm radish-simulator julia --project=. workload_simulator.jl
+# =============================================================================
+#  Simulator
+# =============================================================================
+
+SIM      = $(DC) --profile simulator run --rm --build radish-simulator julia --project=. workload_simulator.jl
 SIM_HOST = --host radish-server --port 9000
 
-simulator:          ## Run the workload simulator (load + run, default settings)
-	$(DC) --profile simulator run --rm radish-simulator
+simulator:          ## Run workload simulator (Docker, load + run)
+	$(DC) --profile simulator run --rm --build radish-simulator
 
-simload:            ## Load keys (default: 5k keys, 10 clients)
+simload:            ## Load keys (Docker)
 	$(SIM) load $(SIM_HOST)
 
-simrun:             ## Run operations (default: 10k ops, 10 clients)
+simrun:             ## Run operations (Docker)
 	$(SIM) run $(SIM_HOST)
 
-simload-light:      ## Load 100k keys per type (10 clients)
-	$(SIM) load $(SIM_HOST) --num-keys 100000
-
-simload-heavy:      ## Load 1M keys per type (10 clients)
+simload-heavy:      ## Load 1M keys per type (Docker)
 	$(SIM) load $(SIM_HOST) --num-keys 1000000
 
-simload-vheavy:     ## Load 10M keys per type (10 clients)
-	$(SIM) load $(SIM_HOST) --num-keys 10000000
-
-simrun-light:       ## Run 100k ops per client (10 clients)
-	$(SIM) run $(SIM_HOST) --num-ops 100000
-
-simrun-heavy:       ## Run 250k ops per client (10 clients)
+simrun-heavy:       ## Run 250k ops per client (Docker)
 	$(SIM) run $(SIM_HOST) --num-ops 250000
 
-simrun-vheavy:      ## Run 1M ops per client (10 clients)
-	$(SIM) run $(SIM_HOST) --num-ops 1000000
+# =============================================================================
+#  Tests — Native (requires local Julia)
+# =============================================================================
 
-# ─── Docs ─────────────────────────────────────────────────────────────────────
+test:               ## Run unit tests (native)
+	$(JULIA_NATIVE) test/runtests.jl
 
-docs-build:     ## Build the docs Docker image
-	$(DC) --profile docs build radish-docs
-
-docs:           ## Start the Jekyll docs server (http://localhost:4000)
-	$(DC) --profile docs up radish-docs
-
-docs-bg:        ## Start the docs server in the background
-	$(DC) --profile docs up -d radish-docs
-
-docs-logs:      ## Tail the docs logs (Ctrl+C to stop)
-	$(DC) logs -f radish-docs
-
-docs-stop:      ## Stop the docs server
-	$(DC) stop radish-docs
-
-# ─── Teardown ─────────────────────────────────────────────────────────────────
-
-down:           ## Stop and remove all running containers
-	$(DC) --profile client --profile docs --profile simulator down
-
-clean:          ## Remove containers, networks and volumes (wipes persisted data!)
-	$(DC) --profile client --profile docs --profile simulator down -v
-
-# ─── Testing ──────────────────────────────────────────────────────────────────
-
-test:           ## Run unit tests (strings, lists, hypercommands, meta commands)
-	julia --project=. test/runtests.jl
-
-smoke-test:     ## Run end-to-end smoke test (rebuild Docker, test every command)
+smoke-test:         ## Run smoke test (starts Docker server, tests over TCP, cleans up)
 	python3 scripts/smoke_test.py
 
-test-all:       ## Run unit tests + smoke test
-	@echo "── Unit Tests ──────────────────────────────────────"
-	julia --project=. test/runtests.jl
+test-all:           ## Run unit tests + smoke test (native + Docker)
+	@echo "── Unit Tests (native) ─────────────────────────────"
+	$(JULIA_NATIVE) test/runtests.jl
 	@echo ""
-	@echo "── Smoke Test ──────────────────────────────────────"
+	@echo "── Smoke Test (Docker) ─────────────────────────────"
 	python3 scripts/smoke_test.py
 
-validate:       ## Run all validation gates (unit tests + smoke test + internal bench + system bench)
-	@echo "══════════════════════════════════════════════════════"
-	@echo "  Radish Full Validation"
-	@echo "══════════════════════════════════════════════════════"
-	@echo ""
-	@echo "── 1/4 Unit Tests ──────────────────────────────────"
-	julia --project=. test/runtests.jl
-	@echo ""
-	@echo "── 2/4 Smoke Test (Docker) ─────────────────────────"
-	python3 scripts/smoke_test.py
-	@echo ""
-	@echo "── 3/4 Internal Benchmarks (Level 0/1) ─────────────"
-	@mkdir -p $(RESULTS_DIR)
-	@BENCH_ID="validate_internals_$$(date +%Y%m%d_%H%M%S)" julia --project=. benchmarks/bench_internals.jl | tee "$(RESULTS_DIR)/validate_internals_$$(date +%Y%m%d_%H%M%S).txt"
-	@echo ""
-	@echo "── 4/4 System Benchmarks (Level 2) ─────────────────"
-	@BENCH_ID="validate_system_$$(date +%Y%m%d_%H%M%S)" julia --threads=4 --project=. benchmarks/bench_system.jl | tee "$(RESULTS_DIR)/validate_system_$$(date +%Y%m%d_%H%M%S).txt"
-	@echo ""
-	@echo "══════════════════════════════════════════════════════"
-	@echo "  All validation gates passed."
-	@echo "══════════════════════════════════════════════════════"
+# =============================================================================
+#  Tests — Docker (no local Julia needed)
+# =============================================================================
 
-# ─── Benchmarks ───────────────────────────────────────────────────────────────
-#   Code:    benchmarks/*.jl, benchmarks/*.py  (version controlled)
-#   Results: benchmarks/results/               (gitignored)
+docker-test:        ## Run unit tests inside Docker
+	$(RUNNER) julia --project=. test/runtests.jl
 
-bench:          ## Run internal benchmarks (Level 0/1)
+docker-smoke-test:  ## Run smoke test inside Docker (server + test in containers)
+	$(RUNNER) python3 scripts/smoke_test.py
+
+docker-test-all:    ## Run unit tests + smoke test inside Docker
+	@echo "── Unit Tests (Docker) ─────────────────────────────"
+	$(RUNNER) julia --project=. test/runtests.jl
+	@echo ""
+	@echo "── Smoke Test (Docker) ─────────────────────────────"
+	$(RUNNER) python3 scripts/smoke_test.py
+
+# =============================================================================
+#  Benchmarks — Native (requires local Julia + Python3)
+# =============================================================================
+
+bench:              ## Internal benchmarks, Level 0/1 (native)
 	@mkdir -p $(RESULTS_DIR)
 	@BENCH_ID="$${BENCH_ID:-internals_$$(date +%Y%m%d_%H%M%S)}"; \
 	OUTFILE="$(RESULTS_DIR)/$${BENCH_ID}.txt"; \
 	echo "Running internal benchmarks → $$OUTFILE"; \
-	BENCH_ID="$$BENCH_ID" julia --project=. benchmarks/bench_internals.jl | tee "$$OUTFILE"; \
-	echo "Saved to $$OUTFILE"
+	BENCH_ID="$$BENCH_ID" $(JULIA_NATIVE) benchmarks/bench_internals.jl | tee "$$OUTFILE"
 
-bench-system:   ## Run system benchmarks (Level 2, 4 threads)
+bench-system:       ## System benchmarks, Level 2 (native, $(THREADS) threads)
 	@mkdir -p $(RESULTS_DIR)
 	@BENCH_ID="$${BENCH_ID:-system_$$(date +%Y%m%d_%H%M%S)}"; \
 	OUTFILE="$(RESULTS_DIR)/$${BENCH_ID}.txt"; \
 	echo "Running system benchmarks → $$OUTFILE"; \
-	BENCH_ID="$$BENCH_ID" julia --threads=4 --project=. benchmarks/bench_system.jl | tee "$$OUTFILE"; \
-	echo "Saved to $$OUTFILE"
+	BENCH_ID="$$BENCH_ID" julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl | tee "$$OUTFILE"
 
-bench-net:      ## Run network benchmarks over Docker (Level 3)
+bench-net:          ## Network benchmarks, Level 3 over Docker TCP
 	@mkdir -p $(RESULTS_DIR)
 	@OUTFILE="$(RESULTS_DIR)/net_docker_$$(date +%Y%m%d_%H%M%S).txt"; \
 	echo "Running Docker network benchmarks → $$OUTFILE"; \
-	python3 benchmarks/bench_net.py | tee "$$OUTFILE"; \
-	echo "Saved to $$OUTFILE"
+	python3 benchmarks/bench_net.py | tee "$$OUTFILE"
 
-bench-native:   ## Run network benchmarks against native server (start server-native first)
+bench-net-native:   ## Network benchmarks, Level 3 over native TCP (start server-native first)
 	@mkdir -p $(RESULTS_DIR)
 	@OUTFILE="$(RESULTS_DIR)/net_native_$$(date +%Y%m%d_%H%M%S).txt"; \
 	echo "Running native network benchmarks → $$OUTFILE"; \
-	python3 benchmarks/bench_net.py --native | tee "$$OUTFILE"; \
-	echo "Saved to $$OUTFILE"
+	python3 benchmarks/bench_net.py --native | tee "$$OUTFILE"
 
-bench-local:    ## Run local benchmarks (internal + system, no Docker needed)
-	@mkdir -p $(RESULTS_DIR)
-	@TS="$$(date +%Y%m%d_%H%M%S)"; \
-	echo "── Internal Benchmarks (Level 0/1) ──────────────────"; \
-	BENCH_ID="local_internals_$$TS" julia --project=. benchmarks/bench_internals.jl | tee "$(RESULTS_DIR)/local_internals_$$TS.txt"; \
+bench-all:          ## All benchmarks: Level 0-2 native + Level 3 Docker, grouped in folder
+	@TS=$$(date +%Y%m%d_%H%M%S); \
+	RUN_DIR="$(RESULTS_DIR)/native_$$TS"; \
+	mkdir -p "$$RUN_DIR"; \
+	echo "══════════════════════════════════════════════════════"; \
+	echo "  Radish Full Benchmark Suite (native + Docker net)"; \
+	echo "  Output: $$RUN_DIR/"; \
+	echo "══════════════════════════════════════════════════════"; \
 	echo ""; \
-	echo "── System Benchmarks (Level 2) ──────────────────────"; \
-	BENCH_ID="local_system_$$TS" julia --threads=4 --project=. benchmarks/bench_system.jl | tee "$(RESULTS_DIR)/local_system_$$TS.txt"; \
-	echo "Saved to $(RESULTS_DIR)/local_*_$$TS.txt"
-
-bench-all:      ## Run ALL benchmarks (internal + system + network/Docker)
-	@mkdir -p $(RESULTS_DIR)
-	@TS="$$(date +%Y%m%d_%H%M%S)"; \
-	echo "── Internal Benchmarks (Level 0/1) ──────────────────"; \
-	BENCH_ID="all_internals_$$TS" julia --project=. benchmarks/bench_internals.jl | tee "$(RESULTS_DIR)/all_internals_$$TS.txt"; \
+	echo "── 1/3 Internal Benchmarks (Level 0/1) ──────────────"; \
+	BENCH_ID="internals" $(JULIA_NATIVE) benchmarks/bench_internals.jl \
+		| tee "$$RUN_DIR/internals.txt"; \
 	echo ""; \
-	echo "── System Benchmarks (Level 2) ──────────────────────"; \
-	BENCH_ID="all_system_$$TS" julia --threads=4 --project=. benchmarks/bench_system.jl | tee "$(RESULTS_DIR)/all_system_$$TS.txt"; \
+	echo "── 2/3 System Benchmarks (Level 2) ──────────────────"; \
+	BENCH_ID="system" julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl \
+		| tee "$$RUN_DIR/system.txt"; \
 	echo ""; \
-	echo "── Network Benchmarks (Level 3) ─────────────────────"; \
-	python3 benchmarks/bench_net.py | tee "$(RESULTS_DIR)/all_net_$$TS.txt"; \
-	echo "Saved to $(RESULTS_DIR)/all_*_$$TS.txt"
+	echo "── 3/3 Network Benchmarks (Level 3, Docker) ─────────"; \
+	python3 benchmarks/bench_net.py | tee "$$RUN_DIR/net.txt"; \
+	echo ""; \
+	echo "══════════════════════════════════════════════════════"; \
+	echo "  Results: $$RUN_DIR/"; \
+	echo "══════════════════════════════════════════════════════"
 
-bench-compare:  ## Compare two benchmark result files (BEFORE=... AFTER=...)
-	@python3 scripts/bench_compare.py $(BEFORE) $(AFTER)
-
-bench-diff:     ## Compare two full benchmark folders (BEFORE=dir AFTER=dir)
-	@if [ -z "$(BEFORE)" ] || [ -z "$(AFTER)" ]; then \
-		echo "Usage: make bench-diff BEFORE=benchmarks/results/full_<ts1> AFTER=benchmarks/results/full_<ts2>"; \
-		exit 1; \
-	fi
+bench-full:         ## Full suite: tests + Level 0-3 with auto native server lifecycle
 	@echo "══════════════════════════════════════════════════════════════════════════"
-	@echo "  Comparing: $(BEFORE) → $(AFTER)"
-	@echo "══════════════════════════════════════════════════════════════════════════"
-	@FAIL=0; \
-	for f in $(BEFORE)/*.txt; do \
-		NAME=$$(basename "$$f"); \
-		if [ -f "$(AFTER)/$$NAME" ]; then \
-			echo ""; \
-			python3 scripts/bench_compare.py "$$f" "$(AFTER)/$$NAME" || FAIL=1; \
-		else \
-			echo ""; \
-			echo "  ⚠ $$NAME: no matching file in $(AFTER)"; \
-		fi; \
-	done; \
-	for f in $(AFTER)/*.txt; do \
-		NAME=$$(basename "$$f"); \
-		if [ ! -f "$(BEFORE)/$$NAME" ]; then \
-			echo ""; \
-			echo "  ⚠ $$NAME: new in $(AFTER) (no baseline)"; \
-		fi; \
-	done
-
-bench-full:     ## Run ALL benchmarks natively (no Docker): tests + Level 0-3 with auto server lifecycle
-	@echo "══════════════════════════════════════════════════════════════════════════"
-	@echo "  Radish Full Benchmark Suite (native, no Docker)"
-	@echo "  $$(date)"
+	@echo "  Radish Full Benchmark Suite (native)"
 	@echo "══════════════════════════════════════════════════════════════════════════"
 	@TS=$$(date +%Y%m%d_%H%M%S); \
 	RUN_DIR="$(RESULTS_DIR)/full_$$TS"; \
@@ -222,55 +162,183 @@ bench-full:     ## Run ALL benchmarks natively (no Docker): tests + Level 0-3 wi
 	echo "  Output: $$RUN_DIR/"; \
 	echo ""; \
 	echo "── 1/5 Unit Tests ────────────────────────────────────────────────────────"; \
-	julia --project=. test/runtests.jl; \
+	$(JULIA_NATIVE) test/runtests.jl; \
 	echo ""; \
 	echo "── 2/5 Internal Benchmarks (Level 0/1) ──────────────────────────────────"; \
-	BENCH_ID="full_internals_$$TS" julia --project=. benchmarks/bench_internals.jl \
+	BENCH_ID="full_internals_$$TS" $(JULIA_NATIVE) benchmarks/bench_internals.jl \
 		| tee "$$RUN_DIR/internals.txt"; \
 	echo ""; \
-	echo "── 3/5 System Benchmarks (Level 2, 4 threads) ───────────────────────────"; \
-	BENCH_ID="full_system_$$TS" julia --threads=4 --project=. benchmarks/bench_system.jl \
+	echo "── 3/5 System Benchmarks (Level 2) ───────────────────────────────────────"; \
+	BENCH_ID="full_system_$$TS" julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl \
 		| tee "$$RUN_DIR/system.txt"; \
 	echo ""; \
 	echo "── 4/5 Starting native server (8 threads) ───────────────────────────────"; \
-	julia --threads=8 --project=. server_runner.jl &  \
+	julia --threads=8 --project=. server_runner.jl & \
 	SERVER_PID=$$!; \
 	echo "  Server PID: $$SERVER_PID"; \
-	echo "  Waiting for server to be ready..."; \
 	for i in $$(seq 1 30); do \
-		if nc -z 127.0.0.1 9000 2>/dev/null; then \
-			echo "  Server ready after $${i}s"; \
-			break; \
-		fi; \
-		if [ $$i -eq 30 ]; then \
-			echo "  ERROR: Server failed to start after 30s"; \
-			kill $$SERVER_PID 2>/dev/null; \
-			exit 1; \
-		fi; \
+		nc -z 127.0.0.1 9000 2>/dev/null && echo "  Server ready after $${i}s" && break; \
+		[ $$i -eq 30 ] && echo "  ERROR: Server failed to start" && kill $$SERVER_PID 2>/dev/null && exit 1; \
 		sleep 1; \
 	done; \
 	echo ""; \
 	echo "── 5/5 Network Benchmarks (Level 3, native) ─────────────────────────────"; \
-	python3 benchmarks/bench_net.py --native \
-		| tee "$$RUN_DIR/net_native.txt"; \
+	python3 benchmarks/bench_net.py --native | tee "$$RUN_DIR/net_native.txt"; \
 	echo ""; \
 	echo "── Stopping server ───────────────────────────────────────────────────────"; \
-	kill $$SERVER_PID 2>/dev/null; \
-	wait $$SERVER_PID 2>/dev/null; \
-	echo "  Server stopped."; \
+	kill $$SERVER_PID 2>/dev/null; wait $$SERVER_PID 2>/dev/null; \
+	echo "  Results: $$RUN_DIR/"
+
+# =============================================================================
+#  Benchmarks — Docker (no local Julia needed)
+# =============================================================================
+
+docker-bench:           ## Internal benchmarks, Level 0/1 (Docker)
+	@mkdir -p $(RESULTS_DIR)
+	$(RUNNER) bash -c '\
+		BENCH_ID="docker_internals_$$(date +%Y%m%d_%H%M%S)" \
+		julia --project=. benchmarks/bench_internals.jl \
+		| tee benchmarks/results/$${BENCH_ID}.txt'
+
+docker-bench-system:    ## System benchmarks, Level 2 (Docker, $(THREADS) threads)
+	@mkdir -p $(RESULTS_DIR)
+	$(RUNNER) bash -c '\
+		BENCH_ID="docker_system_$$(date +%Y%m%d_%H%M%S)" \
+		julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl \
+		| tee benchmarks/results/$${BENCH_ID}.txt'
+
+docker-bench-net:       ## Network benchmarks, Level 3 (all inside Docker)
+	@mkdir -p $(RESULTS_DIR)
+	$(RUNNER) python3 benchmarks/bench_net.py
+
+docker-bench-all:       ## All benchmarks inside Docker, grouped in timestamped folder
+	@TS=$$(date +%Y%m%d_%H%M%S); \
+	RUN_DIR="$(RESULTS_DIR)/docker_$$TS"; \
+	mkdir -p "$$RUN_DIR"; \
+	echo "══════════════════════════════════════════════════════"; \
+	echo "  Radish Full Benchmark Suite (Docker)"; \
+	echo "  Output: $$RUN_DIR/"; \
+	echo "══════════════════════════════════════════════════════"; \
 	echo ""; \
-	echo "══════════════════════════════════════════════════════════════════════════"; \
-	echo "  All benchmarks complete."; \
+	echo "── 1/3 Internal Benchmarks (Level 0/1) ──────────────"; \
+	$(RUNNER) bash -c '\
+		BENCH_ID="docker_internals" \
+		julia --project=. benchmarks/bench_internals.jl' \
+		| tee "$$RUN_DIR/internals.txt"; \
+	echo ""; \
+	echo "── 2/3 System Benchmarks (Level 2) ──────────────────"; \
+	$(RUNNER) bash -c '\
+		BENCH_ID="docker_system" \
+		julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl' \
+		| tee "$$RUN_DIR/system.txt"; \
+	echo ""; \
+	echo "── 3/3 Network Benchmarks (Level 3) ─────────────────"; \
+	$(RUNNER) python3 benchmarks/bench_net.py \
+		| tee "$$RUN_DIR/net.txt"; \
+	echo ""; \
+	echo "══════════════════════════════════════════════════════"; \
 	echo "  Results: $$RUN_DIR/"; \
-	echo "══════════════════════════════════════════════════════════════════════════"
+	echo "══════════════════════════════════════════════════════"
 
-# ─── Utilities ────────────────────────────────────────────────────────────────
+# =============================================================================
+#  Benchmark Comparison
+# =============================================================================
 
-ps:             ## Show status of all Radish containers
+bench-compare:      ## Compare two result files: make bench-compare BEFORE=a.txt AFTER=b.txt
+	@python3 scripts/bench_compare.py $(BEFORE) $(AFTER)
+
+bench-diff:         ## Compare two result folders: make bench-diff BEFORE=dir1 AFTER=dir2
+	@if [ -z "$(BEFORE)" ] || [ -z "$(AFTER)" ]; then \
+		echo "Usage: make bench-diff BEFORE=benchmarks/results/full_<ts1> AFTER=benchmarks/results/full_<ts2>"; \
+		exit 1; \
+	fi
+	@echo "  Comparing: $(BEFORE) → $(AFTER)"
+	@for f in $(BEFORE)/*.txt; do \
+		NAME=$$(basename "$$f"); \
+		if [ -f "$(AFTER)/$$NAME" ]; then \
+			echo ""; \
+			python3 scripts/bench_compare.py "$$f" "$(AFTER)/$$NAME" || true; \
+		else \
+			echo "  ⚠ $$NAME: no matching file in $(AFTER)"; \
+		fi; \
+	done
+
+# =============================================================================
+#  Validate (full gate: tests + benchmarks)
+# =============================================================================
+
+validate:           ## Full validation gate (native): unit tests + smoke test + benchmarks
+	@echo "══════════════════════════════════════════════════════"
+	@echo "  Radish Full Validation (native)"
+	@echo "══════════════════════════════════════════════════════"
+	@echo ""
+	@echo "── 1/4 Unit Tests ──────────────────────────────────"
+	$(JULIA_NATIVE) test/runtests.jl
+	@echo ""
+	@echo "── 2/4 Smoke Test (Docker) ─────────────────────────"
+	python3 scripts/smoke_test.py
+	@echo ""
+	@echo "── 3/4 Internal Benchmarks ─────────────────────────"
+	@mkdir -p $(RESULTS_DIR)
+	$(JULIA_NATIVE) benchmarks/bench_internals.jl
+	@echo ""
+	@echo "── 4/4 System Benchmarks ───────────────────────────"
+	julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl
+	@echo ""
+	@echo "  All validation gates passed."
+
+docker-validate:    ## Full validation gate (Docker): unit tests + smoke test + benchmarks
+	@echo "══════════════════════════════════════════════════════"
+	@echo "  Radish Full Validation (Docker)"
+	@echo "══════════════════════════════════════════════════════"
+	@echo ""
+	@echo "── 1/4 Unit Tests ──────────────────────────────────"
+	$(RUNNER) julia --project=. test/runtests.jl
+	@echo ""
+	@echo "── 2/4 Smoke Test ──────────────────────────────────"
+	$(RUNNER) python3 scripts/smoke_test.py
+	@echo ""
+	@echo "── 3/4 Internal Benchmarks ─────────────────────────"
+	$(RUNNER) julia --project=. benchmarks/bench_internals.jl
+	@echo ""
+	@echo "── 4/4 System Benchmarks ───────────────────────────"
+	$(RUNNER) julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl
+	@echo ""
+	@echo "  All validation gates passed."
+
+# =============================================================================
+#  Docs
+# =============================================================================
+
+docs:               ## Start Jekyll docs server (http://localhost:4000)
+	$(DC) --profile docs up radish-docs
+
+docs-bg:            ## Start docs server in background
+	$(DC) --profile docs up -d radish-docs
+
+docs-stop:          ## Stop docs server
+	$(DC) stop radish-docs
+
+docs-logs:          ## Tail docs logs
+	$(DC) logs -f radish-docs
+
+# =============================================================================
+#  Teardown & Utilities
+# =============================================================================
+
+down:               ## Stop and remove all containers
+	$(DC) --profile client --profile docs --profile simulator --profile runner down
+
+clean:              ## Remove containers, networks, and volumes (wipes data!)
+	$(DC) --profile client --profile docs --profile simulator --profile runner down -v
+
+ps:                 ## Show status of all Radish containers
 	$(DC) ps -a
 
-storage:        ## Show AOF and snapshot file sizes inside the server container
-	@echo "── Persistence Storage ──────────────────────────────"
+logs:               ## Tail logs for all running containers
+	$(DC) logs -f
+
+storage:            ## Show persistence file sizes (Docker server)
 	@docker compose exec radish-server sh -c '\
 		echo "AOF:"; \
 		AOF=/app/persistence/aof/radish.aof; \
@@ -278,58 +346,160 @@ storage:        ## Show AOF and snapshot file sizes inside the server container
 			SIZE=$$(ls -lh $$AOF | awk "{print \$$5}"); \
 			LINES=$$(wc -l < $$AOF); \
 			echo "  $$AOF: $$SIZE ($$LINES lines)"; \
-		else \
-			echo "  (no AOF file)"; \
-		fi; \
-		echo ""; \
+		else echo "  (no AOF file)"; fi; \
 		echo "Snapshots:"; \
-		SNAP_DIR=/app/persistence/snapshots; \
-		if [ -d "$$SNAP_DIR" ]; then \
-			COUNT=$$(ls -1 $$SNAP_DIR/*.rdb 2>/dev/null | wc -l); \
-			SIZE=$$(du -sh $$SNAP_DIR 2>/dev/null | cut -f1); \
+		SNAP=/app/persistence/snapshots; \
+		if [ -d "$$SNAP" ]; then \
+			COUNT=$$(ls -1 $$SNAP/*.rdb 2>/dev/null | wc -l); \
+			SIZE=$$(du -sh $$SNAP 2>/dev/null | cut -f1); \
 			echo "  $$COUNT shard files, $$SIZE total"; \
-		else \
-			echo "  (no snapshots directory)"; \
-		fi' 2>/dev/null || echo "  Server container not running. Start with: make server"
+		else echo "  (none)"; fi' 2>/dev/null || echo "  Server not running. Start with: make server"
 
-storage-watch:  ## Live-refresh storage sizes every second (Ctrl+C to stop)
-	@while true; do \
-		printf "\033[2J\033[H"; \
-		echo "── Persistence Storage (live) ── $$(date +%H:%M:%S) ──"; \
-		echo ""; \
-		docker compose exec -T radish-server sh -c '\
-			AOF=/app/persistence/aof/radish.aof; \
-			if [ -f "$$AOF" ]; then \
-				SIZE=$$(ls -lh $$AOF | awk "{print \$$5}"); \
-				LINES=$$(wc -l < $$AOF); \
-				echo "  AOF: $$SIZE ($$LINES lines)"; \
-			else \
-				echo "  AOF: (no file)"; \
-			fi; \
-			SNAP_DIR=/app/persistence/snapshots; \
-			if [ -d "$$SNAP_DIR" ]; then \
-				COUNT=$$(ls -1 $$SNAP_DIR/*.rdb 2>/dev/null | wc -l); \
-				SIZE=$$(du -sh $$SNAP_DIR 2>/dev/null | cut -f1); \
-				echo "  Snapshots: $$COUNT shards, $$SIZE total"; \
-			else \
-				echo "  Snapshots: (none)"; \
-			fi' 2>/dev/null || echo "  Server not running."; \
-		sleep 1; \
-	done
+# =============================================================================
+#  Help
+# =============================================================================
 
-logs:           ## Tail logs for all running containers (Ctrl+C to stop)
-	$(DC) logs -f
+help:
+	@printf "\n"
+	@printf "  \033[1mRadish Makefile\033[0m\n"
+	@printf "  Native targets require local Julia + Python3.\n"
+	@printf "  Docker targets (docker-*) run everything inside containers.\n"
+	@printf "  Set THREADS=N to control thread count (default: 4).\n"
+	@printf "\n"
+	@printf "  \033[1m── Build ───────────────────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mbuild\033[0m                  Build the radish Docker image\n"
+	@printf "                         \033[2m$$ make build\033[0m\n"
+	@printf "  \033[36mrebuild\033[0m                Force rebuild (no cache)\n"
+	@printf "                         \033[2m$$ make rebuild\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Server ──────────────────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mserver\033[0m                 Start server in Docker (background)\n"
+	@printf "                         \033[2m$$ make server\033[0m\n"
+	@printf "  \033[36mserver-stop\033[0m            Stop Docker server\n"
+	@printf "                         \033[2m$$ make server-stop\033[0m\n"
+	@printf "  \033[36mserver-logs\033[0m            Tail Docker server logs\n"
+	@printf "                         \033[2m$$ make server-logs\033[0m\n"
+	@printf "  \033[36mserver-native\033[0m          Start server natively (no Docker, 8 threads)\n"
+	@printf "                         \033[2m$$ make server-native\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Client ──────────────────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mclient\033[0m                 Attach interactive client (Docker)\n"
+	@printf "                         \033[2m$$ make server && make client\033[0m\n"
+	@printf "  \033[36mclient-native\033[0m          Start client natively (no Docker)\n"
+	@printf "                         \033[2m$$ make client-native\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Simulator ───────────────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36msimulator\033[0m              Run workload simulator (Docker, load + run)\n"
+	@printf "                         \033[2m$$ make server && make simulator\033[0m\n"
+	@printf "  \033[36msimload\033[0m                Load keys into running server (Docker)\n"
+	@printf "                         \033[2m$$ make simload\033[0m\n"
+	@printf "  \033[36msimrun\033[0m                 Run operations against running server (Docker)\n"
+	@printf "                         \033[2m$$ make simrun\033[0m\n"
+	@printf "  \033[36msimload-heavy\033[0m          Load 1M keys per type (Docker)\n"
+	@printf "                         \033[2m$$ make simload-heavy\033[0m\n"
+	@printf "  \033[36msimrun-heavy\033[0m           Run 250k ops per client (Docker)\n"
+	@printf "                         \033[2m$$ make simrun-heavy\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Tests (native) ─────────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mtest\033[0m                   Run unit tests\n"
+	@printf "                         \033[2m$$ make test\033[0m\n"
+	@printf "  \033[36msmoke-test\033[0m             End-to-end smoke test (spins up Docker server)\n"
+	@printf "                         \033[2m$$ make smoke-test\033[0m\n"
+	@printf "  \033[36mtest-all\033[0m               Unit tests + smoke test\n"
+	@printf "                         \033[2m$$ make test-all\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Tests (Docker) ─────────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mdocker-test\033[0m            Run unit tests inside Docker\n"
+	@printf "                         \033[2m$$ make docker-test\033[0m\n"
+	@printf "  \033[36mdocker-smoke-test\033[0m      Smoke test inside Docker\n"
+	@printf "                         \033[2m$$ make docker-smoke-test\033[0m\n"
+	@printf "  \033[36mdocker-test-all\033[0m        Unit tests + smoke test inside Docker\n"
+	@printf "                         \033[2m$$ make docker-test-all\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Benchmarks (native) ────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mbench\033[0m                  Internal benchmarks, Level 0/1\n"
+	@printf "                         \033[2m$$ make bench\033[0m\n"
+	@printf "  \033[36mbench-system\033[0m           System benchmarks, Level 2\n"
+	@printf "                         \033[2m$$ make bench-system THREADS=8\033[0m\n"
+	@printf "  \033[36mbench-net\033[0m              Network benchmarks, Level 3 (Docker TCP)\n"
+	@printf "                         \033[2m$$ make bench-net\033[0m\n"
+	@printf "  \033[36mbench-net-native\033[0m       Network benchmarks, Level 3 (native TCP)\n"
+	@printf "                         \033[2m$$ make server-native  # terminal 1\033[0m\n"
+	@printf "                         \033[2m$$ make bench-net-native  # terminal 2\033[0m\n"
+	@printf "  \033[36mbench-all\033[0m              All benchmarks (Level 0-3), grouped in folder\n"
+	@printf "                         \033[2m$$ make bench-all\033[0m\n"
+	@printf "                         \033[2m→ benchmarks/results/native_<timestamp>/\033[0m\n"
+	@printf "  \033[36mbench-full\033[0m             Tests + all benchmarks with auto server lifecycle\n"
+	@printf "                         \033[2m$$ make bench-full\033[0m\n"
+	@printf "                         \033[2m→ benchmarks/results/full_<timestamp>/\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Benchmarks (Docker) ────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mdocker-bench\033[0m           Internal benchmarks, Level 0/1\n"
+	@printf "                         \033[2m$$ make docker-bench\033[0m\n"
+	@printf "  \033[36mdocker-bench-system\033[0m    System benchmarks, Level 2\n"
+	@printf "                         \033[2m$$ make docker-bench-system THREADS=8\033[0m\n"
+	@printf "  \033[36mdocker-bench-net\033[0m       Network benchmarks, Level 3\n"
+	@printf "                         \033[2m$$ make docker-bench-net\033[0m\n"
+	@printf "  \033[36mdocker-bench-all\033[0m       All benchmarks (Level 0-3), grouped in folder\n"
+	@printf "                         \033[2m$$ make docker-bench-all\033[0m\n"
+	@printf "                         \033[2m→ benchmarks/results/docker_<timestamp>/\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Benchmark Comparison ────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mbench-compare\033[0m          Compare two result files side-by-side\n"
+	@printf "                         \033[2m$$ make bench-compare BEFORE=results/old.txt AFTER=results/new.txt\033[0m\n"
+	@printf "  \033[36mbench-diff\033[0m             Compare two result folders (matched by filename)\n"
+	@printf "                         \033[2m$$ make bench-diff BEFORE=results/docker_20260417 AFTER=results/docker_20260418\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Validation ─────────────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mvalidate\033[0m               Full gate: tests + benchmarks (native)\n"
+	@printf "                         \033[2m$$ make validate\033[0m\n"
+	@printf "  \033[36mdocker-validate\033[0m        Full gate: tests + benchmarks (Docker)\n"
+	@printf "                         \033[2m$$ make docker-validate\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Docs ────────────────────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mdocs\033[0m                   Start Jekyll docs server (http://localhost:4000)\n"
+	@printf "                         \033[2m$$ make docs\033[0m\n"
+	@printf "  \033[36mdocs-bg\033[0m                Start docs server in background\n"
+	@printf "                         \033[2m$$ make docs-bg\033[0m\n"
+	@printf "  \033[36mdocs-stop\033[0m              Stop docs server\n"
+	@printf "                         \033[2m$$ make docs-stop\033[0m\n"
+	@printf "  \033[36mdocs-logs\033[0m              Tail docs logs\n"
+	@printf "                         \033[2m$$ make docs-logs\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Teardown & Utilities ────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mdown\033[0m                   Stop and remove all containers\n"
+	@printf "                         \033[2m$$ make down\033[0m\n"
+	@printf "  \033[36mclean\033[0m                  Remove containers, networks, and volumes (wipes data!)\n"
+	@printf "                         \033[2m$$ make clean\033[0m\n"
+	@printf "  \033[36mps\033[0m                     Show status of all Radish containers\n"
+	@printf "                         \033[2m$$ make ps\033[0m\n"
+	@printf "  \033[36mlogs\033[0m                   Tail logs for all running containers\n"
+	@printf "                         \033[2m$$ make logs\033[0m\n"
+	@printf "  \033[36mstorage\033[0m                Show persistence file sizes (Docker server)\n"
+	@printf "                         \033[2m$$ make storage\033[0m\n"
+	@printf "\n"
+	@printf "  \033[1m── Typical Workflows ──────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[2mRun everything in Docker (no local Julia):\033[0m\n"
+	@printf "    $$ make build\n"
+	@printf "    $$ make docker-test-all\n"
+	@printf "    $$ make docker-bench-all\n"
+	@printf "\n"
+	@printf "  \033[2mBenchmark before/after a change:\033[0m\n"
+	@printf "    $$ make docker-bench-all          # before\n"
+	@printf "    $$ # ... make changes ...\n"
+	@printf "    $$ make rebuild && make docker-bench-all  # after\n"
+	@printf "    $$ make bench-diff BEFORE=benchmarks/results/docker_<ts1> AFTER=benchmarks/results/docker_<ts2>\n"
+	@printf "\n"
 
-help:           ## Show this help message
-	@grep -E '^[a-zA-Z_-]+:.*##' $(MAKEFILE_LIST) \
-		| awk 'BEGIN {FS = ":.*##"}; {printf "  \033[36m%-14s\033[0m %s\n", $$1, $$2}'
-
-.PHONY: build rebuild server server-logs server-stop server-native client \
-        simulator simload simrun \
-        simload-light simload-heavy simload-vheavy \
-        simrun-light simrun-heavy simrun-vheavy \
-        docs-build docs docs-bg docs-logs docs-stop \
-        down clean \
-        test smoke-test test-all validate \
-        bench bench-system bench-net bench-native bench-local bench-all bench-full bench-compare bench-diff \
-        ps storage storage-watch logs help
+.PHONY: build rebuild \
+        server server-stop server-logs server-native \
+        client client-native \
+        simulator simload simrun simload-heavy simrun-heavy \
+        test smoke-test test-all \
+        docker-test docker-smoke-test docker-test-all \
+        bench bench-system bench-net bench-net-native bench-all bench-full \
+        docker-bench docker-bench-system docker-bench-net docker-bench-all \
+        bench-compare bench-diff \
+        validate docker-validate \
+        docs docs-bg docs-stop docs-logs \
+        down clean ps logs storage help

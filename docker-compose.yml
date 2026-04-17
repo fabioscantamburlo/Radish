@@ -1,4 +1,7 @@
 services:
+
+  # ── Core ──────────────────────────────────────────────────────────────────
+
   radish-server:
     build: .
     image: radish
@@ -18,18 +21,18 @@ services:
 
   radish-client:
     image: radish
-    # Override the default command to run the client instead of the server
-    # Connect to the server service name 'radish-server' on port 9000
     command: julia --project=. client_runner.jl radish-server 9000
     depends_on:
       radish-server:
         condition: service_healthy
     networks:
       - radish-net
-    stdin_open: true  # docker run -i
-    tty: true         # docker run -t
+    stdin_open: true
+    tty: true
     profiles:
       - client
+
+  # ── Workload ──────────────────────────────────────────────────────────────
 
   radish-simulator:
     image: radish
@@ -41,6 +44,21 @@ services:
       - radish-net
     profiles:
       - simulator
+
+  # ── Runner: ephemeral container for tests/benchmarks inside Docker ────────
+  #    Uses the same image as the server. Mount results dir for output.
+
+  radish-runner:
+    image: radish
+    working_dir: /app
+    networks:
+      - radish-net
+    volumes:
+      - ./benchmarks/results:/app/benchmarks/results
+    profiles:
+      - runner
+
+  # ── Docs ──────────────────────────────────────────────────────────────────
 
   radish-docs:
     build:
