@@ -2,20 +2,25 @@
 """
 Radish Smoke Test
 
-Rebuilds Docker, starts the server, exercises every command over RESP,
-asserts expected responses, and cleans up.
+Exercises every command over RESP and asserts expected responses.
 
-Usage: python3 scripts/smoke_test.py
-       make smoke-test
+Usage:
+    python3 scripts/smoke_test.py              # Docker mode (builds, starts, tests, cleans up)
+    python3 scripts/smoke_test.py --native     # Native mode (expects server already running)
+
+Environment variables (for --native mode):
+    RADISH_HOST   Server hostname (default: 127.0.0.1)
+    RADISH_PORT   Server port (default: 9000)
 """
 
+import os
 import socket
 import subprocess
 import sys
 import time
 
-HOST = "127.0.0.1"
-PORT = 9000
+HOST = os.environ.get("RADISH_HOST", "127.0.0.1")
+PORT = int(os.environ.get("RADISH_PORT", "9000"))
 PASS = 0
 FAIL = 0
 
@@ -144,34 +149,56 @@ def assert_nil(name, response):
 # ── Main ─────────────────────────────────────────────────────────────────────
 
 def main():
+    native_mode = "--native" in sys.argv
+    mode_label = "native (server already running)" if native_mode else "Docker"
+
     print("=" * 78)
     print("  Radish Smoke Test")
     print("=" * 78)
+    print(f"  Mode: {mode_label}")
+    print(f"  Server: {HOST}:{PORT}")
     print()
 
     try:
-        # Build & start
-        print("── Building Docker image ─────────────────────────────────────────────────")
-        run_visible("docker compose build --quiet")
+        if native_mode:
+            # ── Native mode: expect server already running ───────────
+            print("── Connecting to server ──────────────────────────────────────────────────")
+            for i in range(1, 31):
+                try:
+                    s = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
+                    s.settimeout(2)
+                    s.connect((HOST, PORT))
+                    s.close()
+                    print(f"  Server reachable on {HOST}:{PORT}")
+                    break
+                except (ConnectionRefusedError, OSError):
+                    if i == 30:
+                        print(f"  Server not reachable on {HOST}:{PORT} after 30s")
+                        sys.exit(1)
+                    time.sleep(1)
+        else:
+            # ── Docker mode: build & start ───────────────────────────
+            print("── Building Docker image ─────────────────────────────────────────────────")
+            run_visible("docker compose build --quiet")
 
-        print("── Starting server ───────────────────────────────────────────────────────")
-        run_visible("docker compose up -d radish-server")
+            print("── Starting server ───────────────────────────────────────────────────────")
+            run_visible("docker compose up -d radish-server")
 
-        print("── Waiting for server to be healthy ──────────────────────────────────────")
-        for i in range(1, 91):
-            result = subprocess.run(
-                "docker inspect --format='{{.State.Health.Status}}' radish-server",
-                shell=True, capture_output=True, text=True,
-            )
-            status = result.stdout.strip().strip("'")
-            if status == "healthy":
-                print(f"  Server healthy after {i}s")
-                break
-            if i == 90:
-                print(f"  \033[31mServer failed to become healthy after 90s\033[0m")
-                cleanup()
-                sys.exit(1)
-            time.sleep(1)
+            print("── Waiting for server to be healthy ──────────────────────────────────────")
+            for i in range(1, 91):
+                result = subprocess.run(
+                    "docker inspect --format='{{.State.Health.Status}}' radish-server",
+                    shell=True, capture_output=True, text=True,
+                )
+                status = result.stdout.strip().strip("'")
+                if status == "healthy":
+                    print(f"  Server healthy after {i}s")
+                    break
+                if i == 90:
+                    print(f"  \033[31mServer failed to become healthy after 90s\033[0m")
+                    cleanup()
+                    sys.exit(1)
+                time.sleep(1)
 
         time.sleep(1)
         print()
@@ -542,7 +569,8 @@ def main():
         sock.close()
 
     finally:
-        cleanup()
+        if not native_mode:
+            cleanup()
 
     # Results
     total = PASS + FAIL

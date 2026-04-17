@@ -89,14 +89,34 @@ docker-test:        ## Run unit tests inside Docker
 	$(RUNNER) julia --project=. test/runtests.jl
 
 docker-smoke-test:  ## Run smoke test inside Docker (server + test in containers)
-	$(RUNNER) python3 scripts/smoke_test.py
+	$(DC) up -d --build radish-server
+	@echo "Waiting for server..."
+	@for i in $$(seq 1 30); do \
+		docker compose exec radish-server nc -z 127.0.0.1 9000 2>/dev/null && break; \
+		[ $$i -eq 30 ] && echo "ERROR: Server not ready" && $(DC) stop radish-server && exit 1; \
+		sleep 1; \
+	done
+	$(RUNNER) bash -c 'RADISH_HOST=radish-server python3 scripts/smoke_test.py --native'; \
+	EXIT_CODE=$$?; \
+	$(DC) stop radish-server; \
+	exit $$EXIT_CODE
 
 docker-test-all:    ## Run unit tests + smoke test inside Docker
 	@echo "── Unit Tests (Docker) ─────────────────────────────"
 	$(RUNNER) julia --project=. test/runtests.jl
 	@echo ""
 	@echo "── Smoke Test (Docker) ─────────────────────────────"
-	$(RUNNER) python3 scripts/smoke_test.py
+	$(DC) up -d --build radish-server
+	@echo "Waiting for server..."
+	@for i in $$(seq 1 30); do \
+		docker compose exec radish-server nc -z 127.0.0.1 9000 2>/dev/null && break; \
+		[ $$i -eq 30 ] && echo "ERROR: Server not ready" && $(DC) stop radish-server && exit 1; \
+		sleep 1; \
+	done
+	$(RUNNER) bash -c 'RADISH_HOST=radish-server python3 scripts/smoke_test.py --native'; \
+	EXIT_CODE=$$?; \
+	$(DC) stop radish-server; \
+	exit $$EXIT_CODE
 
 # =============================================================================
 #  Benchmarks — Native (requires local Julia + Python3)
@@ -196,20 +216,28 @@ bench-full:         ## Full suite: tests + Level 0-3 with auto native server lif
 docker-bench:           ## Internal benchmarks, Level 0/1 (Docker)
 	@mkdir -p $(RESULTS_DIR)
 	$(RUNNER) bash -c '\
-		BENCH_ID="docker_internals_$$(date +%Y%m%d_%H%M%S)" \
-		julia --project=. benchmarks/bench_internals.jl \
-		| tee benchmarks/results/$${BENCH_ID}.txt'
+		BENCH_ID="docker_internals_$$(date +%Y%m%d_%H%M%S)"; \
+		BENCH_ID="$$BENCH_ID" julia --project=. benchmarks/bench_internals.jl \
+		| tee benchmarks/results/$$BENCH_ID.txt'
 
 docker-bench-system:    ## System benchmarks, Level 2 (Docker, $(THREADS) threads)
 	@mkdir -p $(RESULTS_DIR)
 	$(RUNNER) bash -c '\
-		BENCH_ID="docker_system_$$(date +%Y%m%d_%H%M%S)" \
-		julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl \
-		| tee benchmarks/results/$${BENCH_ID}.txt'
+		BENCH_ID="docker_system_$$(date +%Y%m%d_%H%M%S)"; \
+		BENCH_ID="$$BENCH_ID" julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl \
+		| tee benchmarks/results/$$BENCH_ID.txt'
 
 docker-bench-net:       ## Network benchmarks, Level 3 (all inside Docker)
 	@mkdir -p $(RESULTS_DIR)
-	$(RUNNER) python3 benchmarks/bench_net.py
+	$(DC) up -d --build radish-server
+	@echo "Waiting for server..."
+	@for i in $$(seq 1 30); do \
+		docker compose exec radish-server nc -z 127.0.0.1 9000 2>/dev/null && break; \
+		[ $$i -eq 30 ] && echo "ERROR: Server not ready" && $(DC) stop radish-server && exit 1; \
+		sleep 1; \
+	done
+	$(RUNNER) bash -c 'RADISH_HOST=radish-server python3 benchmarks/bench_net.py --native' || true
+	$(DC) stop radish-server
 
 docker-bench-all:       ## All benchmarks inside Docker, grouped in timestamped folder
 	@TS=$$(date +%Y%m%d_%H%M%S); \
@@ -296,7 +324,16 @@ docker-validate:    ## Full validation gate (Docker): unit tests + smoke test + 
 	$(RUNNER) julia --project=. test/runtests.jl
 	@echo ""
 	@echo "── 2/4 Smoke Test ──────────────────────────────────"
-	$(RUNNER) python3 scripts/smoke_test.py
+	$(DC) up -d --build radish-server
+	@for i in $$(seq 1 30); do \
+		docker compose exec radish-server nc -z 127.0.0.1 9000 2>/dev/null && break; \
+		[ $$i -eq 30 ] && echo "ERROR: Server not ready" && $(DC) stop radish-server && exit 1; \
+		sleep 1; \
+	done
+	$(RUNNER) bash -c 'RADISH_HOST=radish-server python3 scripts/smoke_test.py --native'; \
+	EXIT_CODE=$$?; \
+	$(DC) stop radish-server; \
+	[ $$EXIT_CODE -ne 0 ] && exit $$EXIT_CODE; true
 	@echo ""
 	@echo "── 3/4 Internal Benchmarks ─────────────────────────"
 	$(RUNNER) julia --project=. benchmarks/bench_internals.jl

@@ -15,6 +15,7 @@ Usage:
     make bench-native                         # Native mode
 """
 
+import os
 import socket
 import subprocess
 import sys
@@ -24,8 +25,8 @@ import threading
 import statistics
 from datetime import datetime
 
-HOST = "127.0.0.1"
-PORT = 9000
+HOST = os.environ.get("RADISH_HOST", "127.0.0.1")
+PORT = int(os.environ.get("RADISH_PORT", "9000"))
 NUM_KEYS = 10_000
 OPS_PER_BENCH = 10_000
 TRIALS = 3

@@ -9,7 +9,7 @@ WORKDIR /app
 
 # ── Layer 1: Dependencies (cached until Project.toml changes) ────────────────
 COPY Project.toml ./
-RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(; warn_loaded=false)' || true
+RUN julia --project=. -e 'using Pkg; Pkg.instantiate(); Pkg.precompile(; warn_loaded=false)'
 
 # ── Layer 2: Source code (rebuilt on any code change, but fast — just a copy) ─
 COPY . .
