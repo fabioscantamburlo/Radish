@@ -668,7 +668,7 @@ function run_benchmarks()
     all_keys_cl = collect(store_keys(store_cl))
     sample_size_cl = max(1, round(Int, 0.10 * length(all_keys_cl)))
     snap_ns = bench_oneshot() do
-        StatsBase.sample(all_keys_cl, sample_size_cl, replace=false)
+        _bench_partial_shuffle!(copy(all_keys_cl), sample_size_cl)
     end
     println("  $(rpad("sample 10% — $(fmt_num(sample_size_cl)) keys", 50)) $(lpad(fmt_time(snap_ns), 12))")
 
@@ -678,7 +678,7 @@ function run_benchmarks()
         tr = DirtyTracker()
         ks = collect(store_keys(st))
         ss = max(1, round(Int, 0.10 * length(ks)))
-        sampled = StatsBase.sample(ks, ss, replace=false)
+        sampled = _bench_partial_shuffle!(ks, ss)
         t_now = now()
         for key in sampled
             typ = get(st.keytype, key, nothing)
@@ -698,7 +698,7 @@ function run_benchmarks()
         tr = DirtyTracker()
         ks = collect(store_keys(st))
         ss = max(1, round(Int, 0.10 * length(ks)))
-        sampled = StatsBase.sample(ks, ss, replace=false)
+        sampled = _bench_partial_shuffle!(ks, ss)
         t_now = now()
         for key in sampled
             typ = get(st.keytype, key, nothing)
@@ -718,7 +718,15 @@ function run_benchmarks()
     println("══════════════════════════════════════════════════════════════════════════════")
 end
 
-# Need StatsBase for sampling in cleaner simulation
-using StatsBase
+# Inline partial shuffle for cleaner simulation (replaces StatsBase.sample)
+function _bench_partial_shuffle!(vec, k)
+    n = length(vec)
+    k = min(k, n)
+    for i in 1:k
+        j = rand(i:n)
+        vec[i], vec[j] = vec[j], vec[i]
+    end
+    return @view vec[1:k]
+end
 
 run_benchmarks()

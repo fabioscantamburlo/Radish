@@ -55,11 +55,14 @@ end
 
 # For type commands returning complex values (Vector, Tuple) that don't fit CommandValue.
 # Hypercommands detect this and wrap the value directly into ExecuteResult.
-struct CommandDirect
-    value::Any
+# Parametric to avoid boxing (OPTIM 0.13)
+struct CommandDirect{T}
+    value::T
 end
 
-# Convenience constructors
+# Shared empty args vector — reused for commands with no extra args (OPTIM 0.15)
+# SHARED — do not mutate
+const EMPTY_STRING_VEC = String[]
 CommandSuccess(value) = CommandResult(true, value, nothing, nothing)
 CommandError(msg::String) = CommandResult(false, nothing, msg, nothing)
 CommandCreate(elem::RadishElement) = CommandResult(true, nothing, nothing, elem)
@@ -85,3 +88,6 @@ mutable struct AOFState
 
     AOFState(path::String) = new(path, nothing, ReentrantLock())
 end
+
+# Export shared sentinel
+export EMPTY_STRING_VEC

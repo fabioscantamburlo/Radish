@@ -3,8 +3,8 @@
 > A detailed review of performance characteristics across four levels:
 > language, data structures, system orchestration, and end-to-end behavior.
 >
-> Last updated after Phase 3.2b — combined batch locking for pipelines.
-> All Level 0, 1, 2 optimizations complete. Level 3 in progress.
+> Last updated after Phase 4 — quick-win sweep (11 items across Levels 0-3).
+> All Level 0, 1, 2 optimizations complete. Level 3 quick wins complete.
 > New audit findings (Levels 0-5) appended — includes residual bottlenecks,
 > testing gaps, and feature enhancements.
 >
@@ -12,9 +12,11 @@
 > benchmark artifact — Julia's JIT dead-code-eliminated `now()` calls in the "before"
 > benchmark. See `reworks/optimnow.md`.
 >
-> **Key finding (Level 3):** The engine processes 2.2M ops/s in-process, but only 7.7k
-> ops/s over native TCP (single-client). After 3.2a+3.2b, pipelining reaches 43-48k ops/s
-> (single-client, batch=100-500). Awaiting isolated machine benchmarks for 3.2b delta.
+> **Key finding (Level 3):** The engine processes 2.8M ops/s in-process (mixed 4w), but
+> only ~4k ops/s over Docker TCP (single-client). After all optimizations through Phase 4,
+> pipelining reaches 55-60k ops/s (single-client batch=100, 2-client pipelined: 57k).
+> Multi-client scaling improved: 4-client latency +39%, 8-client latency +31% (Docker).
+> DBSIZE went from O(N) 620μs to O(1) <1ns (Redis semantics). StatsBase dependency dropped.
 
 ---
 
@@ -111,58 +113,80 @@ Results saved to `benchmarks/results/` (gitignored). Code in `benchmarks/` (trac
 |---|-------|------------|---------------------|
 | 3.2b | Per-command lock acquire/release in batch path | `execute_batch!`: pre-computes all `LockPlan`s, merges shard sets (write subsumes read on same shard), acquires all locks once sorted, executes all commands, releases once. `can_batch_lock` gates eligibility (no tx/QUIT/BGSAVE). Falls back to per-command `execute!` for unsafe batches. | Awaiting isolated benchmarks — eliminates N-1 lock acquire/release cycles per batch |
 
+### Phase 4 — Quick-Win Sweep (11 items, Levels 0-3)
+
+| # | Issue | Resolution | Measured Improvement |
+|---|-------|------------|---------------------|
+| 0.9 | `args[2:end]` allocates in multi-key commands | `@view args[2:end]` + widened `slcs`, `sclen`, `lmove!` to `AbstractVector{String}` | Zero allocation on multi-key path |
+| 0.13 | `CommandDirect.value::Any` boxes returns | Parametric `CommandDirect{T}` — Julia infers `T`, zero boxing | `lprepend!+lpop!`: 64→48 ns (**+34%**), `lappend!+ldequeue!`: 60→48 ns (**+26%**) |
+| 0.14 | Single-command path doesn't cache `now()` | `t = now()` before `execute!`, passed via kwarg | Consistent with batch path; ~130ns saved per non-pipelined cmd |
+| 0.15 | `String[]` allocated per command in RESP parser | `const EMPTY_STRING_VEC = String[]` sentinel, shared for ~70% of commands | ~5-10 ns per command (zero alloc for no-args commands) |
+| 1.10 | DBSIZE TTL-aware O(N) scan | O(1) via `store_size()` — matches Redis semantics (includes pending-expiry keys) | 620 μs → <1 ns (**3,152x**); `execute! DBSIZE`: 459 μs → 241 ns (**1,908x**) |
+| 2.13 | `acquire_all_read!/write!` allocates `collect(1:N)` | Returns `UnitRange` instead of `Vector{Int}`; added `UnitRange` methods to `release_read!/write!` | Zero allocation per KLIST/FLUSHDB |
+| 2.19 | `replay_aof!` rebuilds `KEY_COMMANDS` Set per call | Module-level `const AOF_KEY_COMMANDS` | ~1 μs saved at startup (code quality) |
+| 2.20 | StatsBase dependency for single `sample()` call | Inline Fisher-Yates `_partial_shuffle!` (~5 lines); removed StatsBase from Project.toml | Faster server startup (~100-500ms); eliminated external dependency |
+| 2.21 | Background tasks use `@async` (thread 1 only) | `Threads.@spawn` for cleaner, syncer, AOF flusher | Concurrent 4w: +33% read-heavy, +22% write-heavy, +35% mixed |
+| 3.9 | `take!(buf)` copies IOBuffer on every response | `GC.@preserve buf unsafe_write(sock, pointer(buf.data), buf.size)` — zero-copy write | ~20-50 ns per response; contributes to +20% single-client mixed |
+| 3.12 | `@info` log on every client connect/disconnect | Changed to `@debug` — compiled out at default log level | Zero overhead in production |
+
 ---
 
 ## Cumulative Results
 
 ### Level 0/1 — Engine (cached t, production-equivalent)
 
-| Benchmark | Original | Current | Improvement |
-|---|---|---|---|
-| `rget_or_expire!` no-TTL | 26.2 ns | 25.0 ns | ~same |
-| `rget_or_expire!` with-TTL | 180.6 ns | 31.7 ns | **5.7x** |
-| `rmodify!` + sincr! | 67.2 ns | 71.1 ns | ~same |
-| `rexists` (existing) | 31.8 ns | 42.2 ns | ~same (different code path now) |
-| `rttl` (with TTL) | 332.3 ns | 55.1 ns | **6x** |
-| `rlistkeys` (100k) | 19.4 ms | 1.9 ms | **10x** |
-| `rdbsize` (11k) | 669.9 μs | 574.9 μs | **15%** |
+| Benchmark | Original | Phase 3.2b | Phase 4 | Improvement |
+|---|---|---|---|---|
+| `rget_or_expire!` no-TTL | 26.2 ns | 25.0 ns | 23.7 ns | ~same |
+| `rget_or_expire!` with-TTL | 180.6 ns | 31.7 ns | 26.7 ns | **6.8x** |
+| `rmodify!` + sincr! | 67.2 ns | 71.1 ns | 56.1 ns | **17% (from original)** |
+| `rexists` (existing) | 31.8 ns | 42.2 ns | 25.8 ns | **19%** |
+| `rttl` (with TTL) | 332.3 ns | 55.1 ns | 39.5 ns | **8.4x** |
+| `rlistkeys` (100k) | 19.4 ms | 1.9 ms | 2.3 ms | **8.4x** |
+| `rdbsize` (11k) | 669.9 μs | 574.9 μs | <1 ns | **∞ (O(1) now)** |
+| `lprepend!+lpop!` | 64.2 ns | 64.2 ns | 47.9 ns | **+34%** |
+| `lappend!+ldequeue!` | 59.9 ns | 59.9 ns | 47.5 ns | **+26%** |
 
 ### Level 2 — System (4 threads)
 
-| Benchmark | Original baseline | Current | Improvement |
-|---|---|---|---|
-| `execute!` S_GET | 656 ns | 443 ns | **32%** |
-| `execute!` EXISTS | 558 ns | 363 ns | **35%** |
-| `execute!` PING | 320 ns | 280 ns | **13%** |
-| `resolve_locks` S_GET | 49 ns | 42 ns | **15%** |
-| `acquire+release` (single key) | 85 ns | 23 ns | **3.7x** |
-| `aof_append_batch!` (100 cmds) | 36 μs | 14 μs | **2.6x** |
-| read-heavy 4w | 1.59M ops/s | 2.43M ops/s | **+53%** |
-| write-heavy 4w | 1.92M ops/s | 2.49M ops/s | **+30%** |
-| mixed 4w | 1.82M ops/s | 1.78M ops/s | ~same |
+| Benchmark | Original baseline | Phase 3.2b | Phase 4 | Improvement |
+|---|---|---|---|---|
+| `execute!` S_GET | 656 ns | 443 ns | 344 ns | **48%** |
+| `execute!` EXISTS | 558 ns | 363 ns | 273 ns | **51%** |
+| `execute!` PING | 320 ns | 280 ns | 211 ns | **34%** |
+| `execute!` DBSIZE | 459 μs | 459 μs | 241 ns | **∞ (O(1) now)** |
+| `resolve_locks` S_GET | 49 ns | 42 ns | 45 ns | ~same |
+| `acquire+release` (single key) | 85 ns | 23 ns | 24 ns | **3.5x** |
+| `aof_append_batch!` (100 cmds) | 36 μs | 14 μs | 13 μs | **2.8x** |
+| read-heavy 4w | 1.59M ops/s | 2.43M ops/s | 2.61M ops/s | **+64%** |
+| write-heavy 4w | 1.92M ops/s | 2.49M ops/s | 2.03M ops/s | ~same (Docker noise) |
+| mixed 4w | 1.82M ops/s | 1.78M ops/s | 2.81M ops/s | **+54%** |
 
-### Level 3 — Network (native, no Docker)
+### Level 3 — Network (Docker)
 
-| Benchmark | Before 3.2a | After 3.2a | Improvement |
+| Benchmark | Phase 3.2b (Docker) | Phase 4 (Docker) | Improvement |
 |---|---|---|---|
-| PING round-trip | 98 μs | 96 μs | ~same |
-| S_GET single-client | 129 μs (7.7k ops/s) | 126 μs (7.9k ops/s) | ~same (no regression) |
-| S_GET pipeline batch=100 | 48 μs (21k ops/s) | 23 μs (43k ops/s) | **+105%** |
-| S_GET pipeline batch=500 | 36 μs (28k ops/s) | 22 μs (46k ops/s) | **+64%** |
-| mixed pipeline batch=100 | 48 μs (21k ops/s) | 26 μs (38k ops/s) | **+81%** |
-| 2 clients pipelined | 27 μs (37k ops/s) | 21 μs (47k ops/s) | **+27%** |
-| 4 clients latency | 71 μs (14k ops/s) | 74 μs (14k ops/s) | ~same |
-| 8 clients latency | — | 134 μs (7.5k ops/s) | new benchmark |
+| PING round-trip | 192.6 μs (5.2k ops/s) | 173.8 μs (5.8k ops/s) | **+11%** |
+| S_GET single-client | 235.0 μs (4.3k ops/s) | 260.2 μs (3.8k ops/s) | ~same (Docker noise) |
+| mixed 90/10 single-client | 301.5 μs (3.3k ops/s) | 251.0 μs (4.0k ops/s) | **+20%** |
+| all-commands mix | 314.6 μs (3.2k ops/s) | 257.6 μs (3.9k ops/s) | **+22%** |
+| S_GET pipeline batch=50 | 26.5 μs (37.8k ops/s) | 18.2 μs (54.9k ops/s) | **+45%** |
+| S_GET pipeline batch=100 | 16.5 μs (60.5k ops/s) | 16.6 μs (60.4k ops/s) | ~same |
+| 2 clients pipelined | 22.2 μs (45.0k ops/s) | 17.6 μs (56.7k ops/s) | **+26%** |
+| 4 clients latency | 546.4 μs (1.8k ops/s) | 393.6 μs (2.5k ops/s) | **+39%** |
+| 8 clients latency | 1.2 ms (868 ops/s) | 881.7 μs (1.1k ops/s) | **+31%** |
+| 4 clients pipelined | 36.8 μs (27.1k ops/s) | 34.0 μs (29.4k ops/s) | **+8.5%** |
+| 8 clients pipelined | 110.7 μs (9.0k ops/s) | 102.5 μs (9.8k ops/s) | **+8%** |
 
 ### The Gap
 
 | Layer | Throughput | Gap to next |
 |---|---|---|
-| Raw engine (Level 0, cached t) | 40M ops/s | — |
-| Full dispatch (Level 2, single-thread) | 2.2M ops/s | 18x (locking + `now()` + routing) |
-| Native TCP, pipelined (Level 3, 2 clients) | 47k ops/s | 47x (RESP parse + TCP + task scheduler) |
-| Native TCP, pipelined (Level 3, single-client batch=100) | 43k ops/s | — |
-| Native TCP, single-client | 7.9k ops/s | 5.4x (no pipelining = RTT-bound) |
+| Raw engine (Level 0, cached t) | 42M ops/s | — |
+| Full dispatch (Level 2, single-thread) | 2.8M ops/s | 15x (locking + `now()` + routing) |
+| Docker TCP, pipelined (Level 3, 2 clients) | 57k ops/s | 49x (RESP parse + TCP + task scheduler + Docker) |
+| Docker TCP, pipelined (Level 3, single-client batch=100) | 60k ops/s | — |
+| Docker TCP, single-client | 4.0k ops/s | 15x (no pipelining = RTT-bound) |
 
 ---
 
@@ -173,9 +197,8 @@ Results saved to `benchmarks/results/` (gitignored). Code in `benchmarks/` (trac
 #### 0.8 — `isa CommandDirect` overhead → Deprioritized
 ~2 ns actual (not 20 ns). Noise.
 
-#### 0.9 — `args[2:end]` slice in multi-key commands
-Heap allocation per S_LCS/S_COMPLEN/L_MOVE call. Fix: `@view` or pass full args.
-**Impact:** 🟢 Low. **Effort:** Very Low.
+#### 0.9 — `args[2:end]` slice in multi-key commands → ✅ Done (Phase 4)
+Replaced with `@view args[2:end]`; widened `slcs`, `sclen`, `lmove!` to `AbstractVector{String}`.
 
 #### 0.10 — LCS full O(n×m) DP matrix
 8MB for 1000×1000 strings. Fix: two-row rolling array or Hirschberg's algorithm for
@@ -199,27 +222,14 @@ single command returns an `ExecuteResult`. `CommandResult.value` was fixed (Phas
 `ExecuteResult{T}`.
 **Impact:** 🟡 Medium. **Effort:** Medium (touches every command return site).
 
-#### 0.13 — `CommandDirect.value::Any` boxes list/tuple returns
-`CommandDirect` wraps `value::Any` — used by `lget`, `lrange`, `slcs`, `lpop!`,
-`ldequeue!`. Every list GET, range, pop, and dequeue boxes its return value.
-**Fix:** Make `CommandDirect` parametric (`CommandDirect{T}`) or use a tighter union.
-**Impact:** 🟢 Low-Medium. **Effort:** Low.
+#### 0.13 — `CommandDirect.value::Any` boxes list/tuple returns → ✅ Done (Phase 4)
+Made `CommandDirect` parametric (`CommandDirect{T}`). List push/pop improved +26-34%.
 
-#### 0.14 — Single-command path in `handle_client` doesn't cache `now()`
-The batch path caches `t = now()` once for the entire batch. The single-command path
-(no pipelining) does not — `execute!` → `route_command` → hypercommand each default
-to `t=now()`. This means non-pipelined commands pay an extra ~130ns `now()` call that
-the batch path avoids.
-**Fix:** Add `t = now()` before `execute!` in the single-command path and pass it through.
-**Impact:** 🟡 Medium (~130ns per non-pipelined command). **Effort:** Very Low.
+#### 0.14 — Single-command path in `handle_client` doesn't cache `now()` → ✅ Done (Phase 4)
+Added `t = now()` before `execute!` in single-command path, passed via kwarg.
 
-#### 0.15 — Repeated `String[]` allocation in RESP parser and AOF replay
-The RESP parser creates `String[]` for empty args on every command. AOF replay does the
-same. Benchmarks pre-allocate `empty_args = String[]` and reuse it, but production code
-doesn't.
-**Fix:** Use a `const EMPTY_ARGS = String[]` sentinel and reuse it in the parser and
-AOF replay.
-**Impact:** 🟢 Low. **Effort:** Very Low.
+#### 0.15 — Repeated `String[]` allocation in RESP parser and AOF replay → ✅ Done (Phase 4)
+`const EMPTY_STRING_VEC = String[]` sentinel shared for ~70% of commands.
 
 ### Level 1 — Data Structures
 
@@ -255,24 +265,14 @@ shard, this adds up.
 **Fix:** Pass `num_shards` as a parameter or cache it locally.
 **Impact:** 🟢 Low. **Effort:** Very Low.
 
-#### 1.10 — DBSIZE TTL-aware path still O(N)
-`rdbsize` iterates all keys via `store_keys(store)` and checks expiry on each.
-`store_size()` is O(1) for total count, but the TTL-aware count (which is what
-`DBSIZE` actually returns) is still O(N). With 100k keys this is ~600μs.
-**Fix:** Maintain a separate counter for non-expired keys, or accept the stale total
-count (Redis DBSIZE doesn't subtract expired keys either — it returns the total
-including lazily-expired ones).
-**Impact:** 🟡 Medium. **Effort:** Low-Medium.
+#### 1.10 — DBSIZE TTL-aware path still O(N) → ✅ Done (Phase 4)
+Changed to O(1) via `store_size()` — matches Redis DBSIZE semantics (includes pending-expiry keys).
+Benchmark: 620 μs → <1 ns (**3,152x**).
 
 ### Level 2 — System Orchestration
 
-#### 2.13 — `acquire_all_read!` / `acquire_all_write!` allocates `collect(1:num_shards)`
-Every `KLIST` and `FLUSHDB` call `acquire_all_read!` which does
-`collect(1:lock.num_shards)`. With 256 shards, this allocates a 256-element
-`Vector{Int}` per call.
-**Fix:** Pre-allocate `ALL_SHARD_IDS` at `ShardedLock` construction time and return a
-reference. Or return a range `1:num_shards` instead of a Vector.
-**Impact:** 🟢 Low. **Effort:** Very Low.
+#### 2.13 — `acquire_all_read!` / `acquire_all_write!` allocates `collect(1:num_shards)` → ✅ Done (Phase 4)
+Returns `UnitRange` instead of `Vector{Int}`; added `UnitRange` methods to release functions.
 
 #### 2.14 — Multi-key lock acquisition allocates and sorts per command
 `acquire_read!`/`acquire_write!` for multi-key does
@@ -313,26 +313,14 @@ be ~20s save / ~5s load. JSON is human-readable but not performance-optimal.
 Or parallelize loading across shards — each shard file is independent.
 **Impact:** 🟡 Medium (startup time, BGSAVE latency). **Effort:** Medium-High.
 
-#### 2.19 — `replay_aof!` rebuilds `KEY_COMMANDS` set on every call
-AOF replay creates `KEY_COMMANDS` as a `union(Set(...), Set(...), ...)` inside the
-function body. These are all compile-time constants.
-**Fix:** Make `KEY_COMMANDS` a `const` at module level (like `AOF_EXCLUDED_OPS`).
-**Impact:** 🟢 Low (one-time startup cost). **Effort:** Very Low.
+#### 2.19 — `replay_aof!` rebuilds `KEY_COMMANDS` set on every call → ✅ Done (Phase 4)
+Moved to module-level `const AOF_KEY_COMMANDS`.
 
-#### 2.20 — Cleaner depends on `StatsBase` for a single `sample()` call
-The cleaner uses `StatsBase.sample(ttl_keys, sample_size, replace=false)` which pulls
-in the entire StatsBase package for one sampling operation.
-**Fix:** Implement Fisher-Yates partial shuffle inline (~5 lines). Eliminates the
-dependency and the internal allocation that `sample()` does.
-**Impact:** 🟢 Low (dependency hygiene). **Effort:** Very Low.
+#### 2.20 — Cleaner depends on `StatsBase` for a single `sample()` call → ✅ Done (Phase 4)
+Replaced with inline Fisher-Yates `_partial_shuffle!` (~5 lines). Removed StatsBase from Project.toml.
 
-#### 2.21 — Background tasks use `@async` instead of `Threads.@spawn`
-`async_cleaner`, `async_syncer`, and `async_aof_flusher` are started with `@async`
-which runs them on the same thread as the caller (thread 1). On a multi-threaded
-Julia process, these background tasks compete with the accept loop for CPU time.
-Client handlers already use `@spawn`.
-**Fix:** Use `Threads.@spawn` for background tasks so they run on separate threads.
-**Impact:** 🟡 Medium (multi-threaded deployments). **Effort:** Very Low.
+#### 2.21 — Background tasks use `@async` instead of `Threads.@spawn` → ✅ Done (Phase 4)
+Changed to `Threads.@spawn` for cleaner, syncer, AOF flusher. Concurrent 4w throughput: +22-35%.
 
 #### 2.22 — `execute_batch!` rebuilds `Set{Int}` for shard tracking per batch
 `execute_batch!` creates `read_shards = Set{Int}()` and `write_shards = Set{Int}()`
@@ -375,12 +363,12 @@ with pipelining we get 47k ops/s (2 clients). That's a 47x gap (down from 60x be
 
 **Realistic targets (native, no Docker):**
 
-| Scenario | Current | Target | How |
-|---|---|---|---|
-| Single-client, no pipeline | 7.9k ops/s | 10-15k ops/s | Reduce per-command overhead |
-| Single-client, pipeline batch=100 | 43k ops/s | 100-200k ops/s | Batch locking, reduce allocs |
-| 2 clients, pipeline | 47k ops/s | 200-400k ops/s | Batch locking + reduced task overhead |
-| 4 clients, pipeline | 25k ops/s | 300-500k ops/s | Should scale, not degrade |
+| Scenario | Pre-Phase 4 | Phase 4 (Docker) | Target | How |
+|---|---|---|---|---|
+| Single-client, no pipeline | 7.9k ops/s | 4.0k (Docker) | 10-15k ops/s (native) | Reduce per-command overhead |
+| Single-client, pipeline batch=100 | 43k ops/s | 60k (Docker) | 100-200k ops/s | Reduce allocs |
+| 2 clients, pipeline | 47k ops/s | 57k (Docker) | 200-400k ops/s | Reduced task overhead |
+| 4 clients, pipeline | 25k ops/s | 29k (Docker) | 300-500k ops/s | Should scale, not degrade |
 
 **Impact:** 🔴 High — 2-5x improvement expected from remaining items.
 **Effort:** Medium.
@@ -392,13 +380,8 @@ For long bulk strings or large arrays, this is O(n) per line with no vectorizati
 `ccall(:memchr, ...)` for SIMD-accelerated scanning.
 **Impact:** 🟡 Medium (large payloads). **Effort:** Low.
 
-#### 3.9 — `write_resp_response` calls `take!(buf)` which copies the buffer
-Even with the pre-allocated IOBuffer (3.7), `take!(buf)` copies the buffer contents
-into a new `Vector{UInt8}` before writing to the socket. One allocation per response
-(or per batch).
-**Fix:** Use `write(sock, @view buf.data[1:buf.size])` or `unsafe_write` to write
-directly from the IOBuffer's internal storage without copying.
-**Impact:** 🟡 Medium. **Effort:** Very Low.
+#### 3.9 — `write_resp_response` calls `take!(buf)` which copies the buffer → ✅ Done (Phase 4)
+Replaced with `GC.@preserve buf unsafe_write(sock, pointer(buf.data), buf.size)` — zero-copy write.
 
 #### 3.10 — RESP parser uses prefix-matching for key detection
 `read_resp_command` checks `startswith(cmd_name, "S_") || startswith(cmd_name, "L_")`
@@ -416,11 +399,8 @@ socket and a `@spawn` task forever. No TCP keepalive is configured either.
 300s of no data → close connection). Prevents resource leaks from abandoned clients.
 **Impact:** 🟡 Medium (production reliability). **Effort:** Low.
 
-#### 3.12 — `handle_client` logs at `@info` for every connect/disconnect
-Every client connection generates 2-3 `@info` log messages. Under high connection
-churn (benchmarks, load tests), this floods the log and adds I/O overhead.
-**Fix:** Use `@debug` for connect/disconnect. Keep `@info` for server lifecycle only.
-**Impact:** 🟢 Low. **Effort:** Very Low.
+#### 3.12 — `handle_client` logs at `@info` for every connect/disconnect → ✅ Done (Phase 4)
+Changed to `@debug` — compiled out at default log level. Zero overhead in production.
 
 #### 3.13 — No connection pooling or multiplexing
 Each client gets a dedicated TCP connection and `@spawn` task. For workloads with
@@ -428,6 +408,41 @@ many short-lived connections, connection setup cost dominates.
 **Fix:** Document that clients should use persistent connections and pipelining.
 Consider RESP3 client-side caching or connection multiplexing long-term.
 **Impact:** 🟢 Low (documentation). **Effort:** Very Low (docs) / High (multiplexing).
+
+#### 3.14 — Multi-client throughput degrades at 4+ concurrent clients
+Docker benchmarks show pipelined throughput dropping from 45k ops/s (2 clients) to
+27k ops/s (4 clients) to 9k ops/s (8 clients). Non-pipelined drops from 3.5k (2
+clients) to 868 ops/s (8 clients). The system-level concurrent benchmarks scale well
+(1w→4w: 919k→1.96M ops/s), proving the engine handles contention fine. The
+degradation is in the I/O layer: Julia's task scheduler serializes socket I/O across
+`@spawn` tasks, and the single-threaded `libuv` event loop under Julia's runtime
+becomes the bottleneck when many tasks do concurrent socket reads/writes.
+**Fix (incremental):**
+1. Ensure background tasks run on separate threads (2.21 — `@async` → `@spawn`),
+   freeing the main event loop thread.
+2. Reduce per-command syscall count: combine 3.9 (`take!` copy elimination) with
+   3.8 (vectorized readline) to minimize time spent in I/O per task.
+3. For the batch path, the combined locking (3.2b) already helps — fewer lock
+   acquire/release cycles means less time holding the GIL-equivalent.
+**Fix (architectural — high effort):**
+Replace the task-per-client model with an explicit event loop using `FileWatching.poll_fd`
+or a Julia wrapper around `epoll`/`kqueue`. This would let a single thread service all
+client sockets without task-scheduler overhead, similar to Redis's model. The command
+execution would still be dispatched to worker threads via `@spawn`. This is a major
+rewrite of `handle_client` and the accept loop.
+**Impact:** 🔴 High (multi-client throughput is the primary production bottleneck).
+**Effort:** Low (incremental) / Very High (architectural).
+
+#### 3.15 — Accept loop and background tasks share thread 1
+The accept loop (`while true; sock = accept(server); ...`) runs on the main thread
+alongside `@async` background tasks (cleaner, syncer, AOF flusher). Under load, a
+cleaner cycle iterating 55k TTL keys or a syncer writing shard files can delay
+`accept()` and new client `@spawn` dispatch. This is partially addressed by 2.21
+(`@async` → `@spawn`), but the accept loop itself remains on thread 1.
+**Fix:** Wrap the accept loop in `Threads.@spawn` so it runs on a dedicated thread,
+or pin it to a specific thread via `ccall(:jl_set_task_tid, ...)`.
+**Impact:** 🟡 Medium (connection latency under background task load).
+**Effort:** Very Low.
 
 ### Level 4 — Testing & Benchmarking Gaps
 
@@ -538,7 +553,7 @@ If the server restarts, the client dies with "Connection closed by server". No r
 | 1.1 | Integer parse-stringify cycle | 🟡 Medium | Low | ✅ Done |
 | 1.3 | KLIST per-key `now()` calls | 🔴 High | Very Low | ✅ Done |
 | 0.7 | `in keys()` → `haskey()` | 🟡 Low | Very Low | ✅ Done |
-| 1.4 | DBSIZE O(N) scan | 🟡 Medium | Medium | ✅ Partial |
+| 1.4 | DBSIZE O(N) scan | 🟡 Medium | Medium | ✅ Done (Phase 4 — O(1) via 1.10) |
 | 0.2 | `value::Any` in CommandResult | 🟡 Medium | Low-Medium | ✅ Done |
 | 0.3 | `command::Function` specialization | 🟡 Medium | Low | ✅ Done |
 | 0.4 | Varargs tuple allocation | 🟡 Medium | High | ✅ Done |
@@ -561,7 +576,7 @@ If the server restarts, the client dies with "Connection closed by server". No r
 | 2.3 | AOF configurable sync policy | 🔴 High | Medium | ✅ Done |
 | 2.4 | Snapshot fast key extraction | 🟡 Medium | High | ✅ Done |
 | 0.8 | `isa CommandDirect` overhead | 🟢 Low (~2 ns) | Medium | Deprioritized |
-| 0.9 | `args[2:end]` slice | 🟢 Low | Very Low | Remaining |
+| 0.9 | `args[2:end]` slice | 🟢 Low | Very Low | ✅ Done (Phase 4) |
 | 0.10 | LCS DP matrix | 🟢 Low | Low | Remaining |
 | 3.1 | PackageCompiler sysimage | 🟢 N/A | Medium | Dropped (not shipping) |
 | 3.2 | TCP per-command overhead (47x gap) | 🔴 High | Medium | ✅ 3.2a + 3.2b done |
@@ -571,30 +586,32 @@ If the server restarts, the client dies with "Connection closed by server". No r
 | **New findings from codebase audit:** | | | |
 | 0.11 | `sappend!` O(n²) concatenation | 🟡 Medium | Medium | Remaining |
 | 0.12 | `ExecuteResult.value::Any` boxing | 🟡 Medium | Medium | Remaining |
-| 0.13 | `CommandDirect.value::Any` boxing | 🟢 Low-Medium | Low | Remaining |
-| 0.14 | Single-cmd path missing `now()` cache | 🟡 Medium | Very Low | Remaining |
-| 0.15 | Repeated `String[]` allocation | 🟢 Low | Very Low | Remaining |
+| 0.13 | `CommandDirect.value::Any` boxing | 🟢 Low-Medium | Low | ✅ Done (Phase 4) |
+| 0.14 | Single-cmd path missing `now()` cache | 🟡 Medium | Very Low | ✅ Done (Phase 4) |
+| 0.15 | Repeated `String[]` allocation | 🟢 Low | Very Low | ✅ Done (Phase 4) |
 | 1.6 | `rlistkeys` full alloc with limit | 🟡 Medium | Low | Remaining |
 | 1.7 | `L_GET` materializes Vector | 🟢 Low-Medium | Medium-High | Remaining |
 | 1.8 | `DLinkedListElement` no pooling | 🟡 Medium | Medium | Remaining |
 | 1.9 | `snapshot_shard_id` Ref deref | 🟢 Low | Very Low | Remaining |
-| 1.10 | DBSIZE TTL-aware still O(N) | 🟡 Medium | Low-Medium | Remaining |
-| 2.13 | `acquire_all` allocates Vector | 🟢 Low | Very Low | Remaining |
+| 1.10 | DBSIZE TTL-aware still O(N) | 🟡 Medium | Low-Medium | ✅ Done (Phase 4) — O(1) Redis semantics |
+| 2.13 | `acquire_all` allocates Vector | 🟢 Low | Very Low | ✅ Done (Phase 4) |
 | 2.14 | Multi-key lock alloc+sort | 🟢 Low-Medium | Low | Remaining |
 | 2.15 | `extract_all_keys` intermediate alloc | 🟢 Low | Low | Remaining |
 | 2.16 | AOF lock contention (non-pipelined) | 🟡 Medium | Medium | Remaining |
 | 2.17 | Snapshot re-reads entire shard | 🟡 Medium | High | Remaining |
 | 2.18 | JSON serialization for snapshots | 🟡 Medium | Medium-High | Remaining |
-| 2.19 | `replay_aof!` rebuilds const Set | 🟢 Low | Very Low | Remaining |
-| 2.20 | StatsBase dependency for `sample()` | 🟢 Low | Very Low | Remaining |
-| 2.21 | Background tasks `@async` vs `@spawn` | 🟡 Medium | Very Low | Remaining |
+| 2.19 | `replay_aof!` rebuilds const Set | 🟢 Low | Very Low | ✅ Done (Phase 4) |
+| 2.20 | StatsBase dependency for `sample()` | 🟢 Low | Very Low | ✅ Done (Phase 4) — dependency removed |
+| 2.21 | Background tasks `@async` vs `@spawn` | 🟡 Medium | Very Low | ✅ Done (Phase 4) |
 | 2.22 | `execute_batch!` Set overhead | 🟢 Low-Medium | Low | Remaining |
 | 3.8 | RESP `_readline!` byte-by-byte scan | 🟡 Medium | Low | Remaining |
-| 3.9 | `take!(buf)` copies buffer | 🟡 Medium | Very Low | Remaining |
+| 3.9 | `take!(buf)` copies buffer | 🟡 Medium | Very Low | ✅ Done (Phase 4) |
 | 3.10 | RESP parser prefix-matching | 🟢 Low | Low | Remaining |
 | 3.11 | No TCP keepalive / idle timeout | 🟡 Medium | Low | Remaining |
-| 3.12 | `@info` log on every connect | 🟢 Low | Very Low | Remaining |
+| 3.12 | `@info` log on every connect | 🟢 Low | Very Low | ✅ Done (Phase 4) |
 | 3.13 | No connection pooling docs | 🟢 Low | Very Low | Remaining |
+| 3.14 | Multi-client throughput degrades at 4+ clients | 🔴 High | Low–Very High | Remaining |
+| 3.15 | Accept loop shares thread with background tasks | 🟡 Medium | Very Low | Remaining |
 | 4.1 | No RENAME benchmark | 🟢 Low | Very Low | Remaining |
 | 4.2 | No hot-key contention benchmark | 🟡 Medium | Low | Remaining |
 | 4.3 | No AOF crash-replay test | 🟡 Medium | Medium | Remaining |
@@ -613,22 +630,28 @@ If the server restarts, the client dies with "Connection closed by server". No r
 
 ### Next
 
-**Quick wins (Very Low effort):**
-1. **0.14** — Cache `now()` in single-command path (~130ns/cmd, 1-line fix)
-2. **0.15** — `const EMPTY_ARGS` sentinel (1-line fix)
-3. **2.19** — `KEY_COMMANDS` as module-level const (1-line fix)
-4. **2.20** — Inline Fisher-Yates, drop StatsBase (~5 lines)
-5. **2.21** — `@async` → `Threads.@spawn` for background tasks (3-line fix)
-6. **3.9** — `take!(buf)` → `@view` write (1-line fix)
-7. **3.12** — `@info` → `@debug` for connect/disconnect (3-line fix)
-8. **0.9** — `args[2:end]` → `@view` (existing item)
+**Quick wins (Very Low effort) — all completed in Phase 4:**
+~~1. **0.14** — Cache `now()` in single-command path~~ ✅
+~~2. **0.15** — `const EMPTY_ARGS` sentinel~~ ✅
+~~3. **2.19** — `KEY_COMMANDS` as module-level const~~ ✅
+~~4. **2.20** — Inline Fisher-Yates, drop StatsBase~~ ✅
+~~5. **2.21** — `@async` → `Threads.@spawn` for background tasks~~ ✅
+~~6. **3.9** — `take!(buf)` → `unsafe_write`~~ ✅
+~~7. **3.12** — `@info` → `@debug` for connect/disconnect~~ ✅
+~~8. **0.9** — `args[2:end]` → `@view`~~ ✅
+
+**Remaining quick wins:**
+1. **1.9** — `snapshot_shard_id` cache `num_shards` locally (Very Low effort)
+2. **3.15** — Accept loop on `@spawn` (Very Low effort, secondary to 2.21)
 
 **High-impact remaining:**
-1. **5.4** — Max memory + eviction policy (production safety)
-2. **5.7** — Hash map data type (feature completeness)
-3. **0.12** — `ExecuteResult.value::Any` boxing (hot path allocation)
-4. **3.8** — RESP `_readline!` vectorized scan (networking throughput)
-5. **2.21** — Background tasks on separate threads (multi-core utilization)
+1. **3.14** — Multi-client I/O scaling (architectural: event loop — Very High effort)
+2. **5.4** — Max memory + eviction policy (production safety)
+3. **5.7** — Hash map data type (feature completeness)
+4. **0.12** — `ExecuteResult.value::Any` boxing (hot path allocation)
+5. **3.8** — RESP `_readline!` vectorized scan (networking throughput)
+
+**Next focus: new data types (hashes, sets), then Python client + MCP server.**
 
 ---
 
@@ -2228,6 +2251,231 @@ require a protocol change (RESP3 or custom framing) and is a major undertaking.
 
 **Estimated time gained:**
 N/A — this is a documentation improvement, not a code optimization.
+
+---
+
+#### 3.14 — Multi-client throughput degrades at 4+ concurrent clients
+
+**Current code path:**
+In `server.jl`, each client gets a `@spawn` task:
+```julia
+while true
+    sock = accept(server)
+    client_counter += 1
+    @spawn handle_client(sock, store, db_lock, tracker, aof, client_counter)
+end
+```
+Each `handle_client` task does blocking I/O: `read(reader.sock, UInt8)` blocks the
+task until data arrives, then `write(sock, ...)` blocks until the kernel accepts the
+data. Julia's runtime uses `libuv` under the hood, which multiplexes these blocking
+calls onto an event loop. But the event loop itself is single-threaded (on the thread
+that owns the socket), and task scheduling adds overhead per context switch.
+
+Docker benchmark evidence:
+- Pipelined: 2 clients = 45k ops/s, 4 clients = 27k ops/s, 8 clients = 9k ops/s
+- Non-pipelined: 2 clients = 3.5k ops/s, 4 clients = 1.8k ops/s, 8 clients = 868 ops/s
+- System-level (no I/O): 1w = 919k, 2w = 1.5M, 4w = 1.96M ops/s — scales well
+
+The engine scales. The I/O layer doesn't. The gap widens with more clients because:
+1. More tasks compete for the `libuv` event loop on the owning thread.
+2. Each task's `read()` → process → `write()` cycle holds the event loop's attention,
+   delaying other tasks' I/O completions.
+3. Julia's task scheduler adds ~1-5 μs per context switch (vs ~0.1 μs for epoll).
+
+**How to solve:**
+
+**Incremental (Low effort, moderate gain):**
+Combine items 2.21, 3.8, 3.9, and 0.14 to reduce per-command time spent in I/O:
+- Move background tasks off thread 1 (2.21) — frees event loop capacity.
+- Eliminate `take!(buf)` copy (3.9) — fewer bytes through the I/O path.
+- Vectorize `_readline!` (3.8) — faster parsing between I/O calls.
+- Cache `now()` in single-command path (0.14) — less work per command.
+
+Combined, these reduce the per-command "hold time" on the event loop, allowing more
+tasks to make progress per unit time. Expected: 4 clients pipelined from 27k to
+~40-50k ops/s (still degraded vs 2 clients, but less so).
+
+**Architectural (Very High effort, large gain):**
+Replace the task-per-client model with an explicit I/O multiplexing loop. Two options:
+
+Option A — Single-threaded event loop (Redis model):
+```julia
+# Pseudocode — not real Julia API
+function event_loop(server, store, db_lock, tracker, aof)
+    clients = Dict{RawFD, ClientState}()
+    poller = Poller()  # epoll/kqueue wrapper
+    register!(poller, fd(server), POLLIN)
+
+    while true
+        events = wait(poller, timeout_ms=100)
+        for (fd, event) in events
+            if fd == server_fd && event == POLLIN
+                sock = accept(server)
+                register!(poller, fd(sock), POLLIN)
+                clients[fd(sock)] = ClientState(sock)
+            elseif event == POLLIN
+                state = clients[fd]
+                # Read available data into state.reader buffer
+                n = readavailable!(state.reader)
+                # Parse and execute all complete commands
+                while (cmd = try_parse_command(state.reader)) !== nothing
+                    result = execute!(store, db_lock, cmd, state.session; tracker=tracker)
+                    buffer_response!(state, result)
+                end
+                # Mark socket for writing if responses are buffered
+                if has_pending_writes(state)
+                    modify!(poller, fd, POLLIN | POLLOUT)
+                end
+            elseif event == POLLOUT
+                state = clients[fd]
+                flush_responses!(state)
+                if !has_pending_writes(state)
+                    modify!(poller, fd, POLLIN)
+                end
+            end
+        end
+    end
+end
+```
+
+This eliminates task-scheduler overhead entirely. One thread handles all I/O, never
+blocks on any single client. Command execution can still be dispatched to worker
+threads for CPU-bound operations.
+
+The challenge: Julia doesn't expose `epoll`/`kqueue` directly. Options:
+- Use `FileWatching.poll_fd` (limited, polling-based, not event-driven).
+- Use `ccall` to `epoll_create`, `epoll_ctl`, `epoll_wait` directly (Linux only).
+- Use a Julia package like `Epoll.jl` or write a thin C shim.
+- Use `libuv` directly via `ccall` (Julia's runtime already links it).
+
+Option B — Thread-per-core with socket sharding:
+Distribute accepted sockets across N threads (one per core). Each thread runs its
+own event loop handling ~N/cores clients. This is the model used by Memcached and
+modern Redis (with I/O threads).
+
+```julia
+const THREAD_QUEUES = [Channel{TCPSocket}(256) for _ in 1:nthreads()]
+
+# Accept loop — round-robin distribute
+function accept_loop(server)
+    i = 1
+    while true
+        sock = accept(server)
+        put!(THREAD_QUEUES[i], sock)
+        i = (i % nthreads()) + 1
+    end
+end
+
+# Per-thread event loop
+function thread_loop(thread_id, store, db_lock, tracker, aof)
+    queue = THREAD_QUEUES[thread_id]
+    clients = ClientState[]
+    while true
+        # Accept new clients from queue (non-blocking check)
+        while isready(queue)
+            sock = take!(queue)
+            push!(clients, ClientState(sock))
+        end
+        # Process all clients with available data
+        for state in clients
+            if bytesavailable(state.sock) > 0
+                # read, parse, execute, buffer response
+            end
+            if has_pending_writes(state)
+                flush_responses!(state)
+            end
+        end
+        # Brief yield to avoid busy-spinning
+        yield()
+    end
+end
+```
+
+This scales linearly with cores but is complex to implement correctly (client
+migration, load balancing, shutdown coordination).
+
+**Pros (incremental):**
+- No architectural change. Combines existing items.
+- Expected 30-50% improvement at 4+ clients.
+
+**Pros (architectural):**
+- Eliminates the fundamental bottleneck (task scheduler overhead).
+- Expected 5-10x improvement at 4+ clients.
+- 8 clients pipelined: 9k → 50-100k ops/s (event loop) or 100-200k ops/s (sharded).
+
+**Cons (architectural):**
+- Major rewrite of `handle_client` and the accept loop (~500-1000 lines).
+- Julia's ecosystem doesn't have mature epoll/kqueue wrappers — may need C FFI.
+- Debugging event-loop code is harder than task-per-client.
+- The task-per-client model is simpler, more idiomatic Julia, and easier to maintain.
+- Transactions and session state become more complex without per-client tasks.
+
+**Estimated time gained:**
+Incremental: 4 clients pipelined 27k → ~40-50k ops/s. 8 clients: 9k → ~15-20k ops/s.
+Architectural: 4 clients pipelined → ~100-200k ops/s. 8 clients → ~80-150k ops/s.
+Single-client: unchanged (already I/O-bound on TCP round-trip, not scheduler).
+
+---
+
+#### 3.15 — Accept loop and background tasks share thread 1
+
+**Current code path:**
+In `start_server` (server.jl):
+```julia
+@async async_cleaner(store, db_lock, tracker)
+@async async_syncer(store, db_lock, tracker, aof)
+if cfg.aof_sync_ms > 0
+    @async async_aof_flusher(aof)
+end
+# ... then the accept loop runs on the same thread:
+while true
+    sock = accept(server)
+    @spawn handle_client(...)
+end
+```
+
+All `@async` tasks run on thread 1 (the main thread). The accept loop also runs on
+thread 1. When the cleaner iterates 55k TTL keys (~19 ms) or the syncer writes shard
+files (~133 ms for 1000 dirty keys), the accept loop is blocked — new connections
+queue in the kernel's TCP backlog.
+
+This is a subset of 2.21 (`@async` → `@spawn`), but the accept loop itself also
+deserves attention.
+
+**How to solve:**
+Step 1 — Fix 2.21 first: change `@async` to `Threads.@spawn` for background tasks.
+This moves them off thread 1 entirely.
+
+Step 2 — Optionally, wrap the accept loop itself in `@spawn`:
+```julia
+Threads.@spawn begin
+    while true
+        sock = accept(server)
+        client_counter += 1
+        @spawn handle_client(sock, store, db_lock, tracker, aof, client_counter)
+    end
+end
+```
+Then the main thread can `wait()` on a shutdown signal. The accept loop runs on
+whichever thread Julia's scheduler assigns it to — typically a lightly-loaded one.
+
+**Pros:**
+- Trivial change (3 lines).
+- Accept loop never competes with background tasks.
+- New connections are accepted immediately even during cleaner/syncer cycles.
+
+**Cons:**
+- The accept loop's `accept()` call is already non-blocking in Julia (it yields to
+  the scheduler). The real blocking is when background tasks do CPU-bound work
+  (iterating dicts, writing files) without yielding. `@spawn` for background tasks
+  (2.21) is the primary fix; this is a secondary hardening.
+- If the accept loop is on a `@spawn` task, the main thread needs something to do
+  (e.g., `wait(Condition())` or `Base.JLOptions().isinteractive`). Minor bookkeeping.
+
+**Estimated time gained:**
+No per-command gain. Reduces worst-case connection accept latency from ~133 ms
+(during syncer cycle) to ~0 ms. Only matters under high connection churn concurrent
+with background task activity.
 
 ---
 

@@ -276,7 +276,7 @@ end
 
 """Acquire locks according to a LockPlan. Returns shard ID(s) for release.
 Single-key returns Int (no allocation), multi/all returns Vector{Int}."""
-function acquire_locks!(db_lock::ShardedLock, plan::LockPlan)::Union{Int, Vector{Int}}
+function acquire_locks!(db_lock::ShardedLock, plan::LockPlan)::Union{Int, Vector{Int}, UnitRange{Int}}
     plan.mode == :none && return 0
 
     if plan.scope == :all
@@ -292,7 +292,7 @@ function acquire_locks!(db_lock::ShardedLock, plan::LockPlan)::Union{Int, Vector
 end
 
 """Release locks according to a LockPlan."""
-function release_locks!(db_lock::ShardedLock, plan::LockPlan, shard_ids::Union{Int, Vector{Int}})
+function release_locks!(db_lock::ShardedLock, plan::LockPlan, shard_ids::Union{Int, Vector{Int}, UnitRange{Int}})
     if shard_ids isa Int
         shard_ids == 0 && return
         plan.mode == :read ? release_read!(db_lock, shard_ids) : release_write!(db_lock, shard_ids)

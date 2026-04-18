@@ -27,7 +27,6 @@ Radish deliberately keeps its dependency footprint small — most of the heavy l
 | **Sockets** | stdlib | TCP server and client — `listen()`, `accept()`, `connect()` for all network I/O |
 | **Logging** | stdlib | Structured `@info`, `@warn`, `@debug` logging throughout the server |
 | **JSON3** | external | Serialization of snapshot data to sharded `.rdb` files (one JSON object per key) |
-| **StatsBase** | external | `sample()` function used by the background TTL cleaner to randomly sample keys for expiration checks |
 | **ConcurrentUtilities** | external | Provides `ReadWriteLock` — the foundation of the [sharded locking](concurrency) system |
 | **YAML** | external | Parses the [`radish.yml`](configuration) configuration file at startup |
 | **JuliaFormatter** | dev only | Code formatting for development — not used at runtime |

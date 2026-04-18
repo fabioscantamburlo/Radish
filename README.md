@@ -50,7 +50,6 @@ Only 4 external packages are used at runtime. Everything else — data structure
 | Package | Purpose |
 |---------|---------|
 | **JSON3** | Serialization of snapshot data to sharded `.rdb` files |
-| **StatsBase** | Random key sampling for background TTL expiration |
 | **ConcurrentUtilities** | `ReadWriteLock` for the sharded locking system |
 | **YAML** | Parses the `radish.yml` configuration file at startup |
 

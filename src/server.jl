@@ -1,9 +1,19 @@
 using Dates
 using Logging
-using StatsBase
 using Sockets
 using ConcurrentUtilities
 using Base.Threads: @spawn
+
+# Inline partial shuffle — replaces StatsBase.sample (OPTIM 2.20)
+function _partial_shuffle!(vec, k)
+    n = length(vec)
+    k = min(k, n)
+    for i in 1:k
+        j = rand(i:n)
+        vec[i], vec[j] = vec[j], vec[i]
+    end
+    return @view vec[1:k]
+end
 
 export RadishElement, S_PALETTE, LL_PALETTE
 export start_server
@@ -63,13 +73,14 @@ function async_syncer(store::RadishStore, db_lock::ShardedLock, tracker::DirtyTr
                 continue
             end
 
-            # Determine affected shard IDs
+            # Determine affected shard IDs (OPTIM 1.9 — cache num_shards)
+            num_shards = CONFIG[].num_shards
             dirty_shard_set = Set{Int}()
             for key in keys(modified)
-                push!(dirty_shard_set, snapshot_shard_id(key))
+                push!(dirty_shard_set, snapshot_shard_id(key, num_shards))
             end
             for key in keys(deleted)
-                push!(dirty_shard_set, snapshot_shard_id(key))
+                push!(dirty_shard_set, snapshot_shard_id(key, num_shards))
             end
             sorted_shards = sort(collect(dirty_shard_set))
 
@@ -129,7 +140,7 @@ function async_cleaner(store::RadishStore, db_lock::ShardedLock, tracker::DirtyT
                 sampled = ttl_keys
             else
                 sample_size = max(1, round(Int, cfg.sample_percentage * length(ttl_keys)))
-                sampled = sample(ttl_keys, sample_size, replace=false)
+                sampled = _partial_shuffle!(ttl_keys, sample_size)
             end
 
             # Group by shard
@@ -202,7 +213,7 @@ end
 
 function handle_client(sock::TCPSocket, store::RadishStore, db_lock::ShardedLock,
                        tracker::DirtyTracker, aof::AOFState, client_id::Int)
-    @info "Client #$client_id connected from $(getpeername(sock))"
+    @debug "Client #$client_id connected" peer=getpeername(sock)
 
     try
         # Disable Nagle's algorithm — send responses immediately, don't buffer
@@ -282,6 +293,9 @@ function handle_client(sock::TCPSocket, store::RadishStore, db_lock::ShardedLock
                 end
             else
                 # ── Single command path (no pipelining) ──────────────────
+                # Cache now() once for consistency with batch path (OPTIM 0.14)
+                t = now()
+
                 # AOF Write-Ahead Logging
                 if !(cmd.name in AOF_EXCLUDED_OPS)
                     if !session.in_transaction
@@ -298,7 +312,7 @@ function handle_client(sock::TCPSocket, store::RadishStore, db_lock::ShardedLock
                 end
 
                 # Execute via dispatcher with tracker
-                result = execute!(store, db_lock, cmd, session; tracker=tracker)
+                result = execute!(store, db_lock, cmd, session; tracker=tracker, t=t)
 
                 # Write RESP response back
                 write_resp_response(sock, result, resp_buf)
@@ -311,15 +325,15 @@ function handle_client(sock::TCPSocket, store::RadishStore, db_lock::ShardedLock
         end
     catch e
         if isa(e, EOFError)
-            @info "Client #$client_id disconnected"
+            @debug "Client #$client_id disconnected"
         elseif isa(e, Base.IOError) && (e.code == -32 || e.code == -104)
-            @info "Client #$client_id disconnected (broken pipe)"
+            @debug "Client #$client_id disconnected (broken pipe)"
         else
             @warn "Client #$client_id error: $e"
         end
     finally
         close(sock)
-        @info "Client #$client_id connection closed"
+        @debug "Client #$client_id connection closed"
     end
 end
 
@@ -365,12 +379,12 @@ function start_server(host::String=CONFIG[].host, port::Int=CONFIG[].port)
     # Open AOF for writing
     aof_open!(aof)
 
-    # Start background tasks
+    # Start background tasks (OPTIM 2.21 — @spawn for separate threads)
     println("Starting background tasks...")
-    @async async_cleaner(store, db_lock, tracker)
-    @async async_syncer(store, db_lock, tracker, aof)
+    Threads.@spawn async_cleaner(store, db_lock, tracker)
+    Threads.@spawn async_syncer(store, db_lock, tracker, aof)
     if cfg.aof_sync_ms > 0
-        @async async_aof_flusher(aof)
+        Threads.@spawn async_aof_flusher(aof)
         println("  AOF flusher: every $(cfg.aof_sync_ms)ms")
     end
 
@@ -404,12 +418,26 @@ function start_server(host::String=CONFIG[].host, port::Int=CONFIG[].port)
 
     client_counter = 0
 
-    try
-        while true
-            sock = accept(server)
-            client_counter += 1
-            @spawn handle_client(sock, store, db_lock, tracker, aof, client_counter)
+    # Accept loop on @spawn so it doesn't share thread 1 with main (OPTIM 3.15)
+    accept_task = Threads.@spawn begin
+        try
+            while true
+                sock = accept(server)
+                client_counter += 1
+                @spawn handle_client(sock, store, db_lock, tracker, aof, client_counter)
+            end
+        catch e
+            if isa(e, InterruptException) || isa(e, Base.IOError)
+                # Server socket closed — normal shutdown
+            else
+                @error "Accept loop error: $e"
+                rethrow(e)
+            end
         end
+    end
+
+    try
+        wait(accept_task)
     catch e
         if isa(e, InterruptException)
             println("\nShutting down Radish server...")

@@ -180,17 +180,28 @@ function read_resp_command(reader::RESPReader)
     cmd_name = uppercase(parts[1])
 
     if length(parts) == 1
-        return Command(cmd_name, nothing, String[])
+        return Command(cmd_name, nothing, EMPTY_STRING_VEC)
     end
 
-    if startswith(cmd_name, "S_") || startswith(cmd_name, "L_") || cmd_name in ["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME"]
-        key = parts[2]
-        args = length(parts) > 2 ? parts[3:end] : String[]
-        return Command(cmd_name, key, args)
-    else
-        args = parts[2:end]
-        return Command(cmd_name, nothing, args)
+    # Use COMMAND_TABLE to determine if command takes a key (OPTIM 3.10)
+    # This eliminates prefix-matching and means adding new types (H_, SET_)
+    # requires zero parser changes — just add to palettes.
+    entry = get(COMMAND_TABLE, cmd_name, nothing)
+    if entry !== nothing
+        kind = entry[1]
+        if kind === :nokey
+            return Command(cmd_name, nothing, parts[2:end])
+        else
+            # :meta0, :meta1, :type — all take a key as second part
+            key = parts[2]
+            args = length(parts) > 2 ? parts[3:end] : EMPTY_STRING_VEC
+            return Command(cmd_name, key, args)
+        end
     end
+
+    # Unknown command (MULTI, EXEC, DISCARD, BGSAVE, or truly unknown)
+    # Pass all remaining parts as args — let the dispatcher handle routing
+    return Command(cmd_name, nothing, parts[2:end])
 end
 
 # Keep the old socket-based version for backward compatibility (AOF replay, etc.)
@@ -211,12 +222,14 @@ function write_resp_response(sock::TCPSocket, result::ExecuteResult)
     write(sock, take!(buf))
 end
 
-"""Write an ExecuteResult using a pre-allocated IOBuffer (zero allocation)."""
+"""Write an ExecuteResult using a pre-allocated IOBuffer (zero allocation — OPTIM 3.9)."""
 function write_resp_response(sock::TCPSocket, result::ExecuteResult, buf::IOBuffer)
     seekstart(buf)
     truncate(buf, 0)
     _encode_resp(buf, result)
-    write(sock, take!(buf))
+    GC.@preserve buf unsafe_write(sock, pointer(buf.data), buf.size)
+    seekstart(buf)
+    truncate(buf, 0)
 end
 
 """Write multiple ExecuteResults as RESP to socket in a single write syscall."""

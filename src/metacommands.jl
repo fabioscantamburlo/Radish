@@ -116,17 +116,10 @@ function rttl(store::RadishStore, key::AbstractString;
     return ExecuteResult(SUCCESS, remaining, nothing)
 end
 
-"""Return total number of non-expired keys."""
+"""Return total number of keys (O(1), matches Redis DBSIZE semantics — OPTIM 1.10).
+Includes keys pending lazy expiration, same as Redis."""
 function rdbsize(store::RadishStore; tracker::Union{DirtyTracker, Nothing}=nothing, t::DateTime=now())
-    count = 0
-    for key in store_keys(store)
-        elem = store_get(store, key)
-        elem === nothing && continue
-        if elem.expires_at === nothing || t <= elem.expires_at
-            count += 1
-        end
-    end
-    return ExecuteResult(SUCCESS, count, nothing)
+    return ExecuteResult(SUCCESS, store_size(store), nothing)
 end
 
 """Remove TTL from a key."""

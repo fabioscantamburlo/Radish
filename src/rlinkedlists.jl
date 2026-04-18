@@ -367,7 +367,7 @@ end
 """Wrapper function of lmove command to operate on Radishelement
 Move list 2 into list 1 and delete empty object.
 """
-function lmove!(listl::RadishElement, listr::RadishElement, args::Vector{String})
+function lmove!(listl::RadishElement, listr::RadishElement, args::AbstractVector{String})
     @debug "Calling _lmove!" listl=listl listr=listr
     _lmove!(listl.value, listr.value)
     return CommandSuccess(1)

@@ -167,7 +167,7 @@ function relement_to_element(context::Dict, key, command::F, args::Vector{String
                              t::DateTime=now()) where F<:Function
     keyright = args[1]
     keyleft = key
-    other_args = args[2:end]
+    other_args = @view args[2:end]
     if haskey(context, keyleft) && haskey(context, keyright)
         cmd_result = command(context[keyleft], context[keyright], other_args)
         if cmd_result isa CommandDirect
@@ -187,7 +187,7 @@ function relement_to_element_consume_key2!(context::Dict, key, command::F, args:
                                            t::DateTime=now()) where F<:Function
     keyright = args[1]
     keyleft = key
-    other_args = args[2:end]
+    other_args = @view args[2:end]
     if haskey(context, keyleft) && haskey(context, keyright)
         eleft = context[keyleft]
         eright = context[keyright]

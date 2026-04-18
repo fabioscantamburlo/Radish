@@ -14,12 +14,21 @@ export ensure_persistence_dirs!, snapshot_shard_id,
        save_snapshot!, save_snapshot_shards!, save_full_snapshot!, load_snapshot!,
        aof_open!, aof_append!, aof_append_batch!, aof_truncate!, aof_close!, replay_aof!
 
+# Module-level constant for AOF replay key detection (OPTIM 2.19)
+const AOF_KEY_COMMANDS = union(
+    Set(["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME"]),
+    Set(keys(S_PALETTE)),
+    Set(keys(LL_PALETTE)),
+    Set(keys(META_PALETTE))
+)
+
 # ============================================================================
 # Configuration
 # ============================================================================
 
-"""Compute snapshot shard ID for a key."""
+"""Compute snapshot shard ID for a key. Accepts optional num_shards to avoid CONFIG[] deref in loops (OPTIM 1.9)."""
 snapshot_shard_id(key::String) = (hash(key) % CONFIG[].num_shards) + 1
+snapshot_shard_id(key::String, num_shards::Int) = (hash(key) % num_shards) + 1
 
 """Get file path for a shard's RDB file."""
 shard_path(shard::Int) = joinpath(snapshots_dir(CONFIG[]), "shard_$(lpad(shard, 3, '0')).rdb")
@@ -89,12 +98,15 @@ modified/deleted are Dict{String, Symbol} (key => datatype).
 function save_snapshot_shards!(store::RadishStore, modified::Dict{String, Symbol}, deleted::Dict{String, Symbol})
     ensure_persistence_dirs!()
 
+    # Cache num_shards to avoid CONFIG[] deref per key (OPTIM 1.9)
+    num_shards = CONFIG[].num_shards
+
     # Group dirty keys by shard
     shard_modified = Dict{Int, Dict{String, Symbol}}()
     shard_deleted = Dict{Int, Set{String}}()
 
     for (key, dt) in modified
-        sid = snapshot_shard_id(key)
+        sid = snapshot_shard_id(key, num_shards)
         if !haskey(shard_modified, sid)
             shard_modified[sid] = Dict{String, Symbol}()
         end
@@ -102,7 +114,7 @@ function save_snapshot_shards!(store::RadishStore, modified::Dict{String, Symbol
     end
 
     for (key, _) in deleted
-        sid = snapshot_shard_id(key)
+        sid = snapshot_shard_id(key, num_shards)
         if !haskey(shard_deleted, sid)
             shard_deleted[sid] = Set{String}()
         end
@@ -191,18 +203,21 @@ end
 function save_full_snapshot!(store::RadishStore, tracker::DirtyTracker)
     ensure_persistence_dirs!()
 
+    # Cache num_shards (OPTIM 1.9)
+    num_shards = CONFIG[].num_shards
+
     # Collect all elements across all typed dicts
     shards = Dict{Int, Vector{Tuple{String, RadishElement}}}()
 
     for (key, elem) in store.strings
-        sid = snapshot_shard_id(key)
+        sid = snapshot_shard_id(key, num_shards)
         if !haskey(shards, sid)
             shards[sid] = Tuple{String, RadishElement}[]
         end
         push!(shards[sid], (key, elem))
     end
     for (key, elem) in store.lists
-        sid = snapshot_shard_id(key)
+        sid = snapshot_shard_id(key, num_shards)
         if !haskey(shards, sid)
             shards[sid] = Tuple{String, RadishElement}[]
         end
@@ -210,7 +225,7 @@ function save_full_snapshot!(store::RadishStore, tracker::DirtyTracker)
     end
 
     count = 0
-    for sid in 1:CONFIG[].num_shards
+    for sid in 1:num_shards
         path = shard_path(sid)
         if !haskey(shards, sid)
             isfile(path) && rm(path)
@@ -372,12 +387,6 @@ function replay_aof!(store::RadishStore, db_lock::ShardedLock, aof_path_str::Str
 
     count = 0
     session = ClientSession()
-    KEY_COMMANDS = union(
-        Set(["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME"]),
-        Set(keys(S_PALETTE)),
-        Set(keys(LL_PALETTE)),
-        Set(keys(META_PALETTE))
-    )
 
     for line in eachline(aof_path_str)
         line = strip(line)
@@ -391,7 +400,7 @@ function replay_aof!(store::RadishStore, db_lock::ShardedLock, aof_path_str::Str
 
             if length(parts) == 1
                 cmd = Command(cmd_name, nothing, String[])
-            elseif startswith(cmd_name, "S_") || startswith(cmd_name, "L_") || cmd_name in KEY_COMMANDS
+            elseif startswith(cmd_name, "S_") || startswith(cmd_name, "L_") || cmd_name in AOF_KEY_COMMANDS
                 key = parts[2]
                 args = length(parts) > 2 ? String.(parts[3:end]) : String[]
                 cmd = Command(cmd_name, key, args)

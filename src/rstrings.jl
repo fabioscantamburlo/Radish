@@ -133,50 +133,78 @@ function slen(elem::RadishElement, args::Vector{String})
     return CommandSuccess(length(elem.value))
 end
 
-"""Helper function used internally to find the LCS on two elements of type StringType"""
+"""Helper function used internally to find the LCS on two elements of type StringType.
+Uses full DP matrix for backtracking. Rejects inputs where l1*l2 > MAX_LCS_CELLS (OPTIM 0.10).
+Ensures shorter string is the column dimension for better cache locality."""
+const MAX_LCS_CELLS = 1_000_000  # 1M cells max (~8 MB)
+
 function find_lcs(string1::AbstractString, string2::AbstractString)
     l1, l2 = length(string1), length(string2)
-    dp = zeros(Int, l1 + 1, l2 + 1)
-    # Populating DP matrix
+
+    # Length guard — reject absurdly long inputs
+    if l1 * l2 > MAX_LCS_CELLS
+        return "", 0
+    end
+
+    # Ensure shorter string is the column (inner loop) for cache locality
+    if l1 < l2
+        string1, string2 = string2, string1
+        l1, l2 = l2, l1
+    end
+
+    # Two-row rolling array for length computation
+    prev = zeros(Int, l2 + 1)
+    curr = zeros(Int, l2 + 1)
+    # Full matrix for backtracking (only allocate the direction matrix, not values)
+    # Direction: 0 = diagonal (match), 1 = up, 2 = left
+    dirs = zeros(UInt8, l1, l2)
+
     for (i1, v1) in enumerate(string1)
-        for(i2, v2) in enumerate(string2)
-            
+        fill!(curr, 0)
+        for (i2, v2) in enumerate(string2)
             if v1 == v2
-                dp[i1 + 1, i2 + 1] = 1 + dp[i1, i2]
+                curr[i2 + 1] = 1 + prev[i2]
+                dirs[i1, i2] = 0x00  # diagonal
+            elseif prev[i2 + 1] >= curr[i2]
+                curr[i2 + 1] = prev[i2 + 1]
+                dirs[i1, i2] = 0x01  # up
             else
-                dp[i1 + 1, i2 + 1] = max(dp[i1, i2 + 1], dp[i1 + 1, i2])
+                curr[i2 + 1] = curr[i2]
+                dirs[i1, i2] = 0x02  # left
             end
         end
+        prev, curr = curr, prev  # swap references
     end
-    lcs_length = dp[l1 + 1, l2 + 1]
-    lcs_string = Char[]
-    
-    i, j = l1 + 1, l2 + 1 
-    
-    while i > 1 && j > 1
-        if string1[i - 1] == string2[j - 1]
-            push!(lcs_string, string1[i - 1])
+
+    lcs_length = prev[l2 + 1]
+
+    # Backtrack using direction matrix
+    lcs_chars = Char[]
+    i, j = l1, l2
+    while i > 0 && j > 0
+        d = dirs[i, j]
+        if d == 0x00  # diagonal — match
+            push!(lcs_chars, string1[i])
             i -= 1
             j -= 1
-        
-        elseif dp[i - 1, j] >= dp[i, j - 1]
+        elseif d == 0x01  # up
             i -= 1
-        else
+        else  # left
             j -= 1
         end
     end
 
-    return string(join(reverse(lcs_string), "")), lcs_length
+    return String(reverse!(lcs_chars)), lcs_length
 end
 
 """LCS of two string elements."""
-function slcs(elemleft::RadishElement, elemright::RadishElement, args::Vector{String})
+function slcs(elemleft::RadishElement, elemright::RadishElement, args::AbstractVector{String})
     s_lcs, len_lcs = find_lcs(elemleft.value, elemright.value)
     return CommandDirect((s_lcs, len_lcs))
 end
 
 """Compare lengths of two string elements."""
-function sclen(elemleft::RadishElement, elemright::RadishElement, args::Vector{String})
+function sclen(elemleft::RadishElement, elemright::RadishElement, args::AbstractVector{String})
     result = length(elemleft.value) == length(elemright.value)
     return CommandSuccess(result ? 1 : 0)
 end

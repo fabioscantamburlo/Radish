@@ -545,13 +545,13 @@ end  # Hypercommands
             @test result.value == 0
         end
 
-        @testset "counts non-expired keys" begin
+        @testset "counts all keys including pending expiration (Redis semantics)" begin
             store = fresh_store()
             store_set!(store, "k1", make_string_elem("a"))
             store_set!(store, "k2", make_string_elem("b"))
             store_set!(store, "expired", RadishElement("old", 1, now() - Second(10), :string))
             result = rdbsize(store)
-            @test result.value == 2
+            @test result.value == 3  # includes expired-but-not-yet-cleaned keys (Redis behavior)
         end
     end
 
