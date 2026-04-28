@@ -35,10 +35,15 @@ struct Command
     args::Vector{String}            # Remaining Arguments
 end
 
+# Result value type — tightened from Any to eliminate boxing on common paths (OPTIM 0.12)
+# Julia optimizes small unions as tagged unions. The 3 most common types (Nothing, Int, String)
+# are the hot path. Bool, Vector, Tuple are rare and already heap-allocated.
+const ResultValue = Union{Nothing, Bool, Int, String, Vector, Tuple}
+
 # Struct to capture result of the command
 struct ExecuteResult
     status::ExecutionStatus         # Execution status
-    value::Any                      # Result return (nothing or value)
+    value::ResultValue              # Result return — tight union, no boxing for common types
     error::Union{Nothing, String}   # Error message (only for ERROR status)
 end
 

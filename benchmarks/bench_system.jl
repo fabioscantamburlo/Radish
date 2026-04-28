@@ -559,6 +559,66 @@ function run_benchmarks()
 
     println()
 
+    # Hot-key contention: all workers hammer the SAME key (OPTIM 4.2)
+    # This is the worst case — all workers serialize on one shard's write lock.
+    # Reveals the real cost of lock contention vs the spread-across-shards benchmarks above.
+    # Uses fewer ops (10k) because contention makes these much slower.
+    println("── Hot-Key Contention ──────────────────────────────────────────────────────")
+
+    hot_ops = 10_000
+
+    # All-write on single key (worst case: pure serialization)
+    for num_workers in worker_counts
+        per_op_ns, ops_sec = bench_concurrent(
+            () -> begin
+                s = RadishStore()
+                store_set!(s, "hot_counter", RadishElement("0", nothing, now(), :string))
+                l = ShardedLock(256)
+                t = DirtyTracker()
+                (s, l, t)
+            end,
+            (store_c, db_lock_c, tracker_c, sess, n) -> begin
+                cmd = Command("S_INCR", "hot_counter", String[])
+                for _ in 1:n
+                    execute!(store_c, db_lock_c, cmd, sess; tracker=tracker_c)
+                end
+            end,
+            num_workers, hot_ops
+        )
+        report_throughput("hot-key write ($(num_workers)w)", per_op_ns, ops_sec, num_workers, hot_ops)
+    end
+
+    println()
+
+    # 90/10 read/write on single key (readers can overlap, writers serialize)
+    # NOTE: ReadWriteLock from ConcurrentUtilities starves at 2+ workers on a
+    # single shard with mixed r/w. Capped at 1w to document the baseline.
+    # See OPTIM 2.23 for details. This benchmark will unblock when we swap to
+    # a fair lock implementation.
+    for num_workers in [1]
+        per_op_ns, ops_sec = bench_concurrent(
+            () -> begin
+                s = RadishStore()
+                store_set!(s, "hot_key", RadishElement("0", nothing, now(), :string))
+                l = ShardedLock(256)
+                t = DirtyTracker()
+                (s, l, t)
+            end,
+            (store_c, db_lock_c, tracker_c, sess, n) -> begin
+                cmd_r = Command("S_GET", "hot_key", String[])
+                cmd_w = Command("S_INCR", "hot_key", String[])
+                for _ in 1:n
+                    cmd = rand() < 0.9 ? cmd_r : cmd_w
+                    execute!(store_c, db_lock_c, cmd, sess; tracker=tracker_c)
+                end
+            end,
+            num_workers, hot_ops
+        )
+        report_throughput("hot-key 90/10 r/w ($(num_workers)w)", per_op_ns, ops_sec, num_workers, hot_ops)
+    end
+
+    println()
+
     # =========================================================================
     # 4. AOF throughput
     # =========================================================================

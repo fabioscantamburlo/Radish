@@ -121,13 +121,12 @@ function async_cleaner(store::RadishStore, db_lock::ShardedLock, tracker::DirtyT
             cfg = CONFIG[]
 
             # Collect only TTL keys by iterating typed dicts directly (OPTIM 2.1)
-            # Skips non-TTL keys entirely — no collect(store_keys) allocation
+            # Uses store_typed_dicts for type-agnostic iteration
             ttl_keys = Tuple{String, Symbol}[]
-            for (key, elem) in store.strings
-                elem.expires_at !== nothing && push!(ttl_keys, (key, :string))
-            end
-            for (key, elem) in store.lists
-                elem.expires_at !== nothing && push!(ttl_keys, (key, :list))
+            for (sym, dict) in store_typed_dicts(store)
+                for (key, elem) in dict
+                    elem.expires_at !== nothing && push!(ttl_keys, (key, sym))
+                end
             end
 
             if isempty(ttl_keys)

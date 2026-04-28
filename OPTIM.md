@@ -3,8 +3,9 @@
 > A detailed review of performance characteristics across four levels:
 > language, data structures, system orchestration, and end-to-end behavior.
 >
-> Last updated after Phase 4 — quick-win sweep (11 items across Levels 0-3).
+> Last updated after Phase 5 — eliminated all `::Any` from struct fields.
 > All Level 0, 1, 2 optimizations complete. Level 3 quick wins complete.
+> Zero `::Any` remains on any struct field in the codebase.
 > New audit findings (Levels 0-5) appended — includes residual bottlenecks,
 > testing gaps, and feature enhancements.
 >
@@ -213,14 +214,9 @@ appends this is O(n²) in total bytes copied. Benchmark shows S_APPEND at 3.6 μ
 or a rope/chunked buffer for truly hot append workloads.
 **Impact:** 🟡 Medium (hot append workloads). **Effort:** Medium.
 
-#### 0.12 — `ExecuteResult.value::Any` causes boxing on every command return
-`ExecuteResult` has `value::Any` which forces heap allocation (boxing) for every result,
-even for simple Int or String returns. This is on the absolute hottest path — every
-single command returns an `ExecuteResult`. `CommandResult.value` was fixed (Phase 1,
-0.2) but `ExecuteResult` was not.
-**Fix:** Tighten to `Union{Nothing, Bool, Int, String, Vector, Tuple}` or parameterize
-`ExecuteResult{T}`.
-**Impact:** 🟡 Medium. **Effort:** Medium (touches every command return site).
+#### 0.12 — `ExecuteResult.value::Any` causes boxing on every command return → ✅ Done (Phase 5)
+Tightened to `const ResultValue = Union{Nothing, Bool, Int, String, Vector, Tuple}`.
+Zero `::Any` remains on any struct field in the entire codebase.
 
 #### 0.13 — `CommandDirect.value::Any` boxes list/tuple returns → ✅ Done (Phase 4)
 Made `CommandDirect` parametric (`CommandDirect{T}`). List push/pop improved +26-34%.
@@ -233,13 +229,9 @@ Added `t = now()` before `execute!` in single-command path, passed via kwarg.
 
 ### Level 1 — Data Structures
 
-#### 1.6 — `rlistkeys` allocates full key list even with KLIST limit
-`rlistkeys` builds a `Tuple{String, Symbol}[]` by iterating every entry in
-`store.strings` and `store.lists`, then truncates with `first(key_list, limit)`.
-For 100k keys with `KLIST 10`, it still allocates and populates a 100k-element vector.
-**Fix:** Use a lazy iterator that stops after N keys instead of collecting everything
-first. Short-circuit on limit.
-**Impact:** 🟡 Medium (large databases). **Effort:** Low.
+#### 1.6 — `rlistkeys` allocates full key list even with KLIST limit → ✅ Done (Phase 5)
+Refactored to parse limit upfront and early-exit via `@goto done`. Uses `store_typed_dicts`
+for type-agnostic iteration. `KLIST 10` on 100k keys: ~1.8 ms → ~1 μs.
 
 #### 1.7 — `L_GET` materializes list into `Vector{String}` on every read
 Every `L_GET` calls `_compose_linked_list_forward` which allocates a `Vector{String}`
@@ -329,6 +321,39 @@ commands) this overhead may exceed the per-command locking it replaces.
 **Fix:** Use a fixed-size `BitSet` or pre-allocated `Vector{Bool}` of size `num_shards`.
 For small batches, consider a threshold below which per-command locking is cheaper.
 **Impact:** 🟢 Low-Medium. **Effort:** Low.
+
+#### 2.23 — `ConcurrentUtilities.ReadWriteLock` starves under hot-key contention
+**Discovery (Phase 5 benchmarking):** When 4+ workers do mixed read/write operations
+on the **same key** (same shard), the `ReadWriteLock` from ConcurrentUtilities hangs
+indefinitely. The benchmark stalls at hot-key 90/10 r/w with 4 workers and had to be
+capped at 2 workers to avoid infinite hangs.
+
+**Root cause:** ConcurrentUtilities' `ReadWriteLock` is not fair — it doesn't queue
+waiters. When multiple readers hold the read lock and a writer is waiting, new readers
+can keep acquiring the lock ahead of the writer (reader preference). Under sustained
+mixed load on a single shard, the writer starves forever.
+
+**Benchmark evidence:**
+- Hot-key write (pure serialization): 1w=1.61M, 2w=1.19M, 4w=884k — anti-scales but
+  doesn't stall. Write lock serializes cleanly.
+- Hot-key 90/10 r/w: 1w=1.99M, 2w=1.42M, 4w=**hangs** — writer starvation.
+- Spread keys (10k keys / 256 shards): 4w scales to 2.8-3.8M — no contention.
+
+**Impact on production:** Low for typical workloads (keys spread across shards), but
+a real risk for counter keys, rate limiters, or session locks where many clients
+read/write the same key concurrently.
+
+**Fix:** Replace `ConcurrentUtilities.ReadWriteLock` with a fair read-write lock that
+uses a FIFO queue. Writers get priority after waiting (write-preferring), preventing
+reader starvation of writers. Implementation: ~50-80 lines using `Base.ReentrantLock`
++ `Base.Condition` with a waiter queue.
+
+Alternatively, for the hot-key case specifically, use a simple `ReentrantLock` (no
+read/write distinction) when contention is detected on a shard. The read/write
+distinction only helps when reads vastly outnumber writes AND they don't collide on
+the same shard — which is already the common case with 256 shards.
+
+**Impact:** 🔴 High (correctness — can hang under specific workloads). **Effort:** Medium.
 
 ### Level 3 — Black Box Performance (high priority)
 
@@ -452,13 +477,11 @@ multi-key write meta command but has no dedicated benchmark in `bench_system.jl`
 **Fix:** Add `RENAME` to the full command coverage section.
 **Impact:** 🟢 Low (visibility). **Effort:** Very Low.
 
-#### 4.2 — No concurrent benchmark for hot-key contention
-The concurrent benchmarks use `rand(1:10_000)` for key selection, spreading load
-across shards. There's no benchmark for contention on a single hot key (e.g., all
-workers incrementing the same counter).
-**Fix:** Add a "hot key contention" benchmark: N workers all incrementing the same key.
-Measures write lock contention on a single shard.
-**Impact:** 🟡 Medium (reveals real-world contention patterns). **Effort:** Low.
+#### 4.2 — No concurrent benchmark for hot-key contention → ✅ Done (Phase 5)
+Added to `bench_system.jl`: hot-key write (all workers S_INCR same key) and hot-key
+90/10 r/w (mixed read/write same key). Revealed 2.23 — `ReadWriteLock` starvation
+under 4+ workers on a single shard with mixed reads/writes. Hot-key 90/10 r/w capped
+at 2 workers to avoid benchmark hangs.
 
 #### 4.3 — No test for AOF replay correctness after crash
 The test suite has no test that writes commands, simulates a crash (kill without clean
@@ -585,11 +608,11 @@ If the server restarts, the client dies with "Connection closed by server". No r
 | 3.7 | Pre-allocated response IOBuffer | 🟢 Low | Very Low | ✅ Done |
 | **New findings from codebase audit:** | | | |
 | 0.11 | `sappend!` O(n²) concatenation | 🟡 Medium | Medium | Remaining |
-| 0.12 | `ExecuteResult.value::Any` boxing | 🟡 Medium | Medium | Remaining |
+| 0.12 | `ExecuteResult.value::Any` boxing | 🟡 Medium | Medium | ✅ Done (Phase 5) |
 | 0.13 | `CommandDirect.value::Any` boxing | 🟢 Low-Medium | Low | ✅ Done (Phase 4) |
 | 0.14 | Single-cmd path missing `now()` cache | 🟡 Medium | Very Low | ✅ Done (Phase 4) |
 | 0.15 | Repeated `String[]` allocation | 🟢 Low | Very Low | ✅ Done (Phase 4) |
-| 1.6 | `rlistkeys` full alloc with limit | 🟡 Medium | Low | Remaining |
+| 1.6 | `rlistkeys` full alloc with limit | 🟡 Medium | Low | ✅ Done (Phase 5) |
 | 1.7 | `L_GET` materializes Vector | 🟢 Low-Medium | Medium-High | Remaining |
 | 1.8 | `DLinkedListElement` no pooling | 🟡 Medium | Medium | Remaining |
 | 1.9 | `snapshot_shard_id` Ref deref | 🟢 Low | Very Low | Remaining |
@@ -604,6 +627,7 @@ If the server restarts, the client dies with "Connection closed by server". No r
 | 2.20 | StatsBase dependency for `sample()` | 🟢 Low | Very Low | ✅ Done (Phase 4) — dependency removed |
 | 2.21 | Background tasks `@async` vs `@spawn` | 🟡 Medium | Very Low | ✅ Done (Phase 4) |
 | 2.22 | `execute_batch!` Set overhead | 🟢 Low-Medium | Low | Remaining |
+| 2.23 | `ReadWriteLock` starvation under hot-key contention | 🔴 High | Medium | Remaining |
 | 3.8 | RESP `_readline!` byte-by-byte scan | 🟡 Medium | Low | Remaining |
 | 3.9 | `take!(buf)` copies buffer | 🟡 Medium | Very Low | ✅ Done (Phase 4) |
 | 3.10 | RESP parser prefix-matching | 🟢 Low | Low | Remaining |
@@ -613,7 +637,7 @@ If the server restarts, the client dies with "Connection closed by server". No r
 | 3.14 | Multi-client throughput degrades at 4+ clients | 🔴 High | Low–Very High | Remaining |
 | 3.15 | Accept loop shares thread with background tasks | 🟡 Medium | Very Low | Remaining |
 | 4.1 | No RENAME benchmark | 🟢 Low | Very Low | Remaining |
-| 4.2 | No hot-key contention benchmark | 🟡 Medium | Low | Remaining |
+| 4.2 | No hot-key contention benchmark | 🟡 Medium | Low | ✅ Done (Phase 5) — revealed 2.23 |
 | 4.3 | No AOF crash-replay test | 🟡 Medium | Medium | Remaining |
 | 4.4 | No cleaner+client race test | 🟡 Medium | Medium | Remaining |
 | 4.5 | `bench_net.py` socket leaks | 🟢 Low | Very Low | Remaining |
@@ -645,13 +669,13 @@ If the server restarts, the client dies with "Connection closed by server". No r
 2. **3.15** — Accept loop on `@spawn` (Very Low effort, secondary to 2.21)
 
 **High-impact remaining:**
-1. **3.14** — Multi-client I/O scaling (architectural: event loop — Very High effort)
-2. **5.4** — Max memory + eviction policy (production safety)
-3. **5.7** — Hash map data type (feature completeness)
-4. **0.12** — `ExecuteResult.value::Any` boxing (hot path allocation)
+1. **2.23** — Fair ReadWriteLock (correctness — current lock can hang under hot-key contention)
+2. **3.14** — Multi-client I/O scaling (architectural: event loop — Very High effort)
+3. **5.4** — Max memory + eviction policy (production safety)
+4. **5.7** — Hash map data type (feature completeness)
 5. **3.8** — RESP `_readline!` vectorized scan (networking throughput)
 
-**Next focus: new data types (hashes, sets), then Python client + MCP server.**
+**Zero `::Any` remains on any struct field. Next focus: new data types (hashes, sets), then Python client + MCP server.**
 
 ---
 

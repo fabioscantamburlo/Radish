@@ -8,28 +8,35 @@ using Dates
 using Logging
 
 # Pre-interned type name strings — avoids string allocation per rtype call
+# Adding a new type: add an entry here
 const TYPE_NAMES = Dict{Symbol, String}(:string => "string", :list => "list")
 
-"""List all keys with their types, filtering expired ones."""
+"""List all keys with their types, filtering expired ones.
+Uses store_typed_dicts for type-agnostic iteration.
+Early-exits when limit is reached (OPTIM 1.6)."""
 function rlistkeys(store::RadishStore, args::Vector{String}=String[]; tracker::Union{DirtyTracker, Nothing}=nothing, t::DateTime=now())
+    # Parse limit upfront for early exit
+    limit = typemax(Int)
+    if !isempty(args)
+        parsed = tryparse(Int, args[1])
+        parsed !== nothing && (limit = parsed)
+    end
+
     key_list = Tuple{String, Symbol}[]
     expired_keys = Tuple{String, Symbol}[]
 
-    # Iterate typed dicts directly — one hash iteration, no keytype indirection
-    for (key, elem) in store.strings
-        if elem.expires_at === nothing || t <= elem.expires_at
-            push!(key_list, (key, :string))
-        else
-            push!(expired_keys, (key, :string))
+    # Iterate all typed dicts via store_typed_dicts — type-agnostic
+    for (sym, dict) in store_typed_dicts(store)
+        for (key, elem) in dict
+            if elem.expires_at === nothing || t <= elem.expires_at
+                push!(key_list, (key, sym))
+                length(key_list) >= limit && @goto done
+            else
+                push!(expired_keys, (key, sym))
+            end
         end
     end
-    for (key, elem) in store.lists
-        if elem.expires_at === nothing || t <= elem.expires_at
-            push!(key_list, (key, :list))
-        else
-            push!(expired_keys, (key, :list))
-        end
-    end
+    @label done
 
     # Lazy expiration — delete after iteration to avoid modifying during iteration
     for (key, datatype) in expired_keys
@@ -37,14 +44,7 @@ function rlistkeys(store::RadishStore, args::Vector{String}=String[]; tracker::U
         tracker !== nothing && mark_deleted!(tracker, key, datatype)
     end
 
-    if isempty(args)
-        return key_list
-    end
-    limit_s = tryparse(Int, args[1])
-    if isa(limit_s, Nothing)
-        return key_list
-    end
-    return first(key_list, limit_s)
+    return key_list
 end
 
 """Check if a key exists (and is not expired). Returns 1 or 0."""

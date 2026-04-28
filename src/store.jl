@@ -6,10 +6,17 @@
 # dispatch on the hot path.
 #
 # The keytype index is the single source of truth for key existence and type.
+#
+# Adding a new data type requires:
+#   1. Add a typed dict field to RadishStore
+#   2. Add an entry to store_typed_dicts()
+#   3. Add to the constructor and store_flush!
+#   Everything else (delete, get, set, iteration) works automatically.
 # =============================================================================
 
 export RadishStore, store_haskey, store_keytype, store_delete!, store_get,
-       store_get_typed, store_keys, store_size, store_set!, store_flush!
+       store_get_typed, store_get_typed_key, store_typed_dicts,
+       store_keys, store_size, store_set!, store_flush!
 
 """
 Typed storage for all Radish data types.
@@ -36,6 +43,21 @@ end
 # Legacy alias for backward compatibility
 const RadishContext = RadishStore
 
+"""
+Return all typed dictionaries as (symbol, dict) pairs.
+Central registry — adding a new type means adding one line here.
+Used by store_delete!, store_get, store_set!, store_flush!, and
+all iteration code (cleaner, metacommands, persistence).
+"""
+function store_typed_dicts(store::RadishStore)
+    return (
+        (:string, store.strings),
+        (:list,   store.lists),
+        # (:hash, store.hashes),   # future
+        # (:set,  store.sets),     # future
+    )
+end
+
 """Check if a key exists in any store."""
 function store_haskey(store::RadishStore, key::AbstractString)::Bool
     return haskey(store.keytype, key)
@@ -51,10 +73,11 @@ function store_delete!(store::RadishStore, key::AbstractString)::Bool
     t = get(store.keytype, key, nothing)
     t === nothing && return false
     delete!(store.keytype, key)
-    if t === :string
-        delete!(store.strings, key)
-    elseif t === :list
-        delete!(store.lists, key)
+    for (sym, dict) in store_typed_dicts(store)
+        if t === sym
+            delete!(dict, key)
+            return true
+        end
     end
     return true
 end
@@ -63,30 +86,30 @@ end
 function store_get(store::RadishStore, key::AbstractString)::Union{RadishElement, Nothing}
     t = get(store.keytype, key, nothing)
     t === nothing && return nothing
-    if t === :string
-        return get(store.strings, key, nothing)
-    elseif t === :list
-        return get(store.lists, key, nothing)
+    for (sym, dict) in store_typed_dicts(store)
+        if t === sym
+            return get(dict, key, nothing)
+        end
     end
     return nothing
 end
 
 """Get the typed dictionary for a given type symbol."""
 function store_get_typed(store::RadishStore, datatype::Symbol)
-    if datatype === :string
-        return store.strings
-    elseif datatype === :list
-        return store.lists
+    for (sym, dict) in store_typed_dicts(store)
+        if datatype === sym
+            return dict
+        end
     end
     error("Unknown datatype: $datatype")
 end
 
 """Get element directly from typed dict (caller already knows the type from keytype)."""
 function store_get_typed_key(store::RadishStore, typ::Symbol, key::AbstractString)
-    if typ === :string
-        return get(store.strings, key, nothing)
-    elseif typ === :list
-        return get(store.lists, key, nothing)
+    for (sym, dict) in store_typed_dicts(store)
+        if typ === sym
+            return get(dict, key, nothing)
+        end
     end
     return nothing
 end
@@ -94,10 +117,11 @@ end
 """Insert an element into the correct typed dict + update keytype index."""
 function store_set!(store::RadishStore, key::AbstractString, elem::RadishElement)
     store.keytype[key] = elem.datatype
-    if elem.datatype === :string
-        store.strings[key] = elem
-    elseif elem.datatype === :list
-        store.lists[key] = elem
+    for (sym, dict) in store_typed_dicts(store)
+        if elem.datatype === sym
+            dict[key] = elem
+            return
+        end
     end
 end
 
@@ -113,7 +137,8 @@ end
 
 """Delete all keys from all stores."""
 function store_flush!(store::RadishStore)
-    empty!(store.strings)
-    empty!(store.lists)
+    for (_, dict) in store_typed_dicts(store)
+        empty!(dict)
+    end
     empty!(store.keytype)
 end

@@ -206,22 +206,17 @@ function save_full_snapshot!(store::RadishStore, tracker::DirtyTracker)
     # Cache num_shards (OPTIM 1.9)
     num_shards = CONFIG[].num_shards
 
-    # Collect all elements across all typed dicts
+    # Collect all elements across all typed dicts (type-agnostic via store_typed_dicts)
     shards = Dict{Int, Vector{Tuple{String, RadishElement}}}()
 
-    for (key, elem) in store.strings
-        sid = snapshot_shard_id(key, num_shards)
-        if !haskey(shards, sid)
-            shards[sid] = Tuple{String, RadishElement}[]
+    for (_, dict) in store_typed_dicts(store)
+        for (key, elem) in dict
+            sid = snapshot_shard_id(key, num_shards)
+            if !haskey(shards, sid)
+                shards[sid] = Tuple{String, RadishElement}[]
+            end
+            push!(shards[sid], (key, elem))
         end
-        push!(shards[sid], (key, elem))
-    end
-    for (key, elem) in store.lists
-        sid = snapshot_shard_id(key, num_shards)
-        if !haskey(shards, sid)
-            shards[sid] = Tuple{String, RadishElement}[]
-        end
-        push!(shards[sid], (key, elem))
     end
 
     count = 0
