@@ -12,11 +12,12 @@ Radish is a didactical project — it was built to learn and have fun.  This pag
 
 ## Performance
 
-Radish is slow — significantly slower than Redis. This is expected for several reasons:
+Radish reaches ~100k ops/s with pipelined Python clients — in the same order of magnitude as Redis for simple pipelined workloads. However, the gap widens significantly under production conditions:
 
-- **Language choice** — Julia is optimized for numerical computing, not for building high-throughput network servers on top of that the author is 100% not the best Julia programmer out there.
-- **No optimization effort** — the codebase prioritizes clarity and readability over performance. There are no specialized memory allocators, no zero-copy I/O, no pipelining and not low level optimisation at all. 
-- **Multi-threaded overhead** — The multi-threaded design choice has additional cost of lock acquisition and release on every command. Even read operations acquire read locks on their shard. Recurrent processes: TTL checks and AOF + Dump are using locks as well.
+- **High concurrency** — Redis handles 10,000+ concurrent clients with a single-threaded epoll loop. Radish spawns a Julia task per client, and throughput degrades past ~64 concurrent workers on hot keys.
+- **Memory efficiency** — Redis uses specialized encodings (SDS, ziplist, intset). Radish stores Julia objects with GC headers and Dict overhead.
+- **Latency tail** — Julia's stop-the-world GC can cause millisecond-level p99 spikes. Redis's p99 is microseconds.
+- **Multi-threaded overhead** — the fair lock adds ~50-60ns per command for acquire/release. Even read operations acquire locks.
 
 ---
 
@@ -80,9 +81,9 @@ The Radish-CLI has basic interactive features (command history, tab completion, 
 ---
 
 
-## No clients available
+## Python Client Available
 
-The only way to connect to Radish at the moment, is to use Radish-CLI. I have an idea of implementing a python client but it's not yet in alpha stage.
+RadishPy is a Python client library for Radish with full command support, pipelining, and connection pooling. See the [Client Implementation Guide](client_implementation_guide) for the protocol specification.
 
 ---
 

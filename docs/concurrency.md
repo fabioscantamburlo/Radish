@@ -29,15 +29,28 @@ This is a **race condition** — the classic lost-update problem. Radish needs t
 
 ## Sharded Locking
 
-Instead of a single global lock (which would serialize everything), Radish uses **sharded locking** — N independent `ReadWriteLock`s (configurable via [`num_shards`](configuration), default 256):
+Instead of a single global lock (which would serialize everything), Radish uses **sharded locking** — N independent locks (configurable via [`num_shards`](configuration), default 256). Two lock implementations are available, selectable via `lock_type` in `radish.yml`:
+
+### Standard Lock (`lock_type: "standard"`)
+
+Uses `ConcurrentUtilities.ReadWriteLock`. Reader-preferring — multiple readers proceed concurrently, writers wait for all readers to finish. Simple and fast under low contention, but **starves writers under hot-key mixed read/write load** (4+ concurrent clients on the same key can hang indefinitely).
+
+### Fair Lock (`lock_type: "fair"`, default)
+
+A write-preferring lock built from scratch using `Threads.Condition`. No external dependencies. Once a writer is waiting, new readers park until the writer finishes. Every state transition wakes all waiters — no lost wakeups possible.
+
+Key properties:
+- **No writer starvation** — tested up to 4,096 concurrent workers on a single hot key
+- **No deadlocks** — passed all scenarios that deadlocked the previous `FairShardedLock` attempt
+- **~50-60ns per uncontended acquire/release** (vs ~25ns for the standard lock)
+- **Lock contention warnings** — logs a `@warn` if any acquire blocks for more than 5 seconds
+
+Both implementations share the same API (`acquire_read!`, `acquire_write!`, `release_read!`, `release_write!`) via the `AbstractShardedLock` type, so switching is a config change with no code modifications.
 
 ```julia
-struct ShardedLock
-    shards::Vector{ReadWriteLock}
-    num_shards::Int
-end
-
-ShardedLock(n::Int=256) = ShardedLock([ReadWriteLock() for _ in 1:n], n)
+abstract type AbstractShardedLock end
+struct ShardedLock <: AbstractShardedLock ... end           # standard
+struct SimpleFairShardedLock <: AbstractShardedLock ... end  # fair
 ```
 
 Each key is mapped to a shard using a hash:
@@ -60,7 +73,7 @@ The number of shards is [configurable](configuration) and controls the **granula
 
 ### Read vs Write Locks
 
-Each shard uses a `ReadWriteLock` from the ConcurrentUtilities package:
+Each shard supports concurrent readers or exclusive writers:
 
 - **Read lock** — multiple readers can hold it simultaneously (e.g., `S_GET`, `L_LEN`)
 - **Write lock** — exclusive access, no readers or other writers (e.g., `S_SET`, `L_POP`)
@@ -124,7 +137,7 @@ This is expensive but rare — and it's still better than a single global lock b
 
 ## Background Tasks
 
-Radish runs two background tasks using Julia's `@async`:
+Radish runs three background tasks using `Threads.@spawn` (each on its own OS thread):
 
 ### Async Cleaner (TTL Expiry)
 
@@ -149,6 +162,41 @@ The cleaner uses **per-shard locking** — it locks one shard at a time, checks 
 
 See the [Persistence](persistence) page for details. The syncer runs at a [configurable interval](configuration) (default: every 5 seconds), pops dirty changes, and writes them to shard-specific RDB files.
 
+### AOF Flusher
+
+When `aof_sync_ms > 0` (default: 1000ms), a third background task periodically flushes the AOF IOStream to disk. This batches fsync calls for better throughput while bounding the data-loss window.
+
+---
+
+## Batch Execution (Pipelining)
+
+When a client pipelines multiple commands (sends them without waiting for responses), the server detects buffered data and uses a **batch execution path**:
+
+1. All commands are parsed from the read buffer.
+2. Lock plans are pre-computed and merged — one combined lock acquisition instead of per-command acquire/release.
+3. Write shards subsume read shards on the same shard (write > read).
+4. All locks are acquired in sorted shard order (deadlock-free).
+5. AOF is written inside the lock critical section (guarantees AOF order == execution order).
+6. All commands execute under the combined lock.
+7. All responses are written in a single `write()` syscall.
+
+This optimization (OPTIM 3.2b) gives 2-7x throughput improvement for pipelined clients. Batch sizes of 50-500 commands give the best results.
+
+---
+
+## Graceful Shutdown
+
+When the server receives SIGINT (Ctrl+C) or SIGTERM (Docker stop), it performs a structured shutdown:
+
+1. **Close the listening socket** — stop accepting new connections.
+2. **Set the SHUTDOWN flag** — background tasks check this each cycle and exit.
+3. **Wait for background tasks** to finish their current cycle.
+4. **Acquire all write locks** — blocks until all client handlers release their locks.
+5. **Save final snapshot** under exclusive lock — no concurrent access possible.
+6. **Close and delete AOF** — snapshot is complete, AOF is redundant.
+
+This ensures no data corruption from concurrent access during the final snapshot.
+
 ---
 
 ## Comparing with Redis
@@ -156,7 +204,7 @@ See the [Persistence](persistence) page for details. The syncer runs at a [confi
 | Aspect | Redis | Radish |
 |---|---|---|
 | Threading | Single-threaded | Multi-threaded |
-| Synchronization | Not needed (single thread) | Sharded ReadWriteLocks |
+| Synchronization | Not needed (single thread) | Sharded locks (configurable: standard or fair) |
 | Deadlock prevention | N/A | Sorted lock acquisition |
 | Global operations | Instant (no contention) | Acquire all 256 locks |
 | TTL cleanup | Lazy + sampling | Lazy + sampling (same approach) |

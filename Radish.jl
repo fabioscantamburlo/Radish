@@ -24,8 +24,11 @@ include(joinpath(@__DIR__, "src", "store.jl"))
 # 6. Meta commands (depends on RadishStore)
 include(joinpath(@__DIR__, "src", "metacommands.jl"))
 
-# 7. Infrastructure
+# 7. Infrastructure — both lock implementations, selectable via config
+abstract type AbstractShardedLock end
+export AbstractShardedLock
 include(joinpath(@__DIR__, "src", "sharded_lock.jl"))
+include(joinpath(@__DIR__, "src", "simple_fair_sharded_lock.jl"))
 
 # 8. Dispatcher and networking
 include(joinpath(@__DIR__, "src", "dispatcher.jl"))
@@ -59,7 +62,7 @@ export RadishStore, RadishContext, store_haskey, store_keytype, store_delete!, s
         rlistkeys, check_empty)
 
 # Sharded lock exports
-export ShardedLock
+export ShardedLock, SimpleFairShardedLock, AbstractShardedLock, create_lock
 
 # Core definitions exports
 export ExecutionStatus, ExecuteResult, Command, ClientSession, AOFState, CommandDirect

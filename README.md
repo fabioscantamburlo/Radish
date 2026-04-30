@@ -20,10 +20,12 @@ See the full documentation here: [Radish Documentation](https://fabioscantamburl
 | Persistence | ✅ | Sharded RDB snapshots + AOF with crash recovery |
 | Transactions | ✅ | MULTI/EXEC/DISCARD with atomic execution |
 | Configuration | ✅ | YAML-based config for all tunable parameters |
-| Sharded Locking | ✅ | Configurable ReadWriteLocks for concurrent access |
+| Sharded Locking | ✅ | Configurable lock: standard (ReadWriteLock) or fair (write-preferring, starvation-free) |
 | TTL & Expiry | ✅ | Background cleaner with probabilistic sampling |
 | Docker Support | ✅ | Full Docker Compose setup with health checks |
 | Key Management | ✅ | EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE, RENAME, FLUSHDB |
+| Pipelining | ✅ | Server-side batch execution with combined locking |
+| Python Client | ✅ | RadishPy — full client library with pipelining support |
 
 ---
 
@@ -45,12 +47,12 @@ Every value is wrapped in a parametric `RadishElement{T}` carrying metadata (val
 
 ## Dependencies
 
-Only 4 external packages are used at runtime. Everything else — data structures, RESP protocol, dispatcher, persistence — is built from scratch.
+Only 3 external packages are used at runtime. Everything else — data structures, RESP protocol, dispatcher, persistence, fair lock — is built from scratch.
 
 | Package | Purpose |
 |---------|---------|
 | **JSON3** | Serialization of snapshot data to sharded `.rdb` files |
-| **ConcurrentUtilities** | `ReadWriteLock` for the sharded locking system |
+| **ConcurrentUtilities** | `ReadWriteLock` for the standard sharded lock (optional — the fair lock uses no external deps) |
 | **YAML** | Parses the `radish.yml` configuration file at startup |
 
 ---
@@ -76,6 +78,7 @@ background_tasks:
 
 concurrency:
   num_shards: 256
+  lock_type: "fair"         # "fair" (write-preferring, starvation-free) or "standard" (ReadWriteLock)
 
 ttl_cleanup:
   sampling_threshold: 100000
@@ -140,7 +143,7 @@ Radish runs fully in Docker. All commands go through `make`:
 
 ## Limitations
 
-- Radish is slow, very slow compared to Redis. Not that my idea was to compete with Redis nor to catch it. I am completely aware that Julia may not be the best language to do in-memory databases but, more realistically, my optimisation is not nearly the best possible.
+- Radish is slower than Redis, but reaches ~100k ops/s with pipelined Python clients — in the same order of magnitude for simple workloads. The gap widens under high concurrency and complex operations.
 
 - Radish has limitations in terms of scalability. It's not designed to be scaled out of a single machine. 
 

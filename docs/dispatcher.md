@@ -71,7 +71,8 @@ A pure function that looks at a command's name, key, and arguments and returns a
 struct LockPlan
     mode::Symbol         # :none, :read, :write
     scope::Symbol        # :none, :single, :multi, :all
-    keys::Vector{String} # keys to lock (empty for :none/:all)
+    key1::Union{String, Nothing}    # first key (single + multi)
+    key2::Union{String, Nothing}    # second key (multi only)
 end
 ```
 

@@ -102,7 +102,8 @@ function bench_oneshot(f::Function; warmup::Int=1, trials::Int=3)
 end
 
 """Run a concurrent benchmark K times, return median (per_op_ns, ops_per_sec)."""
-function bench_concurrent(f_setup::Function, f_worker::Function, num_workers::Int, ops_per_worker::Int; trials::Int=3)
+function bench_concurrent(f_setup::Function, f_worker::Function, num_workers::Int, ops_per_worker::Int;
+                          trials::Int=3, timeout_sec::Float64=60.0)
     samples = Float64[]
     for _ in 1:trials
         store_c, db_lock_c, tracker_c = f_setup()
@@ -116,8 +117,18 @@ function bench_concurrent(f_setup::Function, f_worker::Function, num_workers::In
                 put!(barrier, nothing)
             end
         end
-        for _ in 1:num_workers
-            take!(barrier)
+        deadline = time() + timeout_sec
+        completed = 0
+        while completed < num_workers && time() < deadline
+            if isready(barrier)
+                take!(barrier)
+                completed += 1
+            else
+                sleep(0.001)
+            end
+        end
+        if completed < num_workers
+            return (-1.0, -1.0)
         end
         elapsed = Float64(time_ns() - t0)
         push!(samples, elapsed)
@@ -138,7 +149,11 @@ function report(name::String, n::Int, total_ns::Float64, per_op_ns::Float64)
 end
 
 function report_throughput(name::String, per_op_ns::Float64, ops_per_sec::Float64, num_workers::Int, ops_per_worker::Int)
-    println("  $(rpad(name, 50)) $(lpad(fmt_time(per_op_ns), 12))/op  $(lpad(fmt_num(round(Int, ops_per_sec)), 14)) ops/s  ($(fmt_num(num_workers)) workers × $(fmt_num(ops_per_worker)) ops)")
+    if per_op_ns < 0
+        println("  $(rpad(name, 50))     *** TIMEOUT ***")
+    else
+        println("  $(rpad(name, 50)) $(lpad(fmt_time(per_op_ns), 12))/op  $(lpad(fmt_num(round(Int, ops_per_sec)), 14)) ops/s  ($(fmt_num(num_workers)) workers × $(fmt_num(ops_per_worker)) ops)")
+    end
 end
 
 # =============================================================================
@@ -148,7 +163,7 @@ end
 """Create a fresh store + lock + tracker + session for benchmarking."""
 function fresh_system(; num_keys::Int=10_000, ttl_keys::Int=1_000, num_shards::Int=256)
     store = RadishStore()
-    db_lock = ShardedLock(num_shards)
+    db_lock = create_lock(CONFIG[])
     tracker = DirtyTracker()
     session = ClientSession()
 
@@ -193,6 +208,7 @@ function run_benchmarks()
     println()
     println("  Iterations: $(fmt_num(N)) (light), $(fmt_num(N_HEAVY)) (heavy)")
     println("  Threads: $(nthreads())")
+    println("  Lock type: $(CONFIG[].lock_type)")
     println("  Date: $(now())")
     bench_id = get(ENV, "BENCH_ID", "unnamed")
     println("  Bench ID: $(bench_id)")
@@ -477,150 +493,7 @@ function run_benchmarks()
     println()
 
     # =========================================================================
-    # 3. Concurrent throughput (scaling test)
-    # =========================================================================
-    println("── Concurrent Throughput ───────────────────────────────────────────────────")
-
-    available_threads = nthreads()
-    worker_counts = filter(w -> w <= available_threads, [1, 2, 4, 8])
-    ops_per_worker = 50_000
-
-    # Read-heavy workload (90% reads, 10% writes)
-    for num_workers in worker_counts
-        per_op_ns, ops_sec = bench_concurrent(
-            () -> begin s, l, t, _ = fresh_system(); (s, l, t) end,
-            (store_c, db_lock_c, tracker_c, s, n) -> begin
-                for i in 1:n
-                    key = "str_$(rand(1:10_000))"
-                    cmd = rand() < 0.9 ? Command("S_GET", key, String[]) : Command("S_INCR", key, String[])
-                    execute!(store_c, db_lock_c, cmd, s; tracker=tracker_c)
-                end
-            end,
-            num_workers, ops_per_worker
-        )
-        report_throughput("read-heavy 90/10 ($(num_workers)w)", per_op_ns, ops_sec, num_workers, ops_per_worker)
-    end
-
-    println()
-
-    # Write-heavy workload (30% reads, 70% writes)
-    for num_workers in worker_counts
-        per_op_ns, ops_sec = bench_concurrent(
-            () -> begin s, l, t, _ = fresh_system(); (s, l, t) end,
-            (store_c, db_lock_c, tracker_c, s, n) -> begin
-                for i in 1:n
-                    key = "str_$(rand(1:10_000))"
-                    cmd = rand() < 0.3 ? Command("S_GET", key, String[]) : Command("S_INCR", key, String[])
-                    execute!(store_c, db_lock_c, cmd, s; tracker=tracker_c)
-                end
-            end,
-            num_workers, ops_per_worker
-        )
-        report_throughput("write-heavy 30/70 ($(num_workers)w)", per_op_ns, ops_sec, num_workers, ops_per_worker)
-    end
-
-    println()
-
-    # Mixed command workload (all command types)
-    for num_workers in worker_counts
-        per_op_ns, ops_sec = bench_concurrent(
-            () -> begin s, l, t, _ = fresh_system(); (s, l, t) end,
-            (store_c, db_lock_c, tracker_c, s, n) -> begin
-                for i in 1:n
-                    r = rand()
-                    if r < 0.30
-                        cmd = Command("S_GET", "str_$(rand(1:10_000))", String[])
-                    elseif r < 0.50
-                        cmd = Command("S_INCR", "str_$(rand(1:10_000))", String[])
-                    elseif r < 0.60
-                        cmd = Command("EXISTS", "str_$(rand(1:10_000))", String[])
-                    elseif r < 0.70
-                        cmd = Command("TYPE", "str_$(rand(1:10_000))", String[])
-                    elseif r < 0.75
-                        cmd = Command("TTL", "str_ttl_$(rand(1:1_000))", String[])
-                    elseif r < 0.80
-                        cmd = Command("L_LEN", "list_$(rand(1:100))", String[])
-                    elseif r < 0.85
-                        cmd = Command("L_GET", "list_$(rand(1:100))", String[])
-                    elseif r < 0.90
-                        cmd = Command("PING", nothing, String[])
-                    elseif r < 0.95
-                        cmd = Command("S_LEN", "str_$(rand(1:10_000))", String[])
-                    else
-                        cmd = Command("S_GETRANGE", "str_$(rand(1:10_000))", String["1", "3"])
-                    end
-                    execute!(store_c, db_lock_c, cmd, s; tracker=tracker_c)
-                end
-            end,
-            num_workers, ops_per_worker
-        )
-        report_throughput("mixed all-commands ($(num_workers)w)", per_op_ns, ops_sec, num_workers, ops_per_worker)
-    end
-
-    println()
-
-    # Hot-key contention: all workers hammer the SAME key (OPTIM 4.2)
-    # This is the worst case — all workers serialize on one shard's write lock.
-    # Reveals the real cost of lock contention vs the spread-across-shards benchmarks above.
-    # Uses fewer ops (10k) because contention makes these much slower.
-    println("── Hot-Key Contention ──────────────────────────────────────────────────────")
-
-    hot_ops = 10_000
-
-    # All-write on single key (worst case: pure serialization)
-    for num_workers in worker_counts
-        per_op_ns, ops_sec = bench_concurrent(
-            () -> begin
-                s = RadishStore()
-                store_set!(s, "hot_counter", RadishElement("0", nothing, now(), :string))
-                l = ShardedLock(256)
-                t = DirtyTracker()
-                (s, l, t)
-            end,
-            (store_c, db_lock_c, tracker_c, sess, n) -> begin
-                cmd = Command("S_INCR", "hot_counter", String[])
-                for _ in 1:n
-                    execute!(store_c, db_lock_c, cmd, sess; tracker=tracker_c)
-                end
-            end,
-            num_workers, hot_ops
-        )
-        report_throughput("hot-key write ($(num_workers)w)", per_op_ns, ops_sec, num_workers, hot_ops)
-    end
-
-    println()
-
-    # 90/10 read/write on single key (readers can overlap, writers serialize)
-    # NOTE: ReadWriteLock from ConcurrentUtilities starves at 2+ workers on a
-    # single shard with mixed r/w. Capped at 1w to document the baseline.
-    # See OPTIM 2.23 for details. This benchmark will unblock when we swap to
-    # a fair lock implementation.
-    for num_workers in [1]
-        per_op_ns, ops_sec = bench_concurrent(
-            () -> begin
-                s = RadishStore()
-                store_set!(s, "hot_key", RadishElement("0", nothing, now(), :string))
-                l = ShardedLock(256)
-                t = DirtyTracker()
-                (s, l, t)
-            end,
-            (store_c, db_lock_c, tracker_c, sess, n) -> begin
-                cmd_r = Command("S_GET", "hot_key", String[])
-                cmd_w = Command("S_INCR", "hot_key", String[])
-                for _ in 1:n
-                    cmd = rand() < 0.9 ? cmd_r : cmd_w
-                    execute!(store_c, db_lock_c, cmd, sess; tracker=tracker_c)
-                end
-            end,
-            num_workers, hot_ops
-        )
-        report_throughput("hot-key 90/10 r/w ($(num_workers)w)", per_op_ns, ops_sec, num_workers, hot_ops)
-    end
-
-    println()
-
-    # =========================================================================
-    # 4. AOF throughput
+    # 3. AOF throughput
     # =========================================================================
     println("── AOF Throughput ──────────────────────────────────────────────────────────")
 
@@ -652,7 +525,7 @@ function run_benchmarks()
     snap_dir = mktempdir()
     snap_cfg = RadishConfig(
         "127.0.0.1", 9000, snap_dir, "snapshots", "aof", "radish.aof",
-        5.0, 0.1, 256, 100_000, 0.10, 50, 1000, 5, 1000
+        5.0, 0.1, 256, 100_000, 0.10, 50, 1000, 5, 1000, "fair"
     )
     old_cfg = CONFIG[]
     CONFIG[] = snap_cfg

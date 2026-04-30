@@ -40,11 +40,11 @@ fully-compiled code. Median of trials filters noise.
 
 ### Pattern B — Multi-threaded scaling benchmarks
 
-Used in: `bench_fair_lock.jl`, concurrent throughput sections in `bench_system.jl`
+Used in: concurrent throughput sections in `bench_system.jl`
 
 ```julia
 # NAMED worker functions — compiled once, specialize on argument types
-function worker_read_heavy(lock::FairShardedLock, ops::Int)
+function worker_read_heavy(lock::ShardedLock, ops::Int)
     for _ in 1:ops
         key = "k_$(rand(1:10_000))"
         s = shard_id(lock, key)
@@ -56,7 +56,7 @@ end
 # SHARED WARMUP — call each worker function once with real types
 # This triggers JIT compilation BEFORE the measurement loop
 function warmup_all(warmup_ops::Int=5_000)
-    lock = FairShardedLock(256)
+    lock = ShardedLock(256)
     worker_read_heavy(lock, warmup_ops)  # compiles worker_read_heavy
     # ... warm up every worker function you'll measure ...
 
@@ -93,7 +93,7 @@ end
 # Call site:
 warmup_all()                                          # compile everything first
 for nw in [1, 2, 4, 8, 16, 32, 64, 128, 256, 1024]
-    lock = FairShardedLock(256)
+    lock = ShardedLock(256)
     per_op, ops_sec = bench_concurrent(worker_read_heavy, (lock,), nw, 10_000)
     report("$nw workers", per_op, ops_sec)
 end
@@ -174,5 +174,4 @@ end
 | `bench_system.jl` — dispatcher/command sections | A | Same helper |
 | `bench_system.jl` — concurrent throughput | B (multi-threaded) | `bench_concurrent()` helper |
 | `bench_system.jl` — hot-key contention | B | Named worker pattern |
-| `bench_fair_lock.jl` | B | Named worker + shared warmup |
 | `bench_net.py` | N/A (Python) | Uses `median_of(trials)` pattern |

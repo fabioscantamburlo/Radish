@@ -34,6 +34,7 @@ background_tasks:
 # Both systems use the same hash function, so they must use the same count.
 concurrency:
   num_shards: 256           # Number of lock/snapshot shard partitions
+  lock_type: "fair"         # Lock implementation: "standard" (ReadWriteLock) or "fair" (SimpleFairShardedLock)
 
 # -----------------------------------------------------------------------------
 # TTL Cleanup

@@ -40,13 +40,13 @@ graph TD
 
 ### Per-Client Handling
 
-Each client gets its own `@async` task:
+Each client gets its own `Threads.@spawn` task (on a separate OS thread):
 
 ```julia
 while true
     client = accept(server)
     client_counter += 1
-    @async handle_client(client, ctx, db_lock, tracker, aof, client_counter)
+    @spawn handle_client(client, store, db_lock, tracker, aof, client_counter)
 end
 ```
 
@@ -55,31 +55,10 @@ The `handle_client` function:
 1. **Sends a welcome message** — `+Welcome to Radish Server\r\n`
 2. **Creates a `ClientSession`** — tracks transaction state per client
 3. **Enters the read loop** — reads RESP commands, dispatches, writes responses
-4. **Handles disconnection** — `EOFError`, broken pipes, `QUIT`/`EXIT` commands
+4. **Detects pipelining** — if multiple commands are buffered, uses batch execution with combined locking
+5. **Handles disconnection** — `EOFError`, broken pipes, `QUIT`/`EXIT` commands
 
-```julia
-function handle_client(sock, ctx, db_lock, tracker, aof, client_id)
-    write(sock, "+Welcome to Radish Server\r\n")
-    session = ClientSession()
-
-    while isopen(sock)
-        cmd = read_resp_command(sock)
-
-        # AOF Write-Ahead Logging (write commands only, before execution)
-        if !(cmd.name in AOF_EXCLUDED_OPS) && !session.in_transaction
-            aof_append!(aof, cmd)
-        end
-
-        # Log transaction commands to AOF when EXEC is called
-        if cmd.name == "EXEC" && session.in_transaction
-            # batch-write all queued write commands
-        end
-
-        result = execute!(ctx, db_lock, cmd, session; tracker=tracker)
-        write_resp_response(sock, result)
-    end
-end
-```
+AOF writes happen inside the lock critical section (inside `execute!` and `execute_batch!`), guaranteeing that AOF order matches execution order.
 
 ### Connection Resilience
 
@@ -94,12 +73,15 @@ The server gracefully handles common disconnection scenarios:
 
 ### Graceful Shutdown
 
-On `Ctrl+C` (InterruptException), the server:
+On `Ctrl+C` (InterruptException) or SIGTERM (Docker stop), the server:
 
-1. **Saves a full snapshot** — captures all current state to RDB
-2. **Deletes the AOF** — unnecessary since snapshot is complete
-3. **Closes the TCP server** — stops accepting new connections
-4. **Prints goodbye** — `Radish server stopped. Goodbye!`
+1. **Closes the listening socket** — stops accepting new connections
+2. **Signals background tasks** to stop via an atomic SHUTDOWN flag
+3. **Waits for background tasks** to finish their current cycle
+4. **Acquires all write locks** — blocks until all client handlers release
+5. **Saves a full snapshot** under exclusive lock — no concurrent access
+6. **Deletes the AOF** — snapshot is complete
+7. **Prints goodbye** — `Radish server stopped. Goodbye!`
 
 ---
 

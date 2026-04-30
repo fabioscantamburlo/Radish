@@ -27,7 +27,7 @@ Radish deliberately keeps its dependency footprint small — most of the heavy l
 | **Sockets** | stdlib | TCP server and client — `listen()`, `accept()`, `connect()` for all network I/O |
 | **Logging** | stdlib | Structured `@info`, `@warn`, `@debug` logging throughout the server |
 | **JSON3** | external | Serialization of snapshot data to sharded `.rdb` files (one JSON object per key) |
-| **ConcurrentUtilities** | external | Provides `ReadWriteLock` — the foundation of the [sharded locking](concurrency) system |
+| **ConcurrentUtilities** | external | Provides `ReadWriteLock` — used by the standard lock option. The fair lock (default) has no external dependencies |
 | **YAML** | external | Parses the [`radish.yml`](configuration) configuration file at startup |
 | **JuliaFormatter** | dev only | Code formatting for development — not used at runtime |
 
@@ -85,10 +85,12 @@ Eventually, Julia turned out to be an interesting choice for a project like this
 | [Persistence](persistence) | ✅ | Sharded RDB snapshots + AOF with crash recovery |
 | [Transactions](transactions) | ✅ | MULTI/EXEC/DISCARD with atomic execution |
 | [Configuration](configuration) | ✅ | YAML-based config for all tunable parameters |
-| [Sharded Locking](concurrency) | ✅ | Configurable ReadWriteLocks for concurrent access |
+| [Sharded Locking](concurrency) | ✅ | Configurable lock: standard or fair (write-preferring, starvation-free) |
 | [TTL & Expiry](concurrency) | ✅ | Background cleaner with probabilistic sampling |
 | [Docker Support](docker) | ✅ | Full Docker Compose setup with health checks |
 | Key Management | ✅ | EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE, RENAME, FLUSHDB |
+| Pipelining | ✅ | Server-side batch execution with combined locking |
+| [Python Client](client_implementation_guide) | ✅ | RadishPy — full client library with pipelining |
 
 More data structures are coming at some point, I had the feeling that resolving other issues was more valuable than adding overstudied data-types. Still I think that implementing those from scratch is quite fun.
 

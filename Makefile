@@ -105,6 +105,20 @@ bench-system:       ## System benchmarks, Level 2 (native, $(THREADS) threads)
 	echo "Running system benchmarks → $$OUTFILE"; \
 	BENCH_ID="$$BENCH_ID" julia --threads=$(THREADS) --project=. benchmarks/bench_system.jl | tee "$$OUTFILE"
 
+bench-hotkey:       ## Hot-key contention benchmarks, 1→200k workers (native, $(THREADS) threads)
+	@mkdir -p $(RESULTS_DIR)
+	@BENCH_ID="$${BENCH_ID:-hotkey_$$(date +%Y%m%d_%H%M%S)}"; \
+	OUTFILE="$(RESULTS_DIR)/$${BENCH_ID}.txt"; \
+	echo "Running hot-key benchmarks → $$OUTFILE"; \
+	BENCH_ID="$$BENCH_ID" julia --threads=$(THREADS) --project=. benchmarks/bench_system_hotkey.jl | tee "$$OUTFILE"
+
+bench-read-scaling: ## Read scaling diagnostic, isolates scheduler/lock/store (native, $(THREADS) threads)
+	@mkdir -p $(RESULTS_DIR)
+	@BENCH_ID="$${BENCH_ID:-readscale_$$(date +%Y%m%d_%H%M%S)}"; \
+	OUTFILE="$(RESULTS_DIR)/$${BENCH_ID}.txt"; \
+	echo "Running read scaling diagnostic → $$OUTFILE"; \
+	BENCH_ID="$$BENCH_ID" julia --threads=$(THREADS) --project=. benchmarks/bench_read_scaling.jl | tee "$$OUTFILE"
+
 bench-all:          ## All benchmarks: Level 0-3 native, grouped in folder
 	@TS=$$(date +%Y%m%d_%H%M%S); \
 	RUN_DIR="$(RESULTS_DIR)/native_$$TS"; \
@@ -273,6 +287,8 @@ help:
 	@printf "  \033[1m── Benchmarks ──────────────────────────────────────────────────────\033[0m\n"
 	@printf "  \033[36mbench\033[0m                  Internal benchmarks Level 0/1 (native)\n"
 	@printf "  \033[36mbench-system\033[0m           System benchmarks Level 2 (native)\n"
+	@printf "  \033[36mbench-hotkey\033[0m           Hot-key contention 1→200k workers (native)\n"
+	@printf "  \033[36mbench-read-scaling\033[0m     Read scaling diagnostic (native)\n"
 	@printf "  \033[36mbench-all\033[0m              All benchmarks Level 0-3 (native, auto server)\n"
 	@printf "                         \033[2m→ benchmarks/results/native_<timestamp>/\033[0m\n"
 	@printf "  \033[36mdocker-bench-all\033[0m       All benchmarks Level 0-3 (Docker)\n"
@@ -307,7 +323,7 @@ help:
         client client-native \
         simulator simload simrun simload-heavy simrun-heavy \
         test smoke-test docker-test docker-smoke-test \
-        bench bench-system bench-all \
+        bench bench-system bench-hotkey bench-read-scaling bench-all \
         docker-bench-all \
         bench-diff \
         docs docs-bg docs-stop docs-logs \

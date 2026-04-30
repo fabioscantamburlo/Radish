@@ -141,7 +141,7 @@ const LL_PALETTE = Dict{String, Tuple}(
 | `L_DEQUEUE` | Removes and returns the head element; deletes the key if the list becomes empty |
 | `L_TRIMR` | Keeps only the first N elements; deletes the key if the list becomes empty |
 | `L_TRIML` | Keeps only the last N elements; deletes the key if the list becomes empty |
-| `L_MOVE` | Moves all elements of the source list to the tail of the destination list, consuming the source key |
+| `L_MOVE` | Appends key2's elements onto key1's tail; key2 is deleted. Surviving key is key1. |
 
 ---
 

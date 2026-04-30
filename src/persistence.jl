@@ -374,7 +374,7 @@ function aof_close!(aof::AOFState)
 end
 
 """Replay AOF commands into the store on startup."""
-function replay_aof!(store::RadishStore, db_lock::ShardedLock, aof_path_str::String=aof_path(CONFIG[]))
+function replay_aof!(store::RadishStore, db_lock::AbstractShardedLock, aof_path_str::String=aof_path(CONFIG[]))
     if !isfile(aof_path_str) || filesize(aof_path_str) == 0
         @info "No AOF to replay"
         return 0

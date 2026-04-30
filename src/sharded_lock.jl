@@ -2,7 +2,7 @@ using ConcurrentUtilities: ReadWriteLock, readlock, readunlock
 
 export ShardedLock, shard_id, acquire_read!, acquire_write!, release_read!, release_write!
 
-struct ShardedLock
+struct ShardedLock <: AbstractShardedLock
     shards::Vector{ReadWriteLock}
     num_shards::Int
 end
@@ -18,11 +18,21 @@ function acquire_read!(lock::ShardedLock, key::String)::Int
     return id
 end
 
+# Shard-ID read (used by execute_batch!, background tasks)
+function acquire_read!(lock::ShardedLock, id::Int)
+    readlock(lock.shards[id])
+end
+
 # Single key write — returns shard ID directly (no Vector allocation)
 function acquire_write!(lock::ShardedLock, key::String)::Int
     id = shard_id(lock, key)
     Base.lock(lock.shards[id])
     return id
+end
+
+# Shard-ID write (used by execute_batch!, background tasks)
+function acquire_write!(lock::ShardedLock, id::Int)
+    Base.lock(lock.shards[id])
 end
 
 # Multi-key read (ordered)

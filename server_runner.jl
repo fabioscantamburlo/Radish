@@ -19,6 +19,13 @@ end
 include("Radish.jl")
 using .Radish
 
+# Trap SIGTERM (sent by Docker on container stop) and convert to InterruptException
+# so the graceful shutdown sequence in start_server() runs.
+ccall(:signal, Ptr{Cvoid}, (Cint, Ptr{Cvoid}), 15, @cfunction((signum::Cint) -> begin
+    Base.exit_on_sigint(false)
+    ccall(:uv_async_send, Cint, (Ptr{Cvoid},), Base.SIGINT_HANDLE)
+end, Cvoid, (Cint,)))
+
 # Load configuration (optional custom path as 3rd argument)
 config_path = length(ARGS) >= 3 ? ARGS[3] : Radish.DEFAULT_CONFIG_PATH
 init_config!(config_path)

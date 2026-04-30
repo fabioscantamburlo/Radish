@@ -33,6 +33,7 @@ background_tasks:
 
 concurrency:
   num_shards: 256
+  lock_type: "fair"
 
 ttl_cleanup:
   sampling_threshold: 100000
@@ -74,6 +75,7 @@ data_limits:
 | Parameter | Default | Description |
 |-----------|---------|-------------|
 | `num_shards` | `256` | Number of partitions for both the [ShardedLock](concurrency) and the [snapshot shard files](persistence). Both systems use the same hash function, so a single value controls both |
+| `lock_type` | `"fair"` | Lock implementation: `"fair"` (write-preferring, starvation-free) or `"standard"` (ConcurrentUtilities ReadWriteLock). See [Concurrency](concurrency) for details |
 
 ### TTL Cleanup
 
@@ -108,6 +110,10 @@ struct RadishConfig
     sampling_threshold::Int
     sample_percentage::Float64
     list_display_limit::Int
+    pipeline_batch::Int
+    pipeline_flush_ms::Int
+    aof_sync_ms::Int
+    lock_type::String
 end
 ```
 

@@ -87,11 +87,15 @@ RADISH-CLI> L_POP stack        # → frame2 (last in, first out)
 
 ## List Merging
 
-`L_MOVE` is a powerful operation that moves one list to the end of another, consuming the source list:
+`L_MOVE` appends the second list's elements onto the first list's tail, then deletes the second key. The surviving key is the first argument.
 
 ```
+RADISH-CLI> L_PREPEND list1 a
+RADISH-CLI> L_PREPEND list2 b
 RADISH-CLI> L_MOVE list1 list2
 ```
+
+After this, `list1` contains `[a, b]` and `list2` no longer exists.
 
 This is an O(1) operation — it just relinks the tail of `list1` to the head of `list2`. The key for `list2` is deleted after the operation.
 

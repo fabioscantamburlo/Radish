@@ -40,6 +40,9 @@ struct RadishConfig
 
     # AOF sync interval in milliseconds: 0 = flush every command, N>0 = flush every N ms
     aof_sync_ms::Int
+
+    # Lock implementation: "standard" (ConcurrentUtilities.ReadWriteLock) or "fair" (SimpleFairShardedLock)
+    lock_type::String
 end
 
 """Derived paths from the config."""
@@ -100,6 +103,8 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
         get(cl, "pipeline_flush_ms", 5),
         # AOF sync interval (ms): 0 = every command, N>0 = every N ms
         get(pers, "aof_sync_ms", 1000),
+        # Lock type: "standard" or "fair"
+        get(conc, "lock_type", "fair"),
     )
 end
 
@@ -109,6 +114,18 @@ const CONFIG = Ref{RadishConfig}()
 function init_config!(path::String=DEFAULT_CONFIG_PATH)
     CONFIG[] = load_config(path)
     cfg = CONFIG[]
-    @info "Radish config loaded" host=cfg.host port=cfg.port shards=cfg.num_shards sync_interval=cfg.sync_interval_sec
+    @info "Radish config loaded" host=cfg.host port=cfg.port shards=cfg.num_shards lock_type=cfg.lock_type sync_interval=cfg.sync_interval_sec
     return cfg
+end
+
+"""Create the configured lock implementation."""
+function create_lock(cfg::RadishConfig)::AbstractShardedLock
+    if cfg.lock_type == "standard"
+        return ShardedLock(cfg.num_shards)
+    elseif cfg.lock_type == "fair"
+        return SimpleFairShardedLock(cfg.num_shards)
+    else
+        @warn "Unknown lock_type '$(cfg.lock_type)', falling back to fair"
+        return SimpleFairShardedLock(cfg.num_shards)
+    end
 end

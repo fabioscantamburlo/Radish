@@ -135,6 +135,8 @@ end
 
 Every write is wrapped in `lock(aof.lock) do ... end`, ensuring commands are logged atomically. Transactions use `aof_append_batch!` to write all commands in a single locked section.
 
+**AOF writes happen inside the shard lock critical section** — this guarantees that AOF order matches execution order. If two clients write to the same key, the one that acquires the shard lock first also writes to AOF first.
+
 ### AOF Truncation
 
 After each successful snapshot sync, the AOF is truncated (emptied). This prevents unbounded growth — the snapshot already contains all the data, so the AOF only needs to capture writes *since the last snapshot*.
@@ -160,7 +162,7 @@ graph TD
 Key design decisions:
 - **Read locks only** — the syncer reads the current state without blocking writes (the data just needs to be consistent at snapshot time)
 - **Affected shards only** — if 3 out of 256 shards are dirty, only those 3 shards' locks are acquired
-- **Non-blocking** — the syncer runs in its own `@async` task, never blocking client operations
+- **Non-blocking** — the syncer runs in its own `Threads.@spawn` task on a separate OS thread, never blocking client operations
 
 ---
 
@@ -182,10 +184,13 @@ This guarantees that the database state after recovery is identical to what it w
 
 ## Graceful Shutdown
 
-When the server receives `Ctrl+C`, it performs a full snapshot before exiting:
+When the server receives SIGINT (Ctrl+C) or SIGTERM (Docker stop), it performs a structured shutdown:
 
-```julia
-save_full_snapshot!(store, tracker)
-```
+1. **Close the listening socket** — stop accepting new connections
+2. **Signal background tasks** — set the SHUTDOWN atomic flag; cleaner, syncer, and AOF flusher exit their loops
+3. **Wait for background tasks** to finish their current cycle
+4. **Acquire all write locks** — blocks until every client handler releases its locks
+5. **Save a full snapshot** under exclusive lock — no concurrent access possible
+6. **Delete the AOF** — snapshot is complete, AOF is redundant
 
-This is a **full** snapshot (not incremental), ensuring that all data is captured. The AOF is then deleted since it's no longer needed.
+This ensures no data corruption from concurrent access during the final snapshot. The SIGTERM handler (in `server_runner.jl`) converts Docker's stop signal into Julia's `InterruptException` so the same graceful path runs in containers.

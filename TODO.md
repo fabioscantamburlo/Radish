@@ -161,10 +161,11 @@
 - [ ] Sorted Sets (Z_ADD, Z_RANGE, Z_RANK, Z_SCORE, Z_REM)
 
 ### Python Client
-- [ ] RESP encoder/decoder
-- [ ] Connection management
-- [ ] All string and list commands
-- [ ] Transaction support
+- ✅ RESP encoder/decoder
+- ✅ Connection management
+- ✅ All string and list commands
+- ✅ Transaction support
+- ✅ Pipelining support
 
 ### Observability
 - [ ] Metrics (commands processed, clients, memory)
@@ -173,6 +174,7 @@
 - [ ] Slow query logging (>100ms)
 
 ### Performance
+- ✅ Benchmarking suite (internal, system, hot-key, read-scaling, network)
+- ✅ Pipelining / batch command processing
+- [ ] Connection pooling (server-side)
 - [ ] Benchmarking suite vs Redis
-- [ ] Connection pooling
-- [ ] Batch command processing
