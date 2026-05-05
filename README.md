@@ -83,9 +83,6 @@ concurrency:
 ttl_cleanup:
   sampling_threshold: 100000
   sample_percentage: 0.10
-
-data_limits:
-  list_display_limit: 50
 ```
 
 Edit `radish.yml` to adapt Radish to your use-case. CLI arguments for host/port override the config file values. You can also pass a custom config path as the third argument:

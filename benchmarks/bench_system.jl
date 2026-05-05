@@ -525,7 +525,7 @@ function run_benchmarks()
     snap_dir = mktempdir()
     snap_cfg = RadishConfig(
         "127.0.0.1", 9000, snap_dir, "snapshots", "aof", "radish.aof",
-        5.0, 0.1, 256, 100_000, 0.10, 50, 1000, 5, 1000, "fair"
+        5.0, 0.1, 256, 100_000, 0.10, 1000, 5, 1000, "fair"
     )
     old_cfg = CONFIG[]
     CONFIG[] = snap_cfg

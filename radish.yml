@@ -44,12 +44,6 @@ ttl_cleanup:
   sample_percentage: 0.10     # Fraction of keys to sample when above threshold
 
 # -----------------------------------------------------------------------------
-# Data Limits
-# -----------------------------------------------------------------------------
-data_limits:
-  list_display_limit: 50     # Max elements returned by L_GET (0 = unlimited)
-
-# -----------------------------------------------------------------------------
 # Client Defaults
 # -----------------------------------------------------------------------------
 # Recommended defaults for clients connecting to this server.

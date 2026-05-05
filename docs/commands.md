@@ -102,7 +102,7 @@ All list commands are prefixed with `L_`. The key must hold a list value; using 
 | `L_ADD` | `L_ADD <key> <value>` | Create a new list (errors if key exists) | `:1` |
 | `L_PREPEND` | `L_PREPEND <key> <value>` | Add `value` to the head; creates the list if it does not exist | `:1` |
 | `L_APPEND` | `L_APPEND <key> <value>` | Add `value` to the tail; creates the list if it does not exist | `:1` |
-| `L_GET` | `L_GET <key>` | Return up to the first 50 elements (see [List Display Limit](limitations#list-display-limit)) | Array |
+| `L_GET` | `L_GET <key>` | Return all elements of the list | Array |
 | `L_RANGE` | `L_RANGE <key> <start> <end>` | Return elements from `start` to `end` index | Array |
 | `L_LEN` | `L_LEN <key>` | Get the number of elements in the list | Integer |
 | `L_POP` | `L_POP <key>` | Remove and return the tail element | Element or `nil` |

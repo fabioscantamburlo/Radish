@@ -276,12 +276,9 @@ function _traverse_linked_list_forward(list::DLinkedStartEnd)
 end
 
 # TODO: Change limit to 0 for real usecases
-"""get DLinkedStartEnd values by building it forward with a predetermined limit of 50 for vis reasons
-"""
+"""Get all elements from a DLinkedStartEnd as a Vector{String}."""
 function _lget(list::DLinkedStartEnd)
-    limit = CONFIG[].list_display_limit
-    return_value = _compose_linked_list_forward(list, limit)
-    return return_value
+    return _compose_linked_list_forward(list, list.len)
 end
 
 """Get DLinkedStartEnd len by accessing the attribute len

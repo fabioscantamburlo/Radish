@@ -439,7 +439,7 @@ RESP types: `+` = Simple String, `:` = Integer, `$` = Bulk String, `$-1` = Null,
 - Same behavior as L_PREPEND (appends to tail instead of head).
 
 **L_GET \<key\>**
-- Key exists: `*N\r\n<bulk strings>` → array of strings (first 50 elements)
+- Key exists: `*N\r\n<bulk strings>` → array of strings (all elements)
   - Example: `["a", "b", "c"]`
   - Empty list (shouldn't happen — auto-deleted): `*0\r\n` → `[]`
 - Key missing or expired: `$-1\r\n` → `None` (nil)
@@ -738,7 +738,6 @@ Default server settings (from `radish.yml`):
 | `network.port` | `9000` | Listen port |
 | `concurrency.num_shards` | `256` | Lock partitions |
 | `concurrency.lock_type` | `"fair"` | `"fair"` or `"standard"` |
-| `data_limits.list_display_limit` | `50` | Max elements returned by `L_GET` |
 
 ### Starting the Server
 

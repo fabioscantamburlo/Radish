@@ -19,7 +19,7 @@ using .Radish: SUCCESS, KEY_NOT_FOUND, ERROR
 # Suppress @warn/@debug from Radish during tests (keeps @error visible)
 global_logger(ConsoleLogger(stderr, Logging.Error))
 
-# Initialize config (needed by _lget which reads CONFIG[].list_display_limit)
+# Initialize config (needed by persistence and other subsystems)
 init_config!()
 
 # Helper: create a string RadishElement (always String-typed)

@@ -340,8 +340,6 @@ function start_server(host::String=CONFIG[].host, port::Int=CONFIG[].port)
     println("  ├── TTL Cleanup")
     println("  │   ├── sampling threshold: $(cfg.sampling_threshold) keys")
     println("  │   └── sample percentage: $(Int(cfg.sample_percentage * 100))%")
-    println("  └── Data Limits")
-    println("      └── list display limit: $(cfg.list_display_limit)")
     println()
     println("  Press Ctrl+C to stop")
 

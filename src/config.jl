@@ -31,9 +31,6 @@ struct RadishConfig
     sampling_threshold::Int
     sample_percentage::Float64
 
-    # Data limits
-    list_display_limit::Int
-
     # Client defaults
     pipeline_batch::Int
     pipeline_flush_ms::Int
@@ -71,7 +68,6 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
     bg = get(raw, "background_tasks", Dict())
     conc = get(raw, "concurrency", Dict())
     ttl = get(raw, "ttl_cleanup", Dict())
-    dl = get(raw, "data_limits", Dict())
     cl = get(raw, "client", Dict())
 
     # Resolve num_shards with backward compatibility
@@ -96,8 +92,6 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
         # TTL cleanup
         get(ttl, "sampling_threshold", 100_000),
         Float64(get(ttl, "sample_percentage", 0.10)),
-        # Data limits
-        get(dl, "list_display_limit", 50),
         # Client defaults
         get(cl, "pipeline_batch", 1000),
         get(cl, "pipeline_flush_ms", 5),
