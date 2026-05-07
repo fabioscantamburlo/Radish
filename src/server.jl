@@ -106,10 +106,17 @@ function async_cleaner(store::RadishStore, db_lock::AbstractShardedLock, tracker
         try
             cfg = CONFIG[]
 
+            # Collect TTL keys — iteration may race with concurrent writes.
+            # Wrap in try/catch to handle UndefRefError from Dict rehashing.
             ttl_keys = Tuple{String, Symbol}[]
             for (sym, dict) in store_typed_dicts(store)
-                for (key, elem) in dict
-                    elem.expires_at !== nothing && push!(ttl_keys, (key, sym))
+                try
+                    for (key, elem) in dict
+                        elem.expires_at !== nothing && push!(ttl_keys, (key, sym))
+                    end
+                catch e
+                    isa(e, UndefRefError) && continue  # Dict rehashed mid-iteration — skip this type
+                    rethrow()
                 end
             end
 
