@@ -270,6 +270,12 @@ def main():
         send_resp(sock, "S_SET", f"str_{i}", f"value_{i}")
         read_resp(sock)
     print(f"  Loaded {fmt_num(NUM_KEYS)} string keys")
+    # Pre-populate sets (each with 5 members)
+    for i in range(1, NUM_KEYS // 10 + 1):
+        for j in range(1, 6):
+            send_resp(sock, "SET_ADD", f"set_{i}", f"member_{j}")
+            read_resp(sock)
+    print(f"  Loaded {fmt_num(NUM_KEYS // 10)} set keys (5 members each)")
     send_resp(sock, "QUIT")
     read_resp(sock)
     sock.close()
@@ -304,6 +310,23 @@ def main():
     elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, ping_cmds, OPS_PER_BENCH), s))
                         (connect())[0])
     report("PING (pure round-trip)", OPS_PER_BENCH, elapsed)
+
+    # Set operations
+    NUM_SETS = NUM_KEYS // 10
+    set_get_cmds = [("SET_GET", f"set_{random.randint(1, NUM_SETS)}") for _ in range(OPS_PER_BENCH)]
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, set_get_cmds, OPS_PER_BENCH), s))
+                        (connect())[0])
+    report("SET_GET (read all members)", OPS_PER_BENCH, elapsed)
+
+    set_len_cmds = [("SET_LEN", f"set_{random.randint(1, NUM_SETS)}") for _ in range(OPS_PER_BENCH)]
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, set_len_cmds, OPS_PER_BENCH), s))
+                        (connect())[0])
+    report("SET_LEN", OPS_PER_BENCH, elapsed)
+
+    set_add_cmds = [("SET_ADD", f"set_{random.randint(1, NUM_SETS)}", f"bench_{i}") for i in range(OPS_PER_BENCH)]
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, set_add_cmds, OPS_PER_BENCH), s))
+                        (connect())[0])
+    report("SET_ADD (write)", OPS_PER_BENCH, elapsed)
 
     print()
 

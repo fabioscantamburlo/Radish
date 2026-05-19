@@ -326,7 +326,7 @@ RESP types: `+` = Simple String, `:` = Integer, `$` = Bulk String, `$-1` = Null,
 - Key missing: `$-1\r\n` → `None` (nil)
 
 **TYPE \<key\>**
-- Key exists: `$6\r\nstring\r\n` → bulk string `"string"` or `"list"`
+- Key exists: `$6\r\nstring\r\n` → bulk string `"string"`, `"list"`, or `"set"`
 - Key missing or expired: `$-1\r\n` → `None` (nil)
 
 **TTL \<key\>**
@@ -357,7 +357,13 @@ RESP types: `+` = Simple String, `:` = Integer, `$` = Bulk String, `$-1` = Null,
 - Key is new: `:1\r\n` → integer `1` (created via `radd!` which returns `true`)
 - Key already exists: `-ERR Key 'mykey' already exists\r\n` → error
 - Invalid TTL: `-ERR TTL must be a valid integer, got 'abc'\r\n` → error
-- **Note:** S_SET is create-only. To overwrite, DEL first then S_SET.
+- **Note:** S_SET is create-only. To overwrite, use S_UPSERT instead.
+
+**S_UPSERT \<key\> \<value\> [ttl]**
+- Key is new: `:1\r\n` → integer `1` (created)
+- Key already exists: `:1\r\n` → integer `1` (overwritten with new value/TTL)
+- Invalid TTL: `-ERR TTL must be a valid integer, got 'abc'\r\n` → error
+- **Note:** S_UPSERT always succeeds (unless TTL is invalid). Equivalent to atomic DEL + S_SET.
 
 **S_GET \<key\>**
 - Key exists: `$<len>\r\n<value>\r\n` → bulk string (e.g. `"hello"`)
@@ -479,20 +485,63 @@ RESP types: `+` = Simple String, `:` = Integer, `$` = Bulk String, `$-1` = Null,
 
 ---
 
+### Set Commands
+
+**SET_ADD \<key\> \<value\>**
+- Key is new: `:1\r\n` → integer `1` (created new set with value)
+- Key exists (set): `:1\r\n` → integer `1` (added to set; duplicates are silently ignored)
+- Key exists but wrong type: `-ERR WRONGTYPE: Key 'k' holds a string, not a set\r\n` → error
+
+**SET_GET \<key\> [n]**
+- Key exists, no arg: `*N\r\n<bulk strings>` → array of all elements (unordered)
+  - Example: `["a", "b", "c"]`
+- Key exists, with n: `*n\r\n<bulk strings>` → array of n random elements
+  - If n ≥ set size, returns all elements.
+- Invalid n: `-ERR Value 'abc' is not an integer\r\n` → error
+- Key missing or expired: `$-1\r\n` → `None` (nil)
+
+**SET_DEL \<key\> \<value\>**
+- Key exists, value was in set: `:1\r\n` → integer `1` (removed)
+- Key exists, value not in set: `:0\r\n` → integer `0` (no-op)
+- Key exists, set becomes empty after delete: key is auto-deleted, returns `:1\r\n`
+- Key missing or expired: `$-1\r\n` → `None` (nil)
+
+**SET_GETDEL \<key\> \<value\>**
+- Key exists, value was in set: `$<len>\r\n<value>\r\n` → bulk string (the removed value)
+- Key exists, value not in set: `$-1\r\n` → `None` (nil)
+- Key exists, set becomes empty after delete: key is auto-deleted
+- Key missing or expired: `$-1\r\n` → `None` (nil)
+
+**SET_POP \<key\> [n]**
+- Key exists: `*N\r\n<bulk strings>` → array of n random elements removed from the set
+  - Default n = 1 if not provided.
+  - If n ≥ set size, returns all elements and auto-deletes the key.
+- Invalid n: `-ERR Value 'abc' is not an integer\r\n` → error
+- Key missing or expired: `$-1\r\n` → `None` (nil)
+
+**SET_LEN \<key\>**
+- Key exists: `:<length>\r\n` → integer (cardinality, O(1))
+- Key missing or expired: `$-1\r\n` → `None` (nil)
+
+---
+
 ### Type Errors
 
-If you use a string command on a list key (or vice versa), the server returns:
+If you use a command on a key of the wrong type, the server returns:
 
 ```
 -ERR WRONGTYPE: Key 'mykey' holds a list, not a string
 ```
 
-This applies to all typed commands (S_* on a list key, L_* on a string key).
+This applies to all typed commands (S_* on a list key, L_* on a string key,
+SET_* on a non-set key, etc.).
 Meta commands (EXISTS, DEL, TYPE, TTL, etc.) work on any type.
 
 ### Auto-Delete Behavior
 
 - Lists that become empty (via `L_POP`, `L_DEQUEUE`, `L_TRIMR`, `L_TRIML`)
+  are automatically deleted from the store.
+- Sets that become empty (via `SET_DEL`, `SET_GETDEL`, `SET_POP`)
   are automatically deleted from the store.
 - Strings are never auto-deleted — even an empty string `""` is a valid value.
 
@@ -627,6 +676,16 @@ class Radish:
     def ping(self):              return self.execute("PING")
     def dbsize(self):            return self.execute("DBSIZE")
     def flushdb(self):           return self.execute("FLUSHDB")
+
+    # Set commands
+    def set_add(self, key, value):  return self.execute("SET_ADD", key, value)
+    def set_get(self, key, n=None):
+        if n is not None:
+            return self.execute("SET_GET", key, n)
+        return self.execute("SET_GET", key)
+    def set_del(self, key, value):  return self.execute("SET_DEL", key, value)
+    def set_pop(self, key, n=1):    return self.execute("SET_POP", key, n)
+    def set_len(self, key):         return self.execute("SET_LEN", key)
     # ... etc for all commands
 ```
 
@@ -688,6 +747,16 @@ L_LEN mylist                → 3
 L_POP mylist                → "b"
 L_DEQUEUE mylist            → "c"
 L_GET mylist                → ["a"]
+SET_ADD myset x             → 1
+SET_ADD myset y             → 1
+SET_ADD myset z             → 1
+SET_ADD myset x             → 1         (duplicate, set unchanged)
+SET_LEN myset               → 3
+SET_GET myset               → ["x", "y", "z"] (unordered)
+SET_DEL myset y             → 1
+SET_LEN myset               → 2
+SET_POP myset 1             → ["x"] or ["z"] (random)
+TYPE myset                  → "set"
 DBSIZE                      → (number of keys)
 FLUSHDB                     → "OK"
 DBSIZE                      → 0

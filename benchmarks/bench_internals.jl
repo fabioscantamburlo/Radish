@@ -219,6 +219,51 @@ function run_benchmarks()
     report("lappend! + ldequeue! (enqueue/dequeue)", N, total, per_op)
 
     println()
+    println("── Type Commands (Set) ─────────────────────────────────────────────────────")
+
+    total, per_op = bench(N) do
+        setadd!(String["item"])
+    end
+    report("setadd! (create, no TTL)", N, total, per_op)
+
+    set_elem = RadishElement(Set{String}(["a", "b", "c", "d", "e"]), nothing, now(), :set)
+
+    total, per_op = bench(N) do
+        setlen(set_elem, empty_args)
+    end
+    report("setlen", N, total, per_op)
+
+    total, per_op = bench(N) do
+        setget(set_elem, empty_args)
+    end
+    report("setget (all elements)", N, total, per_op)
+
+    setget_n_args = String["3"]
+    total, per_op = bench(N) do
+        setget(set_elem, setget_n_args)
+    end
+    report("setget (3 random)", N, total, per_op)
+
+    # Add/delete cycle to maintain set size
+    set_cycle_elem = RadishElement(Set{String}(["seed"]), nothing, now(), :set)
+    set_add_args = String["x"]
+    set_del_args = String["x"]
+    total, per_op = bench(N) do
+        setadd!(set_cycle_elem, set_add_args)
+        setdel!(set_cycle_elem, set_del_args)
+    end
+    report("setadd! + setdel! (add/del cycle)", N, total, per_op)
+
+    # Pop cycle (re-add after pop to maintain)
+    set_pop_elem = RadishElement(Set{String}(["a", "b", "c", "d", "e"]), nothing, now(), :set)
+    set_pop_args = String["1"]
+    total, per_op = bench(N) do
+        setgetdelrandom!(set_pop_elem, set_pop_args)
+        push!(set_pop_elem.value, "refill_$(rand(1:100000))")
+    end
+    report("setgetdelrandom! (pop 1 + refill)", N, total, per_op)
+
+    println()
 
     # =========================================================================
     # 3. Hypercommand operations (context + key lookup + TTL check)

@@ -418,6 +418,38 @@ function run_benchmarks()
     end
     report("L_APPEND + L_DEQUEUE cycle", N, total, per_op)
 
+    # Set reads
+    # Pre-populate a set
+    store_set!(store2, "set_1", RadishElement(Set{String}(["a", "b", "c", "d", "e"]), nothing, now(), :set))
+    store2.keytype["set_1"] = :set
+
+    cmd = Command("SET_LEN", "set_1", String[])
+    total, per_op = bench(N) do
+        execute!(store2, db_lock2, cmd, session2; tracker=tracker2)
+    end
+    report("SET_LEN", N, total, per_op)
+
+    cmd = Command("SET_GET", "set_1", String[])
+    total, per_op = bench(N) do
+        execute!(store2, db_lock2, cmd, session2; tracker=tracker2)
+    end
+    report("SET_GET (all elements)", N, total, per_op)
+
+    cmd = Command("SET_GET", "set_1", String["3"])
+    total, per_op = bench(N) do
+        execute!(store2, db_lock2, cmd, session2; tracker=tracker2)
+    end
+    report("SET_GET (3 random)", N, total, per_op)
+
+    # Set writes (add/del cycle)
+    cmd_sadd = Command("SET_ADD", "set_1", String["bench_item"])
+    cmd_sdel = Command("SET_DEL", "set_1", String["bench_item"])
+    total, per_op = bench(N) do
+        execute!(store2, db_lock2, cmd_sadd, session2; tracker=tracker2)
+        execute!(store2, db_lock2, cmd_sdel, session2; tracker=tracker2)
+    end
+    report("SET_ADD + SET_DEL cycle", N, total, per_op)
+
     # Meta commands
     cmd = Command("EXISTS", "str_5000", String[])
     total, per_op = bench(N) do

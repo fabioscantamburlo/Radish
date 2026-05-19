@@ -137,6 +137,34 @@ function radd_or_modify!(context::Dict, key::AbstractString, command::F, args::V
     end
 end
 
+"""Unconditional upsert — always creates a new element, overwriting if key exists.
+
+Unlike `radd_or_modify!` which calls the command as a modifier on an existing element,
+this always invokes the command in its *creator* signature `command(args)` and replaces
+whatever was stored at `key` with the freshly created element.
+
+Use case: S_UPSERT — set a string value regardless of whether the key already exists.
+Equivalent to DEL + S_SET in a single atomic operation.
+
+Behavior:
+  - Key missing → creates new element (same as radd!)
+  - Key exists  → overwrites with new element (old value is discarded)
+  - Always calls `command(args)` (creator path), never `command(elem, args)` (modifier path)
+"""
+function radd_or_replace!(context::Dict, key::AbstractString, command::F, args::Vector{String};
+                          tracker::Union{DirtyTracker, Nothing}=nothing,
+                          t::DateTime=now()) where F<:Function
+    cmd_result = command(args)
+    if !cmd_result.success
+        return ExecuteResult(ERROR, nothing, cmd_result.error)
+    end
+    context[key] = cmd_result.element
+    if tracker !== nothing
+        mark_dirty!(tracker, key, cmd_result.element.datatype)
+    end
+    return ExecuteResult(SUCCESS, 1, nothing)
+end
+
 """Modify an existing key."""
 function rmodify!(context::Dict, key::AbstractString, command::F, args::Vector{String};
                   tracker::Union{DirtyTracker, Nothing}=nothing,

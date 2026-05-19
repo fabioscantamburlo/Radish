@@ -15,7 +15,7 @@
 using Dates
 using Logging
 
-export RadishElement, S_PALETTE, LL_PALETTE, META_PALETTE
+export RadishElement, S_PALETTE, LL_PALETTE, SET_PALETTE, META_PALETTE
 
 # =============================================================================
 # Palettes — command registries
@@ -47,6 +47,7 @@ const META_PALETTE = Dict{String, Tuple{Function, Int}}(
 const TYPE_PALETTES = [
     (:string, S_PALETTE),
     (:list,   LL_PALETTE),
+    (:set,    SET_PALETTE),
 ]
 
 const OP_ALLOWED = union(
@@ -54,12 +55,14 @@ const OP_ALLOWED = union(
     keys(META_PALETTE),
     keys(S_PALETTE),
     keys(LL_PALETTE),
+    keys(SET_PALETTE),
     ["MULTI", "EXEC", "DISCARD", "BGSAVE"],
 )
 
 const READ_OPS = Set([
     "S_GET", "S_LEN", "S_GETRANGE", "S_LCS", "S_COMPLEN",
     "L_GET", "L_LEN", "L_RANGE",
+    "SET_GET", "SET_LEN",
     "KLIST", "EXISTS", "TYPE", "TTL", "DBSIZE",
 ])
 

@@ -25,10 +25,11 @@ const ALL_COMMANDS = sort([
     "KLIST", "DBSIZE",
     "EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME",
     "FLUSHDB", "BGSAVE", "DUMP",
-    "S_SET", "S_GET", "S_INCR", "S_GINCR", "S_INCRBY", "S_GINCRBY",
+    "S_SET", "S_UPSERT", "S_GET", "S_INCR", "S_GINCR", "S_INCRBY", "S_GINCRBY",
     "S_APPEND", "S_RPAD", "S_LPAD", "S_GETRANGE", "S_LEN", "S_LCS", "S_COMPLEN",
     "L_ADD", "L_PREPEND", "L_APPEND", "L_GET", "L_RANGE", "L_LEN",
     "L_POP", "L_DEQUEUE", "L_TRIMR", "L_TRIML", "L_MOVE",
+    "SET_ADD", "SET_GET", "SET_DEL", "SET_GETDEL", "SET_POP", "SET_LEN",
 ])
 
 # =============================================================================
@@ -282,7 +283,8 @@ function show_help()
       DUMP                    - Check status/reminder for snapshots
     
     String Commands:
-      S_SET <key> <value> [ttl]  - Set string value with optional TTL
+      S_SET <key> <value> [ttl]  - Set string value (create-only, errors if exists)
+      S_UPSERT <key> <value> [ttl] - Set string value (overwrites if exists)
       S_GET <key>                - Get string value
       S_INCR <key>               - Increment integer string by 1
       S_GINCR <key>              - Get value then increment
@@ -309,9 +311,19 @@ function show_help()
       L_TRIML <key> <n>          - Keep only last n elements
       L_MOVE <key1> <key2>       - Move key2 to end of key1 (consumes key2)
     
+    Set Commands:
+      SET_ADD <key> <value>      - Add element to set (create if not exists)
+      SET_GET <key> [n]          - Get all elements, or n random elements
+      SET_DEL <key> <value>      - Remove element from set
+      SET_GETDEL <key> <value>   - Get element and remove it from set
+      SET_POP <key> [n]          - Remove and return n random elements (default 1)
+      SET_LEN <key>              - Get set cardinality
+    
     Examples:
       S_SET mykey hello 60       - Set 'mykey' to 'hello' with 60s TTL
       L_PREPEND mylist item1     - Add 'item1' to head of 'mylist'
+      SET_ADD myset member1      - Add 'member1' to set 'myset'
+      SET_POP myset 3            - Pop 3 random elements from 'myset'
       KLIST 10                   - Show first 10 keys
     
     Transaction Example:

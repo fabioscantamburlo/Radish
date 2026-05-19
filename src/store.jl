@@ -26,8 +26,8 @@ The `keytype` index maps every key to its type symbol.
 mutable struct RadishStore
     strings::Dict{String, RadishElement{String}}
     lists::Dict{String, RadishElement{DLinkedStartEnd{String}}}
+    sets::Dict{String, RadishElement{Set{String}}}
     # hashes::Dict{String, RadishElement{Dict{String,String}}}   # future
-    # sets::Dict{String, RadishElement{Set{String}}}             # future
 
     keytype::Dict{String, Symbol}   # global key → type index
 
@@ -35,6 +35,7 @@ mutable struct RadishStore
         new(
             Dict{String, RadishElement{String}}(),
             Dict{String, RadishElement{DLinkedStartEnd{String}}}(),
+            Dict{String, RadishElement{Set{String}}}(),
             Dict{String, Symbol}(),
         )
     end
@@ -53,8 +54,8 @@ function store_typed_dicts(store::RadishStore)
     return (
         (:string, store.strings),
         (:list,   store.lists),
+        (:set,    store.sets),
         # (:hash, store.hashes),   # future
-        # (:set,  store.sets),     # future
     )
 end
 

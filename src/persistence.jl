@@ -19,6 +19,7 @@ const AOF_KEY_COMMANDS = union(
     Set(["EXISTS", "DEL", "TYPE", "TTL", "PERSIST", "EXPIRE", "RENAME"]),
     Set(keys(S_PALETTE)),
     Set(keys(LL_PALETTE)),
+    Set(keys(SET_PALETTE)),
     Set(keys(META_PALETTE))
 )
 
@@ -68,6 +69,15 @@ function deserialize_data(::Val{:list}, value::AbstractVector)
         append!(list, string(value[i]))
     end
     return list
+end
+
+serialize_data(::Val{:set}, value::Set{String}) = collect(value)
+
+function deserialize_data(::Val{:set}, value::AbstractVector)
+    if isempty(value)
+        return nothing
+    end
+    return Set{String}(string.(value))
 end
 
 function get_remaining_ttl(elem::RadishElement)::Union{Int, Nothing}
@@ -395,7 +405,7 @@ function replay_aof!(store::RadishStore, db_lock::AbstractShardedLock, aof_path_
 
             if length(parts) == 1
                 cmd = Command(cmd_name, nothing, String[])
-            elseif startswith(cmd_name, "S_") || startswith(cmd_name, "L_") || cmd_name in AOF_KEY_COMMANDS
+            elseif startswith(cmd_name, "S_") || startswith(cmd_name, "L_") || startswith(cmd_name, "SET_") || cmd_name in AOF_KEY_COMMANDS
                 key = parts[2]
                 args = length(parts) > 2 ? String.(parts[3:end]) : String[]
                 cmd = Command(cmd_name, key, args)

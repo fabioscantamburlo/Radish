@@ -53,6 +53,9 @@ fresh_ctx() = Dict{String, RadishElement{String}}()
 # Helper: create a fresh typed list dict (for hypercommand tests)
 fresh_list_ctx() = Dict{String, RadishElement{DLinkedStartEnd{String}}}()
 
+# Helper: create a fresh typed set dict (for hypercommand tests)
+fresh_set_ctx() = Dict{String, RadishElement{Set{String}}}()
+
 # Helper: create a fresh RadishStore (for meta command tests)
 fresh_store() = RadishStore()
 
@@ -60,6 +63,7 @@ println("Running Radish test suite...\n")
 
 include("test_strings.jl")
 include("test_lists.jl")
+include("test_sets.jl")
 include("test_radishelem.jl")
 include("test_batch_locking.jl")
 

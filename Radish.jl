@@ -17,6 +17,7 @@ include(joinpath(@__DIR__, "src", "radishelem.jl"))
 # 4. Type implementations (defines DLinkedStartEnd, type commands, palettes)
 include(joinpath(@__DIR__, "src", "rstrings.jl"))
 include(joinpath(@__DIR__, "src", "rlinkedlists.jl"))
+include(joinpath(@__DIR__, "src", "rsets.jl"))
 
 # 5. RadishStore (depends on RadishElement, DLinkedStartEnd)
 include(joinpath(@__DIR__, "src", "store.jl"))
@@ -58,7 +59,7 @@ export RadishStore, RadishContext, store_haskey, store_keytype, store_delete!, s
 (export RadishElement, rmodify!, rmodify_autodelete!, relement_to_element, rget_or_expire!,
         relement_to_element_consume_key2!,
         rget_on_modify_or_expire!, rget_on_modify_or_expire_autodelete!,
-        rdelete!, radd!, radd_or_modify!,
+        rdelete!, radd!, radd_or_modify!, radd_or_replace!,
         rlistkeys, check_empty)
 
 # Sharded lock exports
@@ -83,5 +84,9 @@ export S_PALETTE
         lappend!,
         lrange, _lmove!, _lconcat, ladd!)
 export LL_PALETTE
+
+# Set type exports
+export setadd!, setget, setdel!, setgetdel!, setgetdelrandom!, setlen
+export SET_PALETTE
 
 end # module Radish

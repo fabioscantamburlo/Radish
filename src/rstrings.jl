@@ -218,8 +218,9 @@ function is_empty(::Val{:string}, elem::RadishElement)::Bool
 end
 
 const S_PALETTE = Dict{String, Tuple}(
-    "S_GET" => (sget, rget_or_expire!),
     "S_SET" => (sadd, radd!),
+    "S_UPSERT" => (sadd, radd_or_replace!),
+    "S_GET" => (sget, rget_or_expire!),
     "S_INCR" => (sincr!, rmodify!),
     "S_GINCR" => (sgincr!, rget_on_modify_or_expire!),
     "S_INCRBY" => (sincr_by!, rmodify!),
