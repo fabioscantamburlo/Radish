@@ -80,7 +80,7 @@ export S_PALETTE
         _lget, llen, _llen,
         _dequeue!, lget, lmove!,
         ltrimr!, ltriml!, _ltriml, _ltrimr,
-        lpop!, ldequeue!,
+        lpop!, ldequeue!, lmpop!, lmdequeue!,
         lappend!,
         lrange, _lmove!, _lconcat, ladd!)
 export LL_PALETTE

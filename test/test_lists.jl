@@ -547,6 +547,108 @@
     end
 
     # =========================================================================
+    # lmpop! — Multi-pop from tail
+    # =========================================================================
+    @testset "lmpop!" begin
+        @testset "pop N elements from tail" begin
+            elem = make_list_elem(["a", "b", "c", "d", "e"])
+            result = lmpop!(elem, String["3"])
+            @test result isa CommandDirect
+            @test result.value == ["e", "d", "c"]
+            @test elem.value.len == 2
+            @test to_vector(elem.value) == ["a", "b"]
+        end
+
+        @testset "pop more than list size (partial)" begin
+            elem = make_list_elem(["a", "b"])
+            result = lmpop!(elem, String["10"])
+            @test result isa CommandDirect
+            @test result.value == ["b", "a"]
+            @test elem.value.len == 0
+        end
+
+        @testset "pop exactly list size" begin
+            elem = make_list_elem(["a", "b", "c"])
+            result = lmpop!(elem, String["3"])
+            @test result isa CommandDirect
+            @test length(result.value) == 3
+            @test elem.value.len == 0
+        end
+
+        @testset "pop 1 element (same as lpop)" begin
+            elem = make_list_elem(["a", "b", "c"])
+            result = lmpop!(elem, String["1"])
+            @test result isa CommandDirect
+            @test result.value == ["c"]
+            @test elem.value.len == 2
+        end
+
+        @testset "invalid N" begin
+            elem = make_list_elem(["a"])
+            result = lmpop!(elem, String["abc"])
+            @test result.success == false
+        end
+
+        @testset "missing N argument" begin
+            elem = make_list_elem(["a"])
+            result = lmpop!(elem, String[])
+            @test result.success == false
+            @test occursin("requires a count", result.error)
+        end
+    end
+
+    # =========================================================================
+    # lmdequeue! — Multi-dequeue from head
+    # =========================================================================
+    @testset "lmdequeue!" begin
+        @testset "dequeue N elements from head" begin
+            elem = make_list_elem(["a", "b", "c", "d", "e"])
+            result = lmdequeue!(elem, String["3"])
+            @test result isa CommandDirect
+            @test result.value == ["a", "b", "c"]
+            @test elem.value.len == 2
+            @test to_vector(elem.value) == ["d", "e"]
+        end
+
+        @testset "dequeue more than list size (partial)" begin
+            elem = make_list_elem(["a", "b"])
+            result = lmdequeue!(elem, String["10"])
+            @test result isa CommandDirect
+            @test result.value == ["a", "b"]
+            @test elem.value.len == 0
+        end
+
+        @testset "dequeue exactly list size" begin
+            elem = make_list_elem(["a", "b", "c"])
+            result = lmdequeue!(elem, String["3"])
+            @test result isa CommandDirect
+            @test length(result.value) == 3
+            @test elem.value.len == 0
+        end
+
+        @testset "dequeue 1 element (same as ldequeue)" begin
+            elem = make_list_elem(["a", "b", "c"])
+            result = lmdequeue!(elem, String["1"])
+            @test result isa CommandDirect
+            @test result.value == ["a"]
+            @test elem.value.len == 2
+        end
+
+        @testset "invalid N" begin
+            elem = make_list_elem(["a"])
+            result = lmdequeue!(elem, String["abc"])
+            @test result.success == false
+        end
+
+        @testset "missing N argument" begin
+            elem = make_list_elem(["a"])
+            result = lmdequeue!(elem, String[])
+            @test result.success == false
+            @test occursin("requires a count", result.error)
+        end
+    end
+
+    # =========================================================================
     # lmove! — Move (RadishElement wrapper)
     # =========================================================================
     @testset "lmove!" begin
@@ -581,7 +683,8 @@
     # =========================================================================
     @testset "LL_PALETTE completeness" begin
         expected = ["L_ADD", "L_LEN", "L_PREPEND", "L_APPEND", "L_TRIMR",
-                    "L_TRIML", "L_GET", "L_RANGE", "L_MOVE", "L_POP", "L_DEQUEUE"]
+                    "L_TRIML", "L_GET", "L_RANGE", "L_MOVE", "L_POP", "L_DEQUEUE",
+                    "L_MPOP", "L_MDEQUEUE"]
         for cmd in expected
             @test haskey(LL_PALETTE, cmd)
         end

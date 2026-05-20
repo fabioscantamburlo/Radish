@@ -218,6 +218,27 @@ function run_benchmarks()
     end
     report("lappend! + ldequeue! (enqueue/dequeue)", N, total, per_op)
 
+    # Multi-pop benchmarks
+    mpop_args = String["5"]
+    prepend_5_args = String["x"]
+    # Build a list with enough elements for repeated mpop
+    mpop_list = RadishElement(DLinkedStartEnd("seed"), nothing, now(), :list)
+    for i in 1:100
+        append!(mpop_list.value, "item_$i")
+    end
+    total, per_op = bench(N ÷ 10) do
+        # Refill 5 elements then mpop 5
+        for _ in 1:5; append!(mpop_list.value, "x"); end
+        lmpop!(mpop_list, mpop_args)
+    end
+    report("lmpop! (pop 5 from tail)", N ÷ 10, total, per_op)
+
+    total, per_op = bench(N ÷ 10) do
+        for _ in 1:5; push!(mpop_list.value, "x"); end
+        lmdequeue!(mpop_list, mpop_args)
+    end
+    report("lmdequeue! (dequeue 5 from head)", N ÷ 10, total, per_op)
+
     println()
     println("── Type Commands (Set) ─────────────────────────────────────────────────────")
 

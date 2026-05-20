@@ -469,6 +469,19 @@ RESP types: `+` = Simple String, `:` = Integer, `$` = Bulk String, `$-1` = Null,
 **L_DEQUEUE \<key\>**
 - Same as L_POP but removes from head instead of tail.
 
+**L_MPOP \<key\> \<n\>**
+- Key exists, list not empty: `*N\r\n<bulk strings>` → array of up to n elements removed from tail
+  - Elements are returned in pop order (tail first).
+  - If n ≥ list length, returns all elements and auto-deletes the key.
+- Missing n argument: `-ERR L_MPOP requires a count argument\r\n` → error
+- Invalid n: `-ERR Value 'abc' is not an integer\r\n` → error
+- Key missing or expired: `$-1\r\n` → `None` (nil)
+
+**L_MDEQUEUE \<key\> \<n\>**
+- Same as L_MPOP but removes from head instead of tail.
+  - Elements are returned in dequeue order (head first).
+- Missing n argument: `-ERR L_MDEQUEUE requires a count argument\r\n` → error
+
 **L_TRIMR \<key\> \<n\>**
 - Key exists: `:1\r\n` → integer `1`. Keeps first n elements, removes the rest.
 - If n ≥ list length: no change, still returns `1`.

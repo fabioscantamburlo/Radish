@@ -418,6 +418,31 @@ function run_benchmarks()
     end
     report("L_APPEND + L_DEQUEUE cycle", N, total, per_op)
 
+    # Multi-pop (refill between iterations to maintain list)
+    # Pre-fill list_mpop with 50 elements
+    for i in 1:50
+        execute!(store2, db_lock2, Command("L_APPEND", "list_mpop", String["item_$i"]), session2; tracker=tracker2)
+    end
+    cmd_mpop = Command("L_MPOP", "list_mpop", String["5"])
+    cmd_refill = Command("L_APPEND", "list_mpop", String["refill"])
+    total, per_op = bench(N ÷ 10) do
+        # Refill 5 then mpop 5
+        for _ in 1:5
+            execute!(store2, db_lock2, cmd_refill, session2; tracker=tracker2)
+        end
+        execute!(store2, db_lock2, cmd_mpop, session2; tracker=tracker2)
+    end
+    report("L_MPOP (pop 5 from tail)", N ÷ 10, total, per_op)
+
+    cmd_mdeq = Command("L_MDEQUEUE", "list_mpop", String["5"])
+    total, per_op = bench(N ÷ 10) do
+        for _ in 1:5
+            execute!(store2, db_lock2, cmd_refill, session2; tracker=tracker2)
+        end
+        execute!(store2, db_lock2, cmd_mdeq, session2; tracker=tracker2)
+    end
+    report("L_MDEQUEUE (dequeue 5 from head)", N ÷ 10, total, per_op)
+
     # Set reads
     # Pre-populate a set
     store_set!(store2, "set_1", RadishElement(Set{String}(["a", "b", "c", "d", "e"]), nothing, now(), :set))

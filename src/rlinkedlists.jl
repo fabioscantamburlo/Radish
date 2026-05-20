@@ -454,6 +454,44 @@ function lpop!(element::RadishElement, args::Vector{String})
     return CommandDirect(res)
 end
 
+"""Pop N elements from tail, return as array. Partial if N > list length."""
+function lmpop!(element::RadishElement, args::Vector{String})
+    if isempty(args)
+        return CommandError("L_MPOP requires a count argument")
+    end
+    n = tryparse(Int, args[1])
+    if isa(n, Nothing)
+        return CommandError("Value '$(args[1])' is not an integer")
+    end
+    n = min(n, element.value.len)
+    results = String[]
+    for _ in 1:n
+        val = pop!(element.value)
+        val === nothing && break
+        push!(results, val)
+    end
+    return CommandDirect(results)
+end
+
+"""Dequeue N elements from head, return as array. Partial if N > list length."""
+function lmdequeue!(element::RadishElement, args::Vector{String})
+    if isempty(args)
+        return CommandError("L_MDEQUEUE requires a count argument")
+    end
+    n = tryparse(Int, args[1])
+    if isa(n, Nothing)
+        return CommandError("Value '$(args[1])' is not an integer")
+    end
+    n = min(n, element.value.len)
+    results = String[]
+    for _ in 1:n
+        val = _dequeue!(element.value)
+        val === nothing && break
+        push!(results, val)
+    end
+    return CommandDirect(results)
+end
+
 """Check if list element is empty.
 Lists with len == 0 are considered empty and should be auto-deleted.
 """
@@ -478,5 +516,7 @@ const LL_PALETTE = Dict{String, Tuple}(
     "L_MOVE" => (lmove!, relement_to_element_consume_key2!),
     "L_POP" => (lpop!, rget_on_modify_or_expire_autodelete!),
     "L_DEQUEUE" => (ldequeue!, rget_on_modify_or_expire_autodelete!),
+    "L_MPOP" => (lmpop!, rget_on_modify_or_expire_autodelete!),
+    "L_MDEQUEUE" => (lmdequeue!, rget_on_modify_or_expire_autodelete!),
     # "L_CONCAT" => (lconcat, radd!),
 )

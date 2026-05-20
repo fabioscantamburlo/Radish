@@ -328,6 +328,33 @@ def main():
                         (connect())[0])
     report("SET_ADD (write)", OPS_PER_BENCH, elapsed)
 
+    # List multi-pop (pre-populate a list, then mpop/mdequeue)
+    sock_lm = connect()
+    for i in range(1, 101):
+        send_resp(sock_lm, "L_APPEND", "bench_mpop_list", f"item_{i}")
+        read_resp(sock_lm)
+    send_resp(sock_lm, "QUIT")
+    read_resp(sock_lm)
+    sock_lm.close()
+
+    # L_MPOP: pop 5 at a time, refill between
+    def mpop_cmds(n):
+        cmds = []
+        for _ in range(n):
+            cmds.append(("L_APPEND", "bench_mpop_list", "refill"))
+            cmds.append(("L_MPOP", "bench_mpop_list", "1"))
+        return cmds
+
+    mpop_cmd_list = mpop_cmds(OPS_PER_BENCH // 2)
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, mpop_cmd_list, len(mpop_cmd_list)), s))
+                        (connect())[0])
+    report("L_MPOP (pop 1, with refill)", OPS_PER_BENCH, elapsed)
+
+    mdeq_cmd_list = [("L_MDEQUEUE", "bench_mpop_list", "1") if i % 2 else ("L_APPEND", "bench_mpop_list", "refill") for i in range(OPS_PER_BENCH)]
+    elapsed = median_of(lambda: (lambda s: (bench_single_latency(s, mdeq_cmd_list, len(mdeq_cmd_list)), s))
+                        (connect())[0])
+    report("L_MDEQUEUE (dequeue 1, with refill)", OPS_PER_BENCH, elapsed)
+
     print()
 
     # ── 2. Single-client pipelined ───────────────────────────────────

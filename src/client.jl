@@ -28,7 +28,7 @@ const ALL_COMMANDS = sort([
     "S_SET", "S_UPSERT", "S_GET", "S_INCR", "S_GINCR", "S_INCRBY", "S_GINCRBY",
     "S_APPEND", "S_RPAD", "S_LPAD", "S_GETRANGE", "S_LEN", "S_LCS", "S_COMPLEN",
     "L_ADD", "L_PREPEND", "L_APPEND", "L_GET", "L_RANGE", "L_LEN",
-    "L_POP", "L_DEQUEUE", "L_TRIMR", "L_TRIML", "L_MOVE",
+    "L_POP", "L_DEQUEUE", "L_MPOP", "L_MDEQUEUE", "L_TRIMR", "L_TRIML", "L_MOVE",
     "SET_ADD", "SET_GET", "SET_DEL", "SET_GETDEL", "SET_POP", "SET_LEN",
 ])
 
@@ -307,6 +307,8 @@ function show_help()
       L_LEN <key>                - Get list length
       L_POP <key>                - Remove and return tail element
       L_DEQUEUE <key>            - Remove and return head element
+      L_MPOP <key> <n>           - Remove and return n elements from tail
+      L_MDEQUEUE <key> <n>       - Remove and return n elements from head
       L_TRIMR <key> <n>          - Keep only first n elements
       L_TRIML <key> <n>          - Keep only last n elements
       L_MOVE <key1> <key2>       - Move key2 to end of key1 (consumes key2)
