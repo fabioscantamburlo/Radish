@@ -272,8 +272,19 @@ function load_snapshot!(store::RadishStore)::Int
         isfile(tmp) && rm(tmp)
     end
 
+    num_shards = CONFIG[].num_shards
+    # Count existing shard files for progress reporting
+    total_shards = 0
+    for sid in 1:num_shards
+        isfile(shard_path(sid)) && (total_shards += 1)
+    end
+
     count = 0
-    for sid in 1:CONFIG[].num_shards
+    shards_loaded = 0
+    bar_width = 40
+    t_start = time_ns()
+
+    for sid in 1:num_shards
         path = shard_path(sid)
         isfile(path) || continue
 
@@ -300,10 +311,27 @@ function load_snapshot!(store::RadishStore)::Int
                 @warn "Skipping malformed line in shard $sid" exception=e
             end
         end
+
+        shards_loaded += 1
+        if total_shards > 0
+            pct = round(Int, 100 * shards_loaded / total_shards)
+            prev_pct = round(Int, 100 * (shards_loaded - 1) / total_shards)
+            # Print every 10% milestone
+            if div(pct, 10) > div(prev_pct, 10) || shards_loaded == total_shards
+                elapsed_sec = (time_ns() - t_start) / 1e9
+                keys_per_sec = elapsed_sec > 0 ? round(Int, count / elapsed_sec) : 0
+                filled = round(Int, bar_width * shards_loaded / total_shards)
+                bar = "█" ^ filled * "░" ^ (bar_width - filled)
+                println("  [$bar] $pct% — $count keys (shard $shards_loaded/$total_shards) $(round(elapsed_sec, digits=1))s elapsed, $keys_per_sec keys/s")
+            end
+        end
     end
 
+    elapsed_total = (time_ns() - t_start) / 1e9
+
     if count > 0
-        @info "Loaded $count keys from sharded snapshots"
+        keys_per_sec = round(Int, count / elapsed_total)
+        @info "Loaded $count keys from sharded snapshots in $(round(elapsed_total, digits=2))s ($keys_per_sec keys/s)"
     else
         @info "No snapshot found, starting fresh"
     end

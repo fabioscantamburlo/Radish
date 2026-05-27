@@ -508,6 +508,55 @@ function run_benchmarks()
     end
     report("Full TTL check (expires_at)", N, total, per_op)
 
+    # expire_if_needed! benchmarks (the shared helper used by all hypercommands)
+    ttl_ctx = Dict{String, RadishElement{String}}()
+    ttl_ctx["live"] = RadishElement("val", 3600, now(), :string)
+    ttl_ctx["expired"] = RadishElement("val", 1, now() - Second(10), :string)
+
+    cached_t_ttl = now()
+    live_elem = ttl_ctx["live"]
+    total, per_op = bench(N) do
+        expire_if_needed!(ttl_ctx, "live", live_elem; t=cached_t_ttl)
+    end
+    report("expire_if_needed! (live key, no-op)", N, total, per_op)
+
+    # Benchmark expired path: must re-insert each iteration since it gets deleted
+    total, per_op = bench(N) do
+        ttl_ctx["expired"] = RadishElement("val", 1, now() - Second(10), :string)
+        expire_if_needed!(ttl_ctx, "expired", ttl_ctx["expired"]; t=cached_t_ttl)
+    end
+    report("expire_if_needed! (expired key, delete)", N, total, per_op)
+
+    # Hypercommand with TTL: rget_or_expire! on live vs expired key
+    ttl_hc_ctx = Dict{String, RadishElement{String}}()
+    ttl_hc_ctx["live"] = RadishElement("hello", 3600, now(), :string)
+    total, per_op = bench(N) do
+        rget_or_expire!(ttl_hc_ctx, "live", sget, hc_empty_args; t=cached_t_ttl)
+    end
+    report("rget_or_expire! (live TTL key, cached t)", N, total, per_op)
+
+    total, per_op = bench(N) do
+        ttl_hc_ctx["expired"] = RadishElement("val", 1, now() - Second(10), :string)
+        rget_or_expire!(ttl_hc_ctx, "expired", sget, hc_empty_args; t=cached_t_ttl)
+    end
+    report("rget_or_expire! (expired key, lazy delete)", N, total, per_op)
+
+    # rmodify! on expired key
+    ttl_mod_ctx = Dict{String, RadishElement{String}}()
+    total, per_op = bench(N) do
+        ttl_mod_ctx["expired"] = RadishElement("10", 1, now() - Second(10), :string)
+        rmodify!(ttl_mod_ctx, "expired", sincr!, hc_empty_args; t=cached_t_ttl)
+    end
+    report("rmodify! (expired key, lazy delete)", N, total, per_op)
+
+    # radd! on expired key (should succeed — create over expired)
+    ttl_add_ctx = Dict{String, RadishElement{String}}()
+    total, per_op = bench(N) do
+        ttl_add_ctx["expired"] = RadishElement("old", 1, now() - Second(10), :string)
+        radd!(ttl_add_ctx, "expired", sadd, String["new"]; t=cached_t_ttl)
+    end
+    report("radd! (expired key, create over)", N, total, per_op)
+
     println()
 
     # =========================================================================

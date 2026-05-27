@@ -60,7 +60,7 @@ export RadishStore, RadishContext, store_haskey, store_keytype, store_delete!, s
         relement_to_element_consume_key2!,
         rget_on_modify_or_expire!, rget_on_modify_or_expire_autodelete!,
         rdelete!, radd!, radd_or_modify!, radd_or_replace!,
-        rlistkeys, check_empty)
+        rlistkeys, check_empty, expire_if_needed!)
 
 # Sharded lock exports
 export ShardedLock, SimpleFairShardedLock, AbstractShardedLock, create_lock

@@ -537,6 +537,29 @@ function run_benchmarks()
     end
     report("EXPIRE + PERSIST cycle", N, total, per_op)
 
+    # TTL expiry: commands on expired keys (lazy delete path)
+    # Pre-create an expired key, attempt operations, re-create for next iteration
+    total, per_op = bench(N) do
+        store_set!(store2, "__expired_bench", RadishElement("10", 1, now() - Second(10), :string))
+        store2.keytype["__expired_bench"] = :string
+        execute!(store2, db_lock2, Command("S_GET", "__expired_bench", String[]), session2; tracker=tracker2)
+    end
+    report("S_GET on expired key (lazy delete)", N, total, per_op)
+
+    total, per_op = bench(N) do
+        store_set!(store2, "__expired_bench", RadishElement("10", 1, now() - Second(10), :string))
+        store2.keytype["__expired_bench"] = :string
+        execute!(store2, db_lock2, Command("S_INCR", "__expired_bench", String[]), session2; tracker=tracker2)
+    end
+    report("S_INCR on expired key (lazy delete)", N, total, per_op)
+
+    total, per_op = bench(N) do
+        store_set!(store2, "__expired_bench", RadishElement("old", 1, now() - Second(10), :string))
+        store2.keytype["__expired_bench"] = :string
+        execute!(store2, db_lock2, Command("S_SET", "__expired_bench", String["new"]), session2; tracker=tracker2)
+    end
+    report("S_SET on expired key (create over)", N, total, per_op)
+
     # Transaction: MULTI + 3 commands + EXEC
     total, per_op = bench(N_HEAVY) do
         execute!(store2, db_lock2, Command("MULTI", nothing, String[]), session2; tracker=tracker2)

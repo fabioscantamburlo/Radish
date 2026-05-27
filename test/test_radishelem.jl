@@ -128,6 +128,42 @@
             radd!(ctx, "k1", sadd, String["hello"]; tracker=tracker)
             @test haskey(tracker.modified, "k1")
         end
+
+        @testset "add succeeds when existing key is expired" begin
+            ctx = fresh_ctx()
+            # Create a key that expired 10 seconds ago
+            expired_elem = RadishElement("old", 1, now() - Second(10), :string)
+            ctx["expired_key"] = expired_elem
+            # radd! should treat it as non-existent and allow creation
+            t = now()
+            result = radd!(ctx, "expired_key", sadd, String["new_value"]; t=t)
+            @test result.status == SUCCESS
+            @test result.value == true
+            @test ctx["expired_key"].value == "new_value"
+        end
+
+        @testset "add fails when existing key is NOT expired" begin
+            ctx = fresh_ctx()
+            # Create a key with TTL far in the future
+            live_elem = RadishElement("alive", 3600, now(), :string)
+            ctx["live_key"] = live_elem
+            result = radd!(ctx, "live_key", sadd, String["new_value"])
+            @test result.status == ERROR
+            @test occursin("already exists", result.error)
+            @test ctx["live_key"].value == "alive"
+        end
+
+        @testset "add on expired key marks tracker with creation" begin
+            ctx = fresh_ctx()
+            tracker = DirtyTracker()
+            expired_elem = RadishElement("old", 1, now() - Second(10), :string)
+            ctx["expired_key"] = expired_elem
+            t = now()
+            radd!(ctx, "expired_key", sadd, String["new_value"]; tracker=tracker, t=t)
+            # mark_dirty! (for the new key) removes from deleted, so only modified remains
+            @test haskey(tracker.modified, "expired_key")
+            @test !haskey(tracker.deleted, "expired_key")
+        end
     end
 
     # =========================================================================
@@ -341,6 +377,121 @@
             ctx["left"] = make_list_elem(["a"])
             result = relement_to_element_consume_key2!(ctx, "left", lmove!, String["missing"])
             @test result.status == KEY_NOT_FOUND
+        end
+    end
+
+    # =========================================================================
+    # TTL expiry — all hypercommands reject expired keys
+    # =========================================================================
+    @testset "TTL expiry across all hypercommands" begin
+        @testset "rmodify! returns KEY_NOT_FOUND on expired key" begin
+            ctx = fresh_ctx()
+            ctx["expired"] = RadishElement("10", 1, now() - Second(10), :string)
+            result = rmodify!(ctx, "expired", sincr!, String[])
+            @test result.status == KEY_NOT_FOUND
+            @test !haskey(ctx, "expired")
+        end
+
+        @testset "rmodify_autodelete! returns KEY_NOT_FOUND on expired key" begin
+            ctx = fresh_list_ctx()
+            expired_list = make_list_elem(["a", "b"])
+            expired_list.ttl = 1
+            expired_list.expires_at = now() - Second(10)
+            ctx["expired"] = expired_list
+            result = rmodify_autodelete!(ctx, "expired", ltrimr!, String["1"])
+            @test result.status == KEY_NOT_FOUND
+            @test !haskey(ctx, "expired")
+        end
+
+        @testset "radd_or_modify! creates fresh when key is expired" begin
+            ctx = fresh_list_ctx()
+            expired_list = make_list_elem(["old"])
+            expired_list.ttl = 1
+            expired_list.expires_at = now() - Second(10)
+            ctx["expired"] = expired_list
+            result = radd_or_modify!(ctx, "expired", lprepend!, String["new_value"])
+            @test result.status == SUCCESS
+            @test haskey(ctx, "expired")
+            @test ctx["expired"].value.head.data == "new_value"
+            @test ctx["expired"].value.len == 1
+        end
+
+        @testset "relement_to_element returns KEY_NOT_FOUND when left key expired" begin
+            ctx = fresh_ctx()
+            ctx["left"] = RadishElement("abc", 1, now() - Second(10), :string)
+            ctx["right"] = make_string_elem("def")
+            result = relement_to_element(ctx, "left", slcs, String["right"])
+            @test result.status == KEY_NOT_FOUND
+            @test !haskey(ctx, "left")
+        end
+
+        @testset "relement_to_element returns KEY_NOT_FOUND when right key expired" begin
+            ctx = fresh_ctx()
+            ctx["left"] = make_string_elem("abc")
+            ctx["right"] = RadishElement("def", 1, now() - Second(10), :string)
+            result = relement_to_element(ctx, "left", slcs, String["right"])
+            @test result.status == KEY_NOT_FOUND
+            @test !haskey(ctx, "right")
+            @test haskey(ctx, "left")
+        end
+
+        @testset "relement_to_element_consume_key2! returns KEY_NOT_FOUND when left expired" begin
+            ctx = fresh_list_ctx()
+            expired_list = make_list_elem(["a"])
+            expired_list.ttl = 1
+            expired_list.expires_at = now() - Second(10)
+            ctx["left"] = expired_list
+            ctx["right"] = make_list_elem(["b"])
+            result = relement_to_element_consume_key2!(ctx, "left", lmove!, String["right"])
+            @test result.status == KEY_NOT_FOUND
+            @test !haskey(ctx, "left")
+            @test haskey(ctx, "right")
+        end
+
+        @testset "relement_to_element_consume_key2! returns KEY_NOT_FOUND when right expired" begin
+            ctx = fresh_list_ctx()
+            ctx["left"] = make_list_elem(["a"])
+            expired_list = make_list_elem(["b"])
+            expired_list.ttl = 1
+            expired_list.expires_at = now() - Second(10)
+            ctx["right"] = expired_list
+            result = relement_to_element_consume_key2!(ctx, "left", lmove!, String["right"])
+            @test result.status == KEY_NOT_FOUND
+            @test !haskey(ctx, "right")
+            @test haskey(ctx, "left")
+        end
+
+        @testset "rget_on_modify_or_expire_autodelete! returns KEY_NOT_FOUND on expired" begin
+            ctx = fresh_list_ctx()
+            expired_list = make_list_elem(["a", "b"])
+            expired_list.ttl = 1
+            expired_list.expires_at = now() - Second(10)
+            ctx["expired"] = expired_list
+            result = rget_on_modify_or_expire_autodelete!(ctx, "expired", lpop!, String[])
+            @test result.status == KEY_NOT_FOUND
+            @test !haskey(ctx, "expired")
+        end
+
+        @testset "expire_if_needed! marks tracker on expiry" begin
+            ctx = fresh_ctx()
+            tracker = DirtyTracker()
+            ctx["expired"] = RadishElement("old", 1, now() - Second(10), :string)
+            element = ctx["expired"]
+            expired = Radish.expire_if_needed!(ctx, "expired", element; tracker=tracker, t=now())
+            @test expired == true
+            @test haskey(tracker.deleted, "expired")
+            @test !haskey(ctx, "expired")
+        end
+
+        @testset "expire_if_needed! does nothing on live key" begin
+            ctx = fresh_ctx()
+            tracker = DirtyTracker()
+            ctx["alive"] = RadishElement("live", 3600, now(), :string)
+            element = ctx["alive"]
+            expired = Radish.expire_if_needed!(ctx, "alive", element; tracker=tracker, t=now())
+            @test expired == false
+            @test !haskey(tracker.deleted, "alive")
+            @test haskey(ctx, "alive")
         end
     end
 

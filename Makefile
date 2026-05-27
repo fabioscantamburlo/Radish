@@ -30,7 +30,7 @@ server-native:      ## Start server natively (no Docker, 8 threads)
 # =============================================================================
 
 client:             ## Attach interactive client (Docker, requires running server)
-	$(DC) --profile client run --rm --build radish-client
+	$(DC) --profile client run --rm radish-client
 
 client-native:      ## Start client natively (no Docker)
 	$(JULIA_NATIVE) client_runner.jl
