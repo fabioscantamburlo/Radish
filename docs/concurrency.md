@@ -6,7 +6,7 @@ nav_order: 10
 
 # Concurrency Model
 
-This is where Radish diverges most significantly from Redis. **Redis is single-threaded** — it processes one command at a time, which elegantly avoids all concurrency issues. **Radish is multi-threaded** — multiple clients are served concurrently, which requires explicit synchronization.
+This is where Radish diverges most from traditional in-memory databases. **Most production key-value stores are single-threaded** — they process one command at a time, which elegantly avoids all concurrency issues. **Radish is multi-threaded** — multiple clients are served concurrently, which requires explicit synchronization.
 
 This was a deliberate choice for the didactical goal: understanding concurrency primitives is essential for systems engineering, and Radish provides a real-world context to explore them.
 
@@ -83,6 +83,7 @@ The [dispatcher](dispatcher) determines whether a command needs a read or write 
 ```julia
 const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "S_LCS", "S_COMPLEN",
                        "L_GET", "L_LEN", "L_RANGE",
+                       "SET_GET", "SET_LEN",
                        "KLIST", "EXISTS", "TYPE", "TTL", "DBSIZE"])
 ```
 
@@ -141,7 +142,7 @@ Radish runs three background tasks using `Threads.@spawn` (each on its own OS th
 
 ### Async Cleaner (TTL Expiry)
 
-Redis uses a **lazy + probabilistic** approach to TTL expiry:
+Radish uses a **lazy + probabilistic** approach to TTL expiry:
 - **Lazy**: check on access (if a key is read and it's expired, delete it)
 - **Probabilistic**: periodically sample random keys and delete expired ones
 
@@ -199,9 +200,9 @@ This ensures no data corruption from concurrent access during the final snapshot
 
 ---
 
-## Comparing with Redis
+## Comparing with Traditional In-Memory Databases
 
-| Aspect | Redis | Radish |
+| Aspect | Single-threaded approach | Radish |
 |---|---|---|
 | Threading | Single-threaded | Multi-threaded |
 | Synchronization | Not needed (single thread) | Sharded locks (configurable: standard or fair) |
@@ -210,4 +211,4 @@ This ensures no data corruption from concurrent access during the final snapshot
 | TTL cleanup | Lazy + sampling | Lazy + sampling (same approach) |
 | Background I/O | Forked child process (COW) | Async task with read locks |
 
-The multi-threaded approach makes some challenges for Radish that Redis doesn't have to deal with (at least on a single machine, for Redis server I have yet to study the subject), such as deadlocks and race conditions. The author decided to use a multi-threaded approach to have fun trying to learn concurrencies problems on a single machine. 
+The multi-threaded approach creates challenges that single-threaded databases don't have to deal with, such as deadlocks and race conditions. The author chose a multi-threaded approach to explore concurrency problems on a single machine.

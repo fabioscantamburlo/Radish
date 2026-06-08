@@ -34,7 +34,7 @@ Connect and start sending commands.
 
 ## 2. RESP Wire Protocol
 
-Radish uses RESP (Redis Serialization Protocol). The implementation is
+Radish uses RESP (REdis Serialization Protocol). The implementation is
 compatible with RESP2 — no RESP3 extensions.
 
 ### Type Prefixes
@@ -589,7 +589,7 @@ A background cleaner also periodically samples keys and removes expired ones.
 
 This means:
 - A key may exist briefly after its TTL expires (until accessed or cleaned).
-- `DBSIZE` includes expired-but-not-yet-cleaned keys (same as Redis).
+- `DBSIZE` includes expired-but-not-yet-cleaned keys.
 - `KLIST` filters expired keys at read time and lazily deletes them.
 
 ---

@@ -307,20 +307,27 @@ end
 
 ```julia
 # Type command (rstrings.jl)
-function sadd(value::String, ttl::String)
-    ttl_p = tryparse(Int, ttl)
-    if ttl_p === nothing
-        return CommandError("TTL must be a valid integer")
-    end
-    elem = RadishElement(value, ttl_p, now(), :string)
+function sadd(args::Vector{String})
+    value = args[1]
+    elem = RadishElement(String(value), nothing, now(), :string)
     return CommandCreate(elem)
 end
 
-# Hypercommand (radishelem.jl)
-function radd!(context, key, command, args...)
+# Hypercommand: radd! (radishelem.jl) — create-only
+function radd!(context::Dict, key, command, args...)
     if haskey(context, key)
         return ExecuteResult(ERROR, nothing, "Key '$key' already exists")
     end
+    cmd_result = command(args...)
+    if !cmd_result.success
+        return ExecuteResult(ERROR, nothing, cmd_result.error)
+    end
+    context[key] = cmd_result.element
+    return ExecuteResult(SUCCESS, true, nothing)
+end
+
+# Hypercommand: radd_or_replace! (radishelem.jl) — create or overwrite (S_UPSERT)
+function radd_or_replace!(context::Dict, key, command, args...)
     cmd_result = command(args...)
     if !cmd_result.success
         return ExecuteResult(ERROR, nothing, cmd_result.error)

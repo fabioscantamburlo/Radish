@@ -13,19 +13,25 @@ Strings are the simplest data type in Radish — they store a single value as a 
 ## Basic Operations
 
 ```
-RADISH-CLI> S_SET greeting "hello" 60    # Set with 60s TTL
+RADISH-CLI> S_SET greeting "hello" 60    # Set with 60s TTL (create-only)
 OK
 RADISH-CLI> S_GET greeting
 ✅ hello
 RADISH-CLI> S_LEN greeting
 ✅ 5
+RADISH-CLI> S_UPSERT greeting "hi" 120  # Overwrite unconditionally
+OK
+RADISH-CLI> S_GET greeting
+✅ hi
 ```
+
+`S_SET` is create-only — it errors if the key already exists. `S_UPSERT` always succeeds, overwriting the existing value and TTL if the key exists.
 
 ---
 
 ## Numeric Operations
 
-String values that represent integers can be incremented atomically — a pattern Redis uses heavily for counters:
+String values that represent integers can be incremented atomically — a common pattern for counters in in-memory databases:
 
 ```
 RADISH-CLI> S_SET counter 100
@@ -43,7 +49,7 @@ RADISH-CLI> S_GET counter
 The `GINCR` variants (get-then-increment) are useful when you need the value *before* the increment — a common pattern in ID generation.
 
 {: .note }
-> If you try to `S_INCR` a string that isn't a valid integer, Radish returns an error — matching Redis's behavior.
+> If you try to `S_INCR` a string that isn't a valid integer, Radish returns an error.
 
 ---
 
@@ -79,13 +85,13 @@ RADISH-CLI> S_LCS a b
 ✅ [BCAB, 4]
 ```
 
-This is implemented using dynamic programming and returns both the subsequence and its length. Redis added LCS support in version 7.0 — Radish implements the same algorithm.
+This is implemented using dynamic programming and returns both the subsequence and its length.
 
 ---
 
 ## Implementation Detail
 
-All string values are stored as `String` — even when they represent integers. This matches Redis's behavior: values are bytes, and integer interpretation happens dynamically when needed (e.g., `S_INCR` parses the string, increments, and stores the result back as a string).
+All string values are stored as `String` — even when they represent integers. Values are bytes, and integer interpretation happens dynamically when needed (e.g., `S_INCR` parses the string, increments, and stores the result back as a string).
 
 ```julia
 # Read-only: return the element's value (always a String)

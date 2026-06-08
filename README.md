@@ -14,9 +14,10 @@ See the full documentation here: [Radish Documentation](https://fabioscantamburl
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| String Operations | ✅ | GET, SET, INCR, APPEND, LCS, padding, and more |
+| String Operations | ✅ | GET, SET, UPSERT, INCR, APPEND, LCS, padding, and more |
 | Linked Lists | ✅ | Custom doubly-linked list with O(1) push/pop |
-| RESP Protocol | ✅ | Redis Serialization Protocol for wire communication |
+| Sets | ✅ | Unordered collections with add, delete, random pop |
+| RESP Protocol | ✅ | RESP wire protocol for client-server communication |
 | Persistence | ✅ | Sharded RDB snapshots + AOF with crash recovery |
 | Transactions | ✅ | MULTI/EXEC/DISCARD with atomic execution |
 | Configuration | ✅ | YAML-based config for all tunable parameters |
@@ -37,6 +38,7 @@ Radish uses a **typed store** — one fully-typed dictionary per data type, unif
 mutable struct RadishStore
     strings::Dict{String, RadishElement{String}}
     lists::Dict{String, RadishElement{DLinkedStartEnd{String}}}
+    sets::Dict{String, RadishElement{Set{String}}}
     keytype::Dict{String, Symbol}   # global key → type index
 end
 ```
@@ -53,9 +55,7 @@ Only 3 external packages are used at runtime. Everything else — data structure
 |---------|---------|
 | **JSON3** | Serialization of snapshot data to sharded `.rdb` files |
 | **ConcurrentUtilities** | `ReadWriteLock` for the standard sharded lock (optional — the fair lock uses no external deps) |
-| **YAML** | Parses the `radish.yml` configuration file at startup |
-
----
+| **YAML** | Parses the `radish.yml` configuration file at startup |---
 
 ## Configuration
 
@@ -108,22 +108,36 @@ Radish runs fully in Docker. All commands go through `make`:
 **Build & Run**
 | Command | Description |
 |---------|-------------|
-| `make build` | Build the Docker image |
 | `make rebuild` | Force rebuild from scratch (no cache) |
 | `make server` | Start the server in the background |
 | `make server-logs` | Tail the server logs |
 | `make server-stop` | Stop the server |
+| `make server-native` | Start server natively (8 threads, no Docker) |
 
 **Client**
 | Command | Description |
 |---------|-------------|
 | `make client` | Attach an interactive client to the running server |
+| `make client-native` | Start client natively (no Docker) |
+
+**Tests**
+| Command | Description |
+|---------|-------------|
+| `make test` | Run unit tests (native) |
+| `make docker-test` | Run unit tests (Docker) |
+| `make smoke-test` | Smoke test (native client + Docker server) |
+
+**Benchmarks**
+| Command | Description |
+|---------|-------------|
+| `make bench-all` | All benchmarks Level 0-3 (native) |
+| `make docker-bench-all` | All benchmarks Level 0-3 (Docker) |
+| `make bench-diff BEFORE=dir1 AFTER=dir2` | Compare two result folders |
 
 **Docs**
 | Command | Description |
 |---------|-------------|
 | `make docs` | Start the Jekyll docs server at `http://localhost:4000` |
-| `make docs-build` | Build the docs Docker image |
 | `make docs-bg` | Start the docs server in the background |
 | `make docs-stop` | Stop the docs server |
 
@@ -140,11 +154,11 @@ Radish runs fully in Docker. All commands go through `make`:
 
 ## Limitations
 
-- Radish is slower than Redis, but reaches ~100k ops/s with pipelined Python clients — in the same order of magnitude for simple workloads. The gap widens under high concurrency and complex operations.
+- Radish is slower than production in-memory databases, but reaches ~50k ops/s with pipelined clients (single-client, batch=100) — reasonable for a didactical project. The gap widens under high concurrency and complex operations.
 
 - Radish has limitations in terms of scalability. It's not designed to be scaled out of a single machine. 
 
-- Radish does not support bulk insert commands, for instance it is not possible to insert multiple *strings* with a single command, nor to create a *list* of n elements with a single command. This may be resolved in the future.
+- Radish does not support bulk insert commands, for instance it is not possible to insert multiple *strings* with a single command (no MSET), nor to create a *list* of n elements with a single command. This may be resolved in the future.
 
 - Many more limitations exist — if you spot one, please open an issue. It's always fun to receive an external point of view.
 
@@ -156,13 +170,25 @@ Full documentation is available at the project's GitHub Pages site, covering eac
 
 ---
 
+## Python Client
+
+RadishPy is a full-featured Python client library for Radish with support for all commands, pipelining, and transactions.
+
+```
+radishpy = { git = "https://github.com/fascanta2101/Radishpy.git" }
+```
+
+See the [Client Implementation Guide](https://fabioscantamburlo.github.io/Radish/client_implementation_guide) for the wire protocol specification if you want to build your own client in another language.
+
+---
+
 ## TODO
 
-🔴 **High priority** — unit tests, integration/Docker tests
+🔴 **High priority** — unit tests (TTL, transactions, dispatcher, persistence, concurrency), integration/Docker tests
 
 🟡 **Medium priority** — `INFO` command
 
-🟢 **Low priority** — hash maps, sets, sorted sets, Python client, observability, performance
+🟢 **Low priority** — hash maps, sorted sets, observability (Prometheus, structured logging)
 
 See [`TODO.md`](TODO.md) for the full detailed tracker.
 

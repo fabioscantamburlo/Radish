@@ -19,7 +19,7 @@
 | F.5 | No SCAN cursor-based iteration | 🟡 Medium | Medium | Open |
 | F.6 | L_GET hardcoded display limit | 🟢 Low | Very Low | Open |
 | F.7 | No hash map data type | 🔴 High | Medium | Open |
-| F.8 | No set data type | 🟡 Medium | Medium | Open |
+| F.8 | No set data type | 🟡 Medium | Medium | ✅ Done |
 | F.9 | Client has no reconnection logic | 🟢 Low | Low | Open |
 
 ---

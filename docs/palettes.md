@@ -33,7 +33,7 @@ The palette defines every command that a specific data type supports, along with
 
 # Command Palettes in detail
 
-Radish has four **palettes**: one for each data type, plus two special palettes for operations that are type-agnostic.
+Radish has five **palettes**: one for each data type, plus two special palettes for operations that are type-agnostic.
 
 The [dispatcher](dispatcher) checks palettes in order via `route_command`:
 
@@ -45,11 +45,12 @@ NOKEY_PALETTE = Dict{String, Function}(...)
 META_PALETTE = Dict{String, Tuple{Function, Int}}(...)
 
 # 3. Type palettes — registered in TYPE_PALETTES for automatic dispatch
-S_PALETTE  = Dict{String, Tuple}(...)   # String commands
-LL_PALETTE = Dict{String, Tuple}(...)   # Linked list commands
+S_PALETTE   = Dict{String, Tuple}(...)   # String commands
+LL_PALETTE  = Dict{String, Tuple}(...)   # Linked list commands
+SET_PALETTE = Dict{String, Tuple}(...)   # Set commands
 ```
 
-`NOKEY_PALETTE` maps to standalone functions that return `ExecuteResult`. `META_PALETTE` maps to `(function, num_extra_args)` tuples. `S_PALETTE` and `LL_PALETTE` map to `(type_command, hypercommand)` tuples — this is the [delegation pattern](architecture) at work.
+`NOKEY_PALETTE` maps to standalone functions that return `ExecuteResult`. `META_PALETTE` maps to `(function, num_extra_args)` tuples. `S_PALETTE`, `LL_PALETTE`, and `SET_PALETTE` map to `(type_command, hypercommand)` tuples — this is the [delegation pattern](architecture) at work.
 
 ---
 
@@ -142,6 +143,32 @@ const LL_PALETTE = Dict{String, Tuple}(
 | `L_TRIMR` | Keeps only the first N elements; deletes the key if the list becomes empty |
 | `L_TRIML` | Keeps only the last N elements; deletes the key if the list becomes empty |
 | `L_MOVE` | Appends key2's elements onto key1's tail; key2 is deleted. Surviving key is key1. |
+
+---
+
+## SET_PALETTE — Sets
+
+Commands that operate on unordered set values.
+
+```julia
+const SET_PALETTE = Dict{String, Tuple}(
+    "SET_ADD"    => (setadd!,           radd_or_modify!),
+    "SET_GET"    => (setget,            rget_or_expire!),
+    "SET_DEL"    => (setdel!,           rmodify_autodelete!),
+    "SET_GETDEL" => (setgetdel!,        rget_on_modify_or_expire_autodelete!),
+    "SET_POP"    => (setgetdelrandom!,  rget_on_modify_or_expire_autodelete!),
+    "SET_LEN"    => (setlen,            rget_or_expire!),
+)
+```
+
+| Command | What it does |
+|---|---|
+| `SET_ADD` | Adds a value to the set; creates the set if it does not exist |
+| `SET_GET` | Returns all elements, or N random elements if an argument is given |
+| `SET_DEL` | Removes a specific element from the set; auto-deletes if empty |
+| `SET_GETDEL` | Removes and returns a specific element; auto-deletes if empty |
+| `SET_POP` | Removes and returns N random elements; auto-deletes if empty |
+| `SET_LEN` | Returns the cardinality of the set |
 
 ---
 
@@ -239,6 +266,7 @@ Adding an entirely new data type requires:
    const TYPE_PALETTES = [
        (:string, S_PALETTE),
        (:list,   LL_PALETTE),
+       (:set,    SET_PALETTE),
        (:hash,   H_PALETTE),   # ← new
    ]
    ```

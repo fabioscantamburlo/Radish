@@ -156,8 +156,8 @@
 ## 🟢 LOW PRIORITY
 
 ### Enhanced Data Structures
+- ✅ Sets (SET_ADD, SET_GET, SET_DEL, SET_GETDEL, SET_POP, SET_LEN)
 - [ ] Hash Maps (H_SET, H_GET, H_GETALL, H_DEL, H_EXISTS, H_LEN, H_KEYS, H_VALS, H_INCRBY)
-- [ ] Sets (S_ADD, S_REM, S_MEMBERS, S_ISMEMBER, S_CARD, S_INTER, S_UNION, S_DIFF)
 - [ ] Sorted Sets (Z_ADD, Z_RANGE, Z_RANK, Z_SCORE, Z_REM)
 
 ### Python Client

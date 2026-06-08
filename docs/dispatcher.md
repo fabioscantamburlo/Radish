@@ -55,6 +55,7 @@ This is the single source of truth for "given a command, what do I do with it?" 
 const TYPE_PALETTES = [
     (:string, S_PALETTE),
     (:list,   LL_PALETTE),
+    (:set,    SET_PALETTE),
     # (:hash, H_PALETTE),  # ← future
 ]
 ```
@@ -81,8 +82,8 @@ The lock strategy is determined by the command type:
 | Command Type | mode | scope | Example |
 |---|---|---|---|
 | `PING`, `QUIT`, `DBSIZE` | `:none` | `:none` | No lock needed |
-| `S_GET`, `L_LEN`, `EXISTS`, `TYPE`, `TTL` | `:read` | `:single` | Read lock on key's shard |
-| `S_SET`, `S_INCR`, `DEL`, `PERSIST`, `EXPIRE` | `:write` | `:single` | Write lock on key's shard |
+| `S_GET`, `L_LEN`, `EXISTS`, `TYPE`, `TTL`, `SET_GET`, `SET_LEN` | `:read` | `:single` | Read lock on key's shard |
+| `S_SET`, `S_INCR`, `DEL`, `PERSIST`, `EXPIRE`, `SET_ADD`, `SET_DEL`, `SET_POP` | `:write` | `:single` | Write lock on key's shard |
 | `S_LCS`, `S_COMPLEN` | `:read` | `:multi` | Read locks on both keys' shards |
 | `L_MOVE`, `RENAME` | `:write` | `:multi` | Write locks on both keys' shards |
 | `KLIST` | `:read` | `:all` | Read locks on all shards |
@@ -151,7 +152,7 @@ end
 This means adding a new data type automatically gets type validation — no extra code needed.
 
 {: .note }
-> Redis returns `WRONGTYPE Operation against a key holding the wrong kind of value` — Radish follows the same pattern, including the key name and its actual type in the message.
+> The `WRONGTYPE` error pattern follows the convention of returning the actual key type in the message, making debugging easier for client applications.
 
 ---
 

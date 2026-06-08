@@ -24,7 +24,7 @@ Simple comparison between `Vector` type in Julia and a `Doubly-Linked List` type
 | Random access | **O(1)** | O(n) |
 | Memory overhead | Lower | Higher (prev/next pointers) |
 
-Redis uses linked lists (or more precisely, quicklists) for its List type because the primary use case is **queue/stack operations** — push and pop from either end. Random access (`LRANGE`) is less common and can tolerate O(n).
+Most in-memory databases use linked lists (or quicklists) for their List type because the primary use case is **queue/stack operations** — push and pop from either end. Random access (`LRANGE`) is less common and can tolerate O(n).
 
 Radish follows the same reasoning: `L_PREPEND`, `L_APPEND`, `L_POP`, and `L_DEQUEUE` are all O(1).
 
@@ -85,6 +85,23 @@ RADISH-CLI> L_POP stack        # → frame2 (last in, first out)
 
 ---
 
+## Bulk Pop / Dequeue
+
+`L_MPOP` and `L_MDEQUEUE` remove and return multiple elements at once:
+
+```
+RADISH-CLI> L_APPEND batch item1
+RADISH-CLI> L_APPEND batch item2
+RADISH-CLI> L_APPEND batch item3
+RADISH-CLI> L_APPEND batch item4
+RADISH-CLI> L_MPOP batch 2      # → ["item4", "item3"] (from tail)
+RADISH-CLI> L_MDEQUEUE batch 2  # → ["item1", "item2"] (from head)
+```
+
+If N is greater than or equal to the list length, all elements are returned and the key is auto-deleted.
+
+---
+
 ## List Merging
 
 `L_MOVE` appends the second list's elements onto the first list's tail, then deletes the second key. The surviving key is the first argument.
@@ -114,4 +131,4 @@ RADISH-CLI> L_TRIML tasks 1    # Keep only last 1 element
 
 ## Auto-Cleanup
 
-When a list becomes empty (e.g., after popping the last element), Radish automatically deletes the key from the context. This prevents "ghost keys" — empty lists taking up space in the dictionary. Redis does the same thing.
+When a list becomes empty (e.g., after popping the last element), Radish automatically deletes the key from the context. This prevents "ghost keys" — empty lists taking up space in the dictionary.

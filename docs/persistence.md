@@ -6,7 +6,7 @@ nav_order: 11
 
 # Persistence
 
-One of the core challenges of any in-memory database is **durability** — what happens when the server crashes or restarts? Radish implements a dual-strategy persistence model inspired by Redis: **RDB snapshots** for periodic full-state captures and **AOF (Append-Only File)** for real-time write logging.
+One of the core challenges of any in-memory database is **durability** — what happens when the server crashes or restarts? Radish implements a dual-strategy persistence model: **RDB snapshots** for periodic full-state captures and **AOF (Append-Only File)** for real-time write logging.
 
 On top of that another idea is to avoid full writes every time if you already know a lot of keys are the same. For doing that, Radish implements a **DirtyTracker** that tries to rewrite only the keys that are changed.
 
@@ -26,7 +26,7 @@ Each has trade-offs:
 | RDB Snapshots | Compact, fast to load | Last few seconds of writes can be lost |
 | AOF Log | No data loss (every write logged) | File grows unbounded, slower recovery |
 
-Radish uses **both** — just like Redis. Snapshots provide the baseline, and AOF fills the gap between snapshots.
+Radish uses **both**. Snapshots provide the baseline, and AOF fills the gap between snapshots.
 
 ---
 
@@ -83,7 +83,7 @@ mv(temp_path, path, force=true)
 If the server crashes mid-write, the original shard file remains intact. The temp file is cleaned up on next startup.
 
 {: .note }
-> Redis uses the same temp-file-and-rename pattern for its RDB files, guaranteeing that a snapshot is either fully written or not written at all.
+> The temp-file-and-rename pattern guarantees that a snapshot is either fully written or not written at all — a standard approach for atomic file operations.
 
 ---
 

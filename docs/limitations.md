@@ -12,11 +12,11 @@ Radish is a didactical project — it was built to learn and have fun.  This pag
 
 ## Performance
 
-Radish reaches ~100k ops/s with pipelined Python clients — in the same order of magnitude as Redis for simple pipelined workloads. However, the gap widens significantly under production conditions:
+Radish reaches ~43-51k ops/s with pipelined clients (single-client, batch=100-500) over native TCP, and ~6k ops/s for single-command latency. While respectable for a didactical project, the gap with production databases is significant under heavy conditions:
 
-- **High concurrency** — Redis handles 10,000+ concurrent clients with a single-threaded epoll loop. Radish spawns a Julia task per client, and throughput degrades past ~64 concurrent workers on hot keys.
-- **Memory efficiency** — Redis uses specialized encodings (SDS, ziplist, intset). Radish stores Julia objects with GC headers and Dict overhead.
-- **Latency tail** — Julia's stop-the-world GC can cause millisecond-level p99 spikes. Redis's p99 is microseconds.
+- **High concurrency** — production in-memory stores handle 10,000+ concurrent clients with a single-threaded epoll loop. Radish spawns a Julia task per client, and throughput degrades past ~64 concurrent workers on hot keys.
+- **Memory efficiency** — production systems use specialized encodings (SDS, ziplist, intset). Radish stores Julia objects with GC headers and Dict overhead.
+- **Latency tail** — Julia's stop-the-world GC can cause millisecond-level p99 spikes. Production databases achieve microsecond p99.
 - **Multi-threaded overhead** — the fair lock adds ~50-60ns per command for acquire/release. Even read operations acquire locks.
 
 ---
@@ -33,19 +33,19 @@ Radish is designed for a single machine only. There is no support for:
 
 ## Data Types
 
-Only **two data types** are currently implemented:
+Only **three data types** are currently implemented:
 
 | Type | Status |
 |---|---|
-| Strings | Implemented |
-| Linked Lists | Implemented |
+| Strings | ✅ Implemented |
+| Linked Lists | ✅ Implemented |
+| Sets | ✅ Implemented |
 | Hashes | Not implemented |
-| Sets | Not implemented |
 | Sorted Sets | Not implemented |
 | Streams | Not implemented |
 | HyperLogLog | Not implemented |
 
-Adding new types is straightforward (see [Adding a New Data Type](palettes#adding-a-new-data-type)), but only strings and lists exist today.
+Adding new types is straightforward (see [Adding a New Data Type](palettes#adding-a-new-data-type)), and the three existing types cover the most common use cases.
 
 ---
 
@@ -69,7 +69,7 @@ There is no password protection or authentication mechanism. Any client that can
 
 ## CLI Limitations
 
-The Radish-CLI has basic interactive features (command history, tab completion, cursor movement, Ctrl+L to clear screen) but is still limited compared to production CLIs like `redis-cli`:
+The Radish-CLI has basic interactive features (command history, tab completion, cursor movement, Ctrl+L to clear screen) but is still limited compared to production database CLIs:
 
 - No syntax highlighting
 - No multi-line input or quoting (values with spaces are not supported — see below)
@@ -81,15 +81,15 @@ The Radish-CLI has basic interactive features (command history, tab completion, 
 ---
 
 
-## Python Client Available
+## Python Client
 
-RadishPy is a Python client library for Radish with full command support, pipelining, and connection pooling. See the [Client Implementation Guide](client_implementation_guide) for the protocol specification.
+RadishPy is a Python client library for Radish with full command support, pipelining, and transactions. See the [Client Implementation Guide](client_implementation_guide) for the protocol specification.
 
 ---
 
 ## No Pub/Sub
 
-Redis's publish/subscribe messaging pattern is not implemented. There are no `SUBSCRIBE`, `PUBLISH`, or `PSUBSCRIBE` commands. Clients can only interact through direct command-response cycles.
+The publish/subscribe messaging pattern is not implemented. There are no `SUBSCRIBE`, `PUBLISH`, or `PSUBSCRIBE` commands. Clients can only interact through direct command-response cycles.
 
 ---
 
@@ -101,9 +101,9 @@ Blocking commands like `BLPOP`, `BRPOP`, and `BLMOVE` are not implemented. These
 
 ## Transaction Limitations
 
-Transactions (MULTI/EXEC) have several constraints compared to Redis:
+Transactions (MULTI/EXEC) have several constraints:
 
-- **No WATCH/UNWATCH** — Redis's optimistic locking mechanism for check-and-set patterns is not available
+- **No WATCH/UNWATCH** — optimistic locking for check-and-set patterns is not available
 - **Write locks for everything** — even read-only commands within a transaction acquire write locks, which is simpler but more restrictive than necessary
 - **No rollback** — if one command in a transaction fails, the remaining commands still execute. The error is included in the result array, but previous commands are not undone
 
@@ -143,7 +143,7 @@ When the server starts with an empty database (no snapshots to load), it inserts
 
 ## No Lua Scripting
 
-Redis supports server-side Lua scripting via `EVAL` and `EVALSHA`. Radish has no equivalent — all logic must be driven from the client side, possibly using transactions for atomicity.
+Server-side scripting via `EVAL` and `EVALSHA` is not supported. All logic must be driven from the client side, possibly using transactions for atomicity.
 
 ---
 
@@ -155,4 +155,4 @@ Expired keys are cleaned up through two mechanisms: lazy deletion on access and 
 - The cleaner samples a subset of keys each cycle — it does not check every key every time
 - Under high key counts, the cleaner only samples a configurable percentage (default: 10%), so expired keys may linger longer
 
-This is the same approach Redis uses, but worth noting as a limitation for time-sensitive use cases.
+This is a standard approach for in-memory databases, but worth noting as a limitation for time-sensitive use cases.
