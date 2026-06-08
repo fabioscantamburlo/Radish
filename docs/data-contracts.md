@@ -58,6 +58,7 @@ end
 CommandSuccess(value)           # Success with a return value
 CommandError(msg::String)       # Failure with error message
 CommandCreate(elem::RadishElement)  # Success, created new element
+CommandDirect(value)            # Bypass — value passed directly to ExecuteResult
 ```
 
 **Examples:**
@@ -73,6 +74,10 @@ CommandCreate(RadishElement("world", nothing, now(), :string))
 
 # Error: value is not an integer
 CommandError("Value 'abc' is not an integer")
+
+# Direct value — bypasses CommandResult extraction, value goes straight to ExecuteResult
+CommandDirect(["a", "b", "c"])   # Used by L_GET, L_RANGE, SET_GET, S_LCS
+CommandDirect("popped_value")    # Used by L_POP, L_DEQUEUE, SET_GETDEL
 ```
 
 **Flow:** Type command → `CommandResult` → Hypercommand

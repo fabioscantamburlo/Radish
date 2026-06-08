@@ -57,7 +57,9 @@ Radish does not support bulk insert commands. For example:
 - You cannot create a list with multiple elements in a single command
 - Each value must be inserted with its own individual command
 
-This can be partially worked around using [transactions](transactions) (MULTI/EXEC), which at least execute multiple commands atomically, but each command is still sent individually.
+Bulk *reads* are supported — `L_MPOP` and `L_MDEQUEUE` return multiple elements in a single operation, and `SET_GET` / `SET_POP` can return N elements at once.
+
+For bulk writes, you can use [transactions](transactions) (MULTI/EXEC) to execute multiple commands atomically, or [pipelining](concurrency#batch-execution-pipelining) to send many commands in a single round-trip. Both work around the single-command limitation with good performance.
 
 ---
 

@@ -3,6 +3,9 @@
 > Everything needed to build a Radish client in any language.
 > This document is the specification for RadishPy and any future client library.
 
+{: .note }
+> **RadishPy** is the official Python client for Radish, implementing everything described in this guide. It's available at [github.com/fabioscantamburlo/Radishpy](https://github.com/fabioscantamburlo/Radishpy). If you just want to connect to Radish from Python, use RadishPy directly. This guide is for building clients in other languages or understanding the protocol internals.
+
 ---
 
 ## 1. Connection Lifecycle

@@ -89,7 +89,22 @@ If the server crashes mid-write, the original shard file remains intact. The tem
 
 ## Dirty Tracking
 
-To know *which* shards need updating, Radish maintains a `DirtyTracker`:
+### The Naive Alternative
+
+The simplest persistence strategy is to dump the entire database to disk periodically — serialize every single key, every cycle, regardless of what changed. This is what a "full snapshot on timer" approach looks like:
+
+1. Every 5 seconds, acquire a lock on the entire store
+2. Iterate all keys (could be millions)
+3. Serialize each one to disk
+4. Release the lock
+
+This works, but it's wasteful. If you have 1 million keys and only 50 changed since the last snapshot, you're still rewriting 999,950 keys for no reason. The disk I/O scales with total database size rather than write throughput, and the all-keys lock blocks clients for the entire serialization time.
+
+### How Dirty Tracking Solves This
+
+Radish takes a different approach: **track what changed, only persist the delta.**
+
+The `DirtyTracker` is a lightweight bookkeeper that records which keys were modified or deleted since the last snapshot sync:
 
 ```julia
 mutable struct DirtyTracker
@@ -99,9 +114,56 @@ mutable struct DirtyTracker
 end
 ```
 
-Every hypercommand that modifies state calls `mark_dirty!(tracker, key, datatype)` or `mark_deleted!(tracker, key, datatype)`. The type is recorded so the syncer knows which typed dictionary to read from when serializing. The background syncer then **pops** these changes atomically and applies them to the snapshot files.
+Every hypercommand that modifies state calls `mark_dirty!(tracker, key, datatype)` or `mark_deleted!(tracker, key, datatype)`. These calls happen inline during command execution — they're just a dictionary insertion, costing nanoseconds.
 
-This design means the server never blocks waiting for disk I/O during normal operation — dirty tracking is just a `Set` insertion.
+### The Sync Cycle
+
+When the background syncer wakes up (every [`sync_interval_sec`](configuration)), it:
+
+1. **Pops** the dirty sets atomically — swaps them with fresh empty dicts under the lock. This is O(1) and takes microseconds regardless of how many keys are dirty.
+2. **Computes affected shards** — hashes each dirty key to find which shard files need rewriting.
+3. **Acquires read locks only on affected shards** — not the whole database, just the 3-5 shards that actually changed.
+4. **Rewrites only those shard files** — serializes the current state of dirty shards to disk.
+5. **Truncates the AOF** — the snapshot now covers everything, so the AOF can be emptied.
+
+The key insight: if 50 keys changed across 3 shards, the syncer rewrites 3 out of 256 shard files. The other 253 remain untouched on disk.
+
+### Why This Is Clever
+
+| Metric | Full snapshot | Dirty tracking |
+|---|---|---|
+| Disk I/O per sync | O(total keys) | O(dirty keys) |
+| Lock scope | All shards (blocking) | Only dirty shards (read lock) |
+| Client impact | Blocked during entire serialize | Minimal — only affected shards briefly read-locked |
+| Write amplification | 1M keys → 1M serialized | 50 dirty keys → 3 shards rewritten |
+| Idle database cost | Full rewrite every cycle | Zero I/O (nothing dirty) |
+
+The tracker also stores the **datatype** alongside each key. This tells the syncer which typed dictionary (`store.strings`, `store.lists`, `store.sets`) to read from when serializing — no need to probe all dicts looking for the key.
+
+### The Pop-and-Swap Pattern
+
+The `pop_changes!` function is the critical synchronization point between the hot path (client handlers marking keys dirty) and the cold path (syncer writing to disk):
+
+```julia
+function pop_changes!(tracker::DirtyTracker)
+    lock(tracker.lock) do
+        modified = tracker.modified
+        deleted = tracker.deleted
+        tracker.modified = Dict{String, Symbol}()
+        tracker.deleted = Dict{String, Symbol}()
+        return modified, deleted
+    end
+end
+```
+
+This swap is O(1) — it just moves two dict pointers. After the swap, client handlers write to fresh empty dicts (zero contention with the syncer), while the syncer processes the old dicts at its own pace without holding any lock.
+
+### Edge Cases
+
+- **Key modified then deleted in the same cycle** — appears in both `modified` and `deleted`. The syncer processes deletions after modifications, so the key is correctly removed from the shard file.
+- **Same key modified multiple times** — only recorded once in `modified` (dict semantics — last write wins for the datatype symbol, but it doesn't matter because the syncer reads the *current* value from the store, not a cached one).
+- **No dirty keys** — syncer checks `isempty(modified) && isempty(deleted)` and skips entirely. Zero disk I/O on idle databases.
+
 
 ---
 

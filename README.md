@@ -175,20 +175,8 @@ Full documentation is available at the project's GitHub Pages site, covering eac
 RadishPy is a full-featured Python client library for Radish with support for all commands, pipelining, and transactions.
 
 ```
-radishpy = { git = "https://github.com/fascanta2101/Radishpy.git" }
+radishpy = { git = "https://github.com/fabioscantamburlo/Radishpy.git" }
 ```
 
 See the [Client Implementation Guide](https://fabioscantamburlo.github.io/Radish/client_implementation_guide) for the wire protocol specification if you want to build your own client in another language.
-
----
-
-## TODO
-
-🔴 **High priority** — unit tests (TTL, transactions, dispatcher, persistence, concurrency), integration/Docker tests
-
-🟡 **Medium priority** — `INFO` command
-
-🟢 **Low priority** — hash maps, sorted sets, observability (Prometheus, structured logging)
-
-See [`TODO.md`](TODO.md) for the full detailed tracker.
 
