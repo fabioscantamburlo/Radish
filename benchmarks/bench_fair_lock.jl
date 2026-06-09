@@ -1,13 +1,11 @@
 #!/usr/bin/env julia
 
 # =============================================================================
-# FairShardedLock Scaling Benchmark
+# SimpleFairShardedLock Scaling Benchmark
 #
-# Compares FairShardedLock vs ShardedLock (ReadWriteLock) from 1 → 16384 workers.
-#
-# All worker functions are NAMED (not anonymous closures) and specialized on lock
-# type. A shared warmup phase compiles all of them before the real measurement
-# loop starts. This eliminates JIT compilation noise from the measurements.
+# Compares SimpleFairShardedLock vs ShardedLock (ConcurrentUtilities.ReadWriteLock)
+# from 1 → 16384 workers. Demonstrates that SimpleFairShardedLock avoids writer
+# starvation under high contention where ReadWriteLock fails.
 #
 # Run: julia --threads=8 --project=. benchmarks/bench_fair_lock.jl
 # =============================================================================
@@ -15,10 +13,16 @@
 using Pkg
 Pkg.activate(joinpath(@__DIR__, ".."))
 
-include(joinpath(@__DIR__, "..", "src", "fair_sharded_lock.jl"))
+module SFLock
+    abstract type AbstractShardedLock end
+    include(joinpath(@__DIR__, "..", "src", "simple_fair_sharded_lock.jl"))
+end
 
-# Current ShardedLock in a sub-module to avoid name clash with fair_sharded_lock.jl
+using .SFLock: SimpleFairShardedLock, shard_id, acquire_read!, acquire_write!, release_read!, release_write!
+
+# ShardedLock (ConcurrentUtilities.ReadWriteLock) in a sub-module to avoid name clash
 module OldLock
+    abstract type AbstractShardedLock end
     using ConcurrentUtilities: ReadWriteLock, readlock, readunlock
     include(joinpath(@__DIR__, "..", "src", "sharded_lock.jl"))
 end
@@ -57,9 +61,9 @@ end
 # Named worker functions — compiled once, specialized per lock type
 # =============================================================================
 
-# ── FairShardedLock workers ──────────────────────────────────────────────────
+# ── SimpleFairShardedLock workers ────────────────────────────────────────────
 
-function fair_distributed_9010(lock::FairShardedLock, ops::Int)
+function fair_distributed_9010(lock::SimpleFairShardedLock, ops::Int)
     for _ in 1:ops
         key = "k_$(rand(1:10_000))"
         s = shard_id(lock, key)
@@ -71,7 +75,7 @@ function fair_distributed_9010(lock::FairShardedLock, ops::Int)
     end
 end
 
-function fair_hotkey_9010(lock::FairShardedLock, sid::Int, ops::Int)
+function fair_hotkey_9010(lock::SimpleFairShardedLock, sid::Int, ops::Int)
     for _ in 1:ops
         if rand() < 0.9
             acquire_read!(lock, sid); release_read!(lock, sid)
@@ -113,7 +117,7 @@ function warmup_all(warmup_ops::Int=5_000)
     println("  Warming up (compiling all worker functions)...")
 
     # Warmup each function with REAL types so Julia's specializer kicks in
-    fair = FairShardedLock(256)
+    fair = SimpleFairShardedLock(256)
     fair_sid = shard_id(fair, "WARMUP")
     fair_distributed_9010(fair, warmup_ops)
     fair_hotkey_9010(fair, fair_sid, warmup_ops)
@@ -184,7 +188,7 @@ function run_benchmarks()
     worker_counts = [1, 2, 4, 8, 16, 32, 64, 128, 256, 512, 1024, 2048, 4096, 8192, 16384]
 
     println("╔══════════════════════════════════════════════════════════════════════════════╗")
-    println("║  Lock Scaling Benchmark — FairShardedLock vs ShardedLock (ReadWriteLock)     ║")
+    println("║  Lock Scaling Benchmark — SimpleFairShardedLock vs ShardedLock               ║")
     println("╚══════════════════════════════════════════════════════════════════════════════╝")
     println()
     println("  Threads: $(nthreads())")
@@ -196,10 +200,10 @@ function run_benchmarks()
 
     warmup_all()
 
-    # ── Distributed 90/10 r/w — FairShardedLock ──────────────────────
-    println("── Distributed 90/10 r/w — FairShardedLock ────────────────────────────────")
+    # ── Distributed 90/10 r/w — SimpleFairShardedLock ───────────────
+    println("── Distributed 90/10 r/w — SimpleFairShardedLock ───────────────────────────")
     for nw in worker_counts
-        l = FairShardedLock(256)
+        l = SimpleFairShardedLock(256)
         per_op, ops_sec = bench_concurrent(fair_distributed_9010, (l,), nw, OPS)
         per_op < 0 ? println("  $(rpad("$(fmt_num(nw))w", 20))     TIMED OUT") :
                      report("$(fmt_num(nw))w", per_op, ops_sec, nw, OPS)
@@ -216,10 +220,10 @@ function run_benchmarks()
     end
     println()
 
-    # ── Hot-key 90/10 r/w — FairShardedLock ──────────────────────────
-    println("── Hot-key 90/10 r/w — FairShardedLock ────────────────────────────────────")
+    # ── Hot-key 90/10 r/w — SimpleFairShardedLock ───────────────────
+    println("── Hot-key 90/10 r/w — SimpleFairShardedLock ───────────────────────────────")
     for nw in worker_counts
-        l = FairShardedLock(256)
+        l = SimpleFairShardedLock(256)
         sid = shard_id(l, "HOT")
         per_op, ops_sec = bench_concurrent(fair_hotkey_9010, (l, sid), nw, OPS)
         per_op < 0 ? println("  $(rpad("$(fmt_num(nw))w", 20))     TIMED OUT") :

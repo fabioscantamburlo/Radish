@@ -9,7 +9,7 @@ using Logging
 
 # Pre-interned type name strings — avoids string allocation per rtype call
 # Adding a new type: add an entry here
-const TYPE_NAMES = Dict{Symbol, String}(:string => "string", :list => "list")
+const TYPE_NAMES = Dict{Symbol, String}(:string => "string", :list => "list", :set => "set")
 
 """List all keys with their types, filtering expired ones.
 Uses store_typed_dicts for type-agnostic iteration.

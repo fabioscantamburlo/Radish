@@ -302,7 +302,7 @@ function show_help()
       L_ADD <key> <value>        - Create new list with value
       L_PREPEND <key> <value>    - Add to head (create if not exists)
       L_APPEND <key> <value>     - Add to tail (create if not exists)
-      L_GET <key>                - Get list (first 50 elements)
+      L_GET <key>                - Get all elements of the list
       L_RANGE <key> <s> <e>      - Get elements from start to end index
       L_LEN <key>                - Get list length
       L_POP <key>                - Remove and return tail element

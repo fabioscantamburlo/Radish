@@ -55,7 +55,7 @@ Only 3 external packages are used at runtime. Everything else — data structure
 |---------|---------|
 | **JSON3** | Serialization of snapshot data to sharded `.rdb` files |
 | **ConcurrentUtilities** | `ReadWriteLock` for the standard sharded lock (optional — the fair lock uses no external deps) |
-| **YAML** | Parses the `radish.yml` configuration file at startup |---
+| **YAML** | Parses the `radish.yml` configuration file at startup |
 
 ## Configuration
 
@@ -71,6 +71,7 @@ persistence:
   snapshots_subdir: "snapshots"
   aof_subdir: "aof"
   aof_filename: "radish.aof"
+  aof_sync_ms: 1000           # 0 = flush every command, N>0 = flush every N ms
 
 background_tasks:
   sync_interval_sec: 5
@@ -83,6 +84,10 @@ concurrency:
 ttl_cleanup:
   sampling_threshold: 100000
   sample_percentage: 0.10
+
+client:
+  pipeline_batch: 1000       # Commands per pipeline batch (0 = no pipelining)
+  pipeline_flush_ms: 5       # Flush after this many ms even if batch not full
 ```
 
 Edit `radish.yml` to adapt Radish to your use-case. CLI arguments for host/port override the config file values. You can also pass a custom config path as the third argument:

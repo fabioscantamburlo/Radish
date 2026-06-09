@@ -141,15 +141,16 @@ It returns the list trimmed on the right by value
 """
 function _ltrimr!(list::DLinkedStartEnd, value::Int)
     
-    if value == 0
-        @warn "While trimming a list, value must be > 0" value=value
+    if value <= 0
+        list.head = nothing
+        list.tail = nothing
+        list.len = 0
         return
     end
     iterator = 1
     j = list.head
     len = list.len
     if len <= value
-        @warn "Trimming a list — nothing changes" len=len value=value
         return
     end
 
@@ -157,7 +158,6 @@ function _ltrimr!(list::DLinkedStartEnd, value::Int)
     while iterator < value
         j = j.next
         iterator = iterator + 1
-        # @info "iterator '$iterator'"
     end
     
     j.next = nothing
@@ -185,15 +185,16 @@ It returns the list trimmed on the left by value
 """
 function _ltriml!(list::DLinkedStartEnd, value::Int)
     
-    if value == 0
-        @warn "While trimming a list, value must be > 0" value=value
+    if value <= 0
+        list.head = nothing
+        list.tail = nothing
+        list.len = 0
         return
     end
     iterator = 1
     j = list.tail
     len = list.len
     if len <= value
-        @warn "Trimming a list — nothing changes" len=len value=value
         return
     end
 
