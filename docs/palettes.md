@@ -6,10 +6,10 @@ nav_order: 5
 
 # Command Palettes introduction
 
-A **palette** is a dictionary that maps command names to `(type_command, hypercommand)` pairs. Each data type defines its own palette, and that palette is the single contract between the data type and the rest of the system.
+A **palette** is a dictionary that maps command names to handler definitions. Each data type defines its own palette, and that palette is the single contract between the data type and the rest of the system.
 
 ```julia
-# String Palette
+# String Palette — maps command names to (type_command, hypercommand) pairs
 S_PALETTE = Dict{String, Tuple}(
     "S_GET"     => (sget, rget_or_expire!),
     "S_SET"     => (sadd, radd!),
@@ -33,25 +33,40 @@ The palette defines every command that a specific data type supports, along with
 
 # Command Palettes in detail
 
-Radish has several **palettes**, one for each datatype and on top of that, plus two special palettes for operations that are type-agnostic.
+Radish has five **palettes**: one for each data type, plus two special palettes for operations that are type-agnostic.
 
-The [dispatcher](dispatcher) checks all four palettes to route any incoming command:
+The [dispatcher](dispatcher) checks palettes in order via `route_command`:
 
 ```julia
 # 1. No-key commands (PING, KLIST, DBSIZE, FLUSHDB, DUMP)
 NOKEY_PALETTE = Dict{String, Function}(...)
 
-# 2. String commands (S_GET, S_SET, S_INCR, ...)
-S_PALETTE = Dict{String, Tuple}(...)
+# 2. Meta commands (EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE, RENAME)
+META_PALETTE = Dict{String, Tuple{Function, Int}}(...)
 
-# 3. Linked list commands (L_ADD, L_POP, L_APPEND, ...)
-LL_PALETTE = Dict{String, Tuple}(...)
-
-# 4. Meta commands (EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE)
-META_PALETTE = Dict{String, Function}(...)
+# 3. Type palettes — registered in TYPE_PALETTES for automatic dispatch
+S_PALETTE   = Dict{String, Tuple}(...)   # String commands
+LL_PALETTE  = Dict{String, Tuple}(...)   # Linked list commands
+SET_PALETTE = Dict{String, Tuple}(...)   # Set commands
 ```
 
-`NOKEY_PALETTE` and `META_PALETTE` map directly to standalone functions. `S_PALETTE` and `LL_PALETTE` map to `(type_command, hypercommand)` tuples — this is the [delegation pattern](architecture) at work.
+`NOKEY_PALETTE` maps to standalone functions that return `ExecuteResult`. `META_PALETTE` maps to `(function, num_extra_args)` tuples. `S_PALETTE`, `LL_PALETTE`, and `SET_PALETTE` map to `(type_command, hypercommand)` tuples — this is the [delegation pattern](architecture) at work.
+
+---
+
+## TYPE_PALETTES — The Registry
+
+Type palettes are registered in a central list that the dispatcher iterates over:
+
+```julia
+const TYPE_PALETTES = [
+    (:string, S_PALETTE),
+    (:list,   LL_PALETTE),
+    # (:hash, H_PALETTE),  # ← future
+]
+```
+
+When `route_command` receives a command, it loops over `TYPE_PALETTES`, checks if the command name exists in each palette, validates the key's datatype, and dispatches. This means adding a new data type only requires appending one entry to this list — no changes to the routing logic itself.
 
 ---
 
@@ -91,7 +106,7 @@ const S_PALETTE = Dict{String, Tuple}(
 | `S_RPAD` | Right-pads the string to a target length |
 | `S_LPAD` | Left-pads the string to a target length |
 | `S_LCS` | Returns the Longest Common Subsequence of two string keys |
-| `S_COMPLEN` | Returns the length of the LCS of two string keys |
+| `S_COMPLEN` | Compares the lengths of two string keys |
 
 ---
 
@@ -119,30 +134,57 @@ const LL_PALETTE = Dict{String, Tuple}(
 |---|---|
 | `L_ADD` | Creates a new list key with a single element |
 | `L_LEN` | Returns the number of elements in the list |
-| `L_GET` | Returns the element at a given index |
-| `L_RANGE` | Returns all elements between two indices |
+| `L_GET` | Returns the list contents (up to the display limit) |
+| `L_RANGE` | Returns elements between two indices |
 | `L_PREPEND` | Pushes a value to the head (creates list if missing) |
 | `L_APPEND` | Pushes a value to the tail (creates list if missing) |
-| `L_POP` | Removes and returns the head element; deletes the key if the list becomes empty |
-| `L_DEQUEUE` | Removes and returns the tail element; deletes the key if the list becomes empty |
-| `L_TRIMR` | Removes N elements from the tail; deletes the key if the list becomes empty |
-| `L_TRIML` | Removes N elements from the head; deletes the key if the list becomes empty |
-| `L_MOVE` | Moves the tail of a source list to the head of a destination list, consuming the source key |
+| `L_POP` | Removes and returns the tail element; deletes the key if the list becomes empty |
+| `L_DEQUEUE` | Removes and returns the head element; deletes the key if the list becomes empty |
+| `L_TRIMR` | Keeps only the first N elements; deletes the key if the list becomes empty |
+| `L_TRIML` | Keeps only the last N elements; deletes the key if the list becomes empty |
+| `L_MOVE` | Appends key2's elements onto key1's tail; key2 is deleted. Surviving key is key1. |
+
+---
+
+## SET_PALETTE — Sets
+
+Commands that operate on unordered set values.
+
+```julia
+const SET_PALETTE = Dict{String, Tuple}(
+    "SET_ADD"    => (setadd!,           radd_or_modify!),
+    "SET_GET"    => (setget,            rget_or_expire!),
+    "SET_DEL"    => (setdel!,           rmodify_autodelete!),
+    "SET_GETDEL" => (setgetdel!,        rget_on_modify_or_expire_autodelete!),
+    "SET_POP"    => (setgetdelrandom!,  rget_on_modify_or_expire_autodelete!),
+    "SET_LEN"    => (setlen,            rget_or_expire!),
+)
+```
+
+| Command | What it does |
+|---|---|
+| `SET_ADD` | Adds a value to the set; creates the set if it does not exist |
+| `SET_GET` | Returns all elements, or N random elements if an argument is given |
+| `SET_DEL` | Removes a specific element from the set; auto-deletes if empty |
+| `SET_GETDEL` | Removes and returns a specific element; auto-deletes if empty |
+| `SET_POP` | Removes and returns N random elements; auto-deletes if empty |
+| `SET_LEN` | Returns the cardinality of the set |
 
 ---
 
 ## META_PALETTE — Type-agnostic operations
 
-These commands work on **any key regardless of its datatype**. They are not paired with a type command — each entry is a standalone function.
+These commands work on **any key regardless of its datatype**. Each entry is a `(function, num_extra_args)` tuple, where `num_extra_args` indicates how many additional arguments the function expects beyond the key.
 
 ```julia
-const META_PALETTE = Dict{String, Function}(
-    "EXISTS"  => rexists,
-    "DEL"     => rdel,
-    "TYPE"    => rtype,
-    "TTL"     => rttl,
-    "PERSIST" => rpersist,
-    "EXPIRE"  => rexpire,
+const META_PALETTE = Dict{String, Tuple{Function, Int}}(
+    "EXISTS"  => (rexists,   0),
+    "DEL"     => (rdel,      0),
+    "TYPE"    => (rtype,     0),
+    "TTL"     => (rttl,      0),
+    "PERSIST" => (rpersist,  0),
+    "EXPIRE"  => (rexpire,   1),   # needs TTL argument
+    "RENAME"  => (rrename!,  1),   # needs new key argument
 )
 ```
 
@@ -154,22 +196,26 @@ const META_PALETTE = Dict{String, Function}(
 | `TTL` | Returns the remaining time-to-live of a key in seconds |
 | `PERSIST` | Removes the TTL from a key, making it persistent |
 | `EXPIRE` | Sets or updates the TTL of a key in seconds |
+| `RENAME` | Renames a key atomically, overwriting the target if it exists |
+
+{: .note }
+> `RENAME` was previously special-cased in the dispatcher. It now lives in `META_PALETTE` as a meta command with one extra argument (the new key name), which is cleaner and consistent with how `EXPIRE` is handled.
 
 ---
 
 ## NOKEY_PALETTE — Server-level operations
 
-These commands require **no key at all** — they operate at the server or database level. Like `META_PALETTE`, each entry is a standalone function.
+These commands require **no key at all** — they operate at the server or database level. Each entry is a standalone function that returns `ExecuteResult`.
 
 ```julia
 const NOKEY_PALETTE = Dict{String, Function}(
-    "KLIST"   => rlistkeys,
+    "PING"    => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "PONG", nothing),
+    "QUIT"    => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
+    "EXIT"    => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
+    "DUMP"    => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, "Use BGSAVE for snapshots", nothing),
     "DBSIZE"  => rdbsize,
     "FLUSHDB" => rflushdb,
-    "PING"    => (ctx, args...) -> ExecuteResult(SUCCESS, "PONG", nothing),
-    "QUIT"    => (ctx, args...) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
-    "EXIT"    => (ctx, args...) -> ExecuteResult(SUCCESS, "Goodbye", nothing),
-    "DUMP"    => (ctx, args...) -> ExecuteResult(SUCCESS, "Use BGSAVE for snapshots", nothing),
+    "KLIST"   => (ctx, args...; tracker=nothing) -> ExecuteResult(SUCCESS, rlistkeys(ctx, args...; tracker=tracker), nothing),
 )
 ```
 
@@ -183,7 +229,7 @@ const NOKEY_PALETTE = Dict{String, Function}(
 | `DUMP` | Informational stub pointing users to `BGSAVE` |
 
 {: .note }
-> `RENAME` and `BGSAVE` are special-cased in the dispatcher and do not belong to any palette — `RENAME` is a two-key meta operation and `BGSAVE` triggers the persistence layer directly.
+> `BGSAVE` is handled directly in `execute!` since it triggers the persistence layer asynchronously and doesn't fit the palette pattern.
 
 ---
 
@@ -210,14 +256,23 @@ That's it — the dispatcher, locking, RESP encoding, and type validation all wo
 
 ## Adding a New Data Type
 
-Adding an entirely new data type requires only:
+Adding an entirely new data type requires:
 
 1. Define the data structure (e.g., `HashTable`)
 2. Write type commands (e.g., `hset!`, `hget`)
 3. Create a palette mapping command names to `(type_command, hypercommand)` pairs
-4. Register the palette in the dispatcher
+4. Add one entry to `TYPE_PALETTES`:
+   ```julia
+   const TYPE_PALETTES = [
+       (:string, S_PALETTE),
+       (:list,   LL_PALETTE),
+       (:set,    SET_PALETTE),
+       (:hash,   H_PALETTE),   # ← new
+   ]
+   ```
+5. Add read commands to `READ_OPS` and multi-key commands to `MULTI_KEY_OPS`
 
-The hypercommands don't change at all, unless you need to introduce a completely new type of operation.
+The hypercommands, routing logic, type validation, and lock resolution all pick up the new type automatically. No changes to `route_command` or `resolve_locks` are needed.
 
 {: .note }
 > For instance: blocking operations are not implemented in Radish at the moment. If you want to add them, a new hypercommand would be needed.

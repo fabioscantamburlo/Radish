@@ -9,7 +9,7 @@ nav_order: 12
 <span class="label label-purple">Heavily AI Assisted</span>
 
 
-Radish uses the **RESP (Redis Serialization Protocol)** for client-server communication. This follows a custom implementation, from scratch. (It could not be the best implementation of the RESP protocol out there).
+Radish uses the **RESP (REdis Serialization Protocol)** for client-server communication — the same wire protocol used by many in-memory databases. This follows a custom implementation, from scratch. (It could not be the best implementation of the RESP protocol out there).
 
 ---
 
@@ -17,7 +17,7 @@ Radish uses the **RESP (Redis Serialization Protocol)** for client-server commun
 
 Instead of inventing a custom protocol, Radish implements RESP because:
 
-1. **It's well-documented** — the [Redis protocol specification](https://redis.io/docs/latest/develop/reference/protocol-spec/) is clear and thorough
+1. **It's well-documented** — the [RESP specification](https://redis.io/docs/latest/develop/reference/protocol-spec/) is clear and thorough
 2. **It's simple** — human-readable for debugging, yet efficient to parse
 3. **It's type-aware** — different prefixes for strings, integers, errors, arrays, and nulls
 4. **It's a learning opportunity** — implementing a real protocol teaches serialization, framing, and type encoding

@@ -15,14 +15,11 @@ Radish can run entirely in Docker — no Julia installation needed. This makes i
 ## Quick Start
 
 ```bash
-# Build the image
-docker compose build
-
-# Start the server
-docker compose up
+# Build and start the server
+docker compose up -d --build radish-server
 
 # Connect a client (separate terminal)
-docker compose run --rm radish-client
+docker compose --profile client run --rm radish-client
 ```
 
 That's it. The server starts on port 9000 and the client connects automatically.
@@ -53,9 +50,19 @@ The Dockerfile uses Julia 1.11 as the base image and installs dependencies:
 
 ```dockerfile
 FROM julia:1.11
+
+# Install netcat (healthcheck) + python3 (bench_net.py, smoke_test.py)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends netcat-openbsd python3 \
+    && rm -rf /var/lib/apt/lists/*
+
 WORKDIR /app
+COPY Project.toml ./
+RUN julia --project=. -e 'using Pkg; Pkg.instantiate()' \
+    && julia --project=. -e 'using Pkg; Pkg.precompile(; warn_loaded=false)' || true
 COPY . .
-RUN julia --project=. -e 'using Pkg; Pkg.instantiate()'
+EXPOSE 9000
+CMD ["julia", "--threads=auto", "--project=.", "server_runner.jl", "0.0.0.0", "9000"]
 ```
 
 ### Docker Compose
@@ -64,24 +71,34 @@ RUN julia --project=. -e 'using Pkg; Pkg.instantiate()'
 services:
   radish-server:
     build: .
-    command: julia --project=. server_runner.jl 0.0.0.0 9000
+    command: julia --threads=auto --project=. server_runner.jl 0.0.0.0 9000
     ports:
       - "9000:9000"
     volumes:
       - radish-data:/app/persistence
     healthcheck:
-      test: ["CMD", "nc", "-z", "localhost", "9000"]
-      interval: 10s
+      test: ["CMD-SHELL", "nc -z 127.0.0.1 9000"]
+      interval: 5s
+      timeout: 3s
+      retries: 10
+      start_period: 30s
 
   radish-client:
-    build: .
+    image: radish
     command: julia --project=. client_runner.jl radish-server 9000
+    depends_on:
+      radish-server:
+        condition: service_healthy
     stdin_open: true
     tty: true
+    profiles:
+      - client
 
 volumes:
   radish-data:
 ```
+
+The Docker Compose file also defines services for the workload simulator, a runner container (for tests/benchmarks in Docker), and a docs server — each gated behind profiles so they only start when explicitly requested.
 
 ---
 
@@ -93,10 +110,11 @@ The health check uses `nc -z` (netcat zero-I/O mode) — a lightweight TCP probe
 
 ```yaml
 healthcheck:
-  test: ["CMD", "nc", "-z", "localhost", "9000"]
-  interval: 10s
+  test: ["CMD-SHELL", "nc -z 127.0.0.1 9000"]
+  interval: 5s
   timeout: 3s
-  retries: 3
+  retries: 10
+  start_period: 30s
 ```
 
 This avoids sending actual RESP commands for health checks. The server handles these connection-and-immediate-disconnect probes gracefully — the `ECONNRESET` from health check probes is caught and logged silently.
@@ -142,7 +160,6 @@ All day-to-day operations are wrapped in `make` targets. Run `make help` to see 
 
 | Command | Description |
 |---------|-------------|
-| `make build` | Build the Docker image |
 | `make rebuild` | Force rebuild from scratch (no cache) |
 
 **Server**
@@ -152,26 +169,50 @@ All day-to-day operations are wrapped in `make` targets. Run `make help` to see 
 | `make server` | Start the server in the background |
 | `make server-logs` | Tail the server logs (Ctrl+C to stop) |
 | `make server-stop` | Stop the server |
+| `make server-native` | Start server natively (8 threads, no Docker) |
 
 **Client**
 
 | Command | Description |
 |---------|-------------|
 | `make client` | Attach an interactive client to the running server |
+| `make client-native` | Start client natively (no Docker) |
 
 **Simulator**
 
 | Command | Description |
 |---------|-------------|
-| `make simulator` | Run the workload simulator (load + run) |
-| `make simload` | Run simulator in load-only mode |
-| `make simrun` | Run simulator in run-only mode |
+| `make simulator` | Run the workload simulator (load + run, default settings) |
+| `make simload` | Load keys (Docker) |
+| `make simrun` | Run operations (Docker) |
+| `make simload-heavy` | Load 1M keys per type (Docker) |
+| `make simrun-heavy` | Run 250k ops per client (Docker) |
+
+**Tests**
+
+| Command | Description |
+|---------|-------------|
+| `make test` | Run unit tests (native) |
+| `make smoke-test` | Run smoke test (starts Docker server, tests over TCP) |
+| `make docker-test` | Run unit tests inside Docker |
+| `make docker-smoke-test` | Run smoke test entirely in Docker |
+
+**Benchmarks**
+
+| Command | Description |
+|---------|-------------|
+| `make bench` | Internal benchmarks Level 0/1 (native) |
+| `make bench-system` | System benchmarks Level 2 (native) |
+| `make bench-hotkey` | Hot-key contention 1→200k workers (native) |
+| `make bench-read-scaling` | Read scaling diagnostic (native) |
+| `make bench-all` | All benchmarks Level 0-3 (native, auto server) |
+| `make docker-bench-all` | All benchmarks Level 0-3 (Docker) |
+| `make bench-diff` | Compare two result folders |
 
 **Docs**
 
 | Command | Description |
 |---------|-------------|
-| `make docs-build` | Build the docs Docker image |
 | `make docs` | Start the Jekyll docs server at `http://localhost:4000` |
 | `make docs-bg` | Start the docs server in the background |
 | `make docs-logs` | Tail the docs logs (Ctrl+C to stop) |
@@ -185,6 +226,7 @@ All day-to-day operations are wrapped in `make` targets. Run `make help` to see 
 | `make clean` | Remove containers, networks and volumes (wipes persisted data) |
 | `make ps` | Show status of all Radish containers |
 | `make logs` | Tail logs for all running containers |
+| `make storage` | Show persistence file sizes |
 | `make help` | Show all available commands |
 
 ---
@@ -205,7 +247,7 @@ nc localhost 9000
 
 ## Workload Simulator
 
-The workload simulator (`workload_simulator.jl`) generates realistic client traffic against a running Radish server. It exercises **every supported command** across all data types, making it useful for stress testing, performance profiling, and validating correctness under load.
+The workload simulator (`workload_simulator.jl`) generates realistic client traffic against a running Radish server. It exercises **every supported command** across all data types (strings, lists, and sets), making it useful for stress testing, performance profiling, and validating correctness under load.
 
 ### Modes
 
@@ -226,23 +268,11 @@ make simrun      # run only
 With custom parameters:
 
 ```bash
-# Small quick test
-docker compose --profile simulator run --rm radish-simulator \
+# Custom settings via direct docker compose
+docker compose --profile simulator run --rm --build radish-simulator \
   julia --project=. workload_simulator.jl loadrun \
   --host radish-server --port 9000 \
   --num-clients 3 --num-keys 100 --num-ops 200
-
-# Duration-based run (60 seconds)
-docker compose --profile simulator run --rm radish-simulator \
-  julia --project=. workload_simulator.jl run \
-  --host radish-server --port 9000 \
-  --duration 60 --num-clients 20
-
-# Continuous load (Ctrl+C to stop)
-docker compose --profile simulator run --rm radish-simulator \
-  julia --project=. workload_simulator.jl run \
-  --host radish-server --port 9000 \
-  --forever --num-clients 50
 ```
 
 ### Local Usage (no Docker)
@@ -267,12 +297,12 @@ julia workload_simulator.jl run --duration 30 --num-clients 10
 
 ### Load Phase
 
-Creates `--num-keys` keys **per supported type** (currently: strings and lists):
+Creates `--num-keys` keys **per supported type** (currently: strings, lists, and sets):
 
 - **TTL**: 50% of keys get a TTL between 10 min–1 hour; 50% are persistent
 - **Content size**: Random between 5–500 (chars for strings, elements for lists)
 - **Integer strings**: ~30% of string keys store integer values (for `S_INCR` and friends)
-- **Key naming**: `str_1`, `str_2`, ... for strings; `list_1`, `list_2`, ... for lists
+- **Key naming**: `str_1`, `str_2`, ... for strings; `list_1`, `list_2`, ... for lists; `set_1`, `set_2`, ... for sets
 
 ### Run Phase
 
@@ -280,7 +310,7 @@ Discovers existing keys via `KLIST`, then executes random operations with weight
 
 | Category | Probability | Description |
 |----------|-------------|-------------|
-| Type-specific ops | ~75% | All string and list commands, weighted by key count |
+| Type-specific ops | ~75% | All string, list, and set commands, weighted by key count |
 | Transactions | ~10% | `MULTI` → 3–8 same-type ops → `EXEC` (20% `DISCARD`) |
 | Meta ops | ~10% | `EXISTS`, `TYPE`, `TTL`, `PERSIST`, `EXPIRE`, `RENAME`, `DEL` |
 | General ops | ~5% | `PING`, `DBSIZE`, `KLIST` |
@@ -295,6 +325,7 @@ The simulator uses a **Type Registry** — adding a new Radish type requires onl
 const TYPE_REGISTRY = [
     (name = "string", prefix = "str",  create_fn = ..., ops = ..., tx_ops = ...),
     (name = "list",   prefix = "list", create_fn = ..., ops = ..., tx_ops = ...),
+    (name = "set",    prefix = "set",  create_fn = ..., ops = ..., tx_ops = ...),
     # (name = "hash", prefix = "hash", create_fn = ..., ops = ..., tx_ops = ...),
 ]
 ```

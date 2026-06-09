@@ -26,14 +26,14 @@ persistence:
   snapshots_subdir: "snapshots"
   aof_subdir: "aof"
   aof_filename: "radish.aof"
-  num_snapshot_shards: 256
 
 background_tasks:
   sync_interval_sec: 5
   cleaner_interval_sec: 0.1
 
 concurrency:
-  num_lock_shards: 256
+  num_shards: 256
+  lock_type: "fair"
 
 ttl_cleanup:
   sampling_threshold: 100000
@@ -62,7 +62,6 @@ data_limits:
 | `snapshots_subdir` | `snapshots` | Subdirectory (relative to `dir`) for RDB shard files |
 | `aof_subdir` | `aof` | Subdirectory (relative to `dir`) for the append-only file |
 | `aof_filename` | `radish.aof` | Name of the AOF file |
-| `num_snapshot_shards` | `256` | Number of RDB shard files. **Must match `concurrency.num_lock_shards`** |
 
 ### Background Tasks
 
@@ -71,11 +70,12 @@ data_limits:
 | `sync_interval_sec` | `5` | Seconds between RDB snapshot syncs. Lower values mean less data loss on crash but more disk I/O |
 | `cleaner_interval_sec` | `0.1` | Seconds between TTL expiration cleanup runs. Controls how quickly expired keys are reclaimed |
 
-### Concurrency
+### Concurrency & Sharding
 
 | Parameter | Default | Description |
 |-----------|---------|-------------|
-| `num_lock_shards` | `256` | Number of `ReadWriteLock` partitions in the [ShardedLock](concurrency). **Must match `persistence.num_snapshot_shards`** |
+| `num_shards` | `256` | Number of partitions for both the [ShardedLock](concurrency) and the [snapshot shard files](persistence). Both systems use the same hash function, so a single value controls both |
+| `lock_type` | `"fair"` | Lock implementation: `"fair"` (write-preferring, starvation-free) or `"standard"` (ConcurrentUtilities ReadWriteLock). See [Concurrency](concurrency) for details |
 
 ### TTL Cleanup
 
@@ -104,13 +104,16 @@ struct RadishConfig
     snapshots_subdir::String
     aof_subdir::String
     aof_filename::String
-    num_snapshot_shards::Int
     sync_interval_sec::Float64
     cleaner_interval_sec::Float64
-    num_lock_shards::Int
+    num_shards::Int
     sampling_threshold::Int
     sample_percentage::Float64
     list_display_limit::Int
+    pipeline_batch::Int
+    pipeline_flush_ms::Int
+    aof_sync_ms::Int
+    lock_type::String
 end
 ```
 
@@ -134,19 +137,12 @@ Command-line arguments for host and port **override** the values from the config
 
 ---
 
-## Important Constraints
-
-{: .warning }
-> **`num_lock_shards` and `num_snapshot_shards` must be equal.** The snapshot system uses the same hash function as the ShardedLock to partition keys into shards. If these values don't match, snapshot files and lock partitions will be misaligned, leading to incorrect incremental saves.
-
----
-
 ## Tuning Guide
 
 | Scenario | What to Change |
 |----------|----------------|
 | **Development** | Defaults are fine. Low traffic, small datasets |
-| **High write throughput** | Lower `sync_interval_sec` (e.g., `1`) to reduce data loss window. Increase shard count if contention is high |
+| **High write throughput** | Lower `sync_interval_sec` (e.g., `1`) to reduce data loss window. Increase `num_shards` if contention is high |
 | **Large datasets (millions of keys)** | Increase `sampling_threshold` and/or lower `sample_percentage` to reduce cleaner overhead |
 | **Docker / remote access** | Set `host` to `0.0.0.0` |
 | **Memory-constrained** | Lower `list_display_limit` to reduce response sizes |

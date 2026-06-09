@@ -6,14 +6,11 @@ nav_order: 4
 
 # The Dispatcher
 
-The dispatcher is the **central router** of Radish — it receives every command from every client and decides what to do with it. It handles:
+The dispatcher is the **central router** of Radish — it receives every command from every client and decides what to do with it. Its responsibilities are split across three focused functions:
 
-- **Command parsing** — reading the incoming RESP input into a structured command
-- **Lock acquisition** — acquiring the right read or write locks for the keys involved
-- **Palette lookup** — finding the `(type_command, hypercommand)` pair for the given command
-- **Type validation** — ensuring the target key holds the expected data type
-- **Transaction management** — queuing commands during `MULTI`/`EXEC` blocks
-- **Error handling** — returning well-formed error responses on failure
+- **`execute!`** — transaction lifecycle (MULTI/EXEC/DISCARD/BGSAVE), lock orchestration, and delegation to the other two functions
+- **`resolve_locks`** — determines what locks a command needs, returning a `LockPlan` (pure function, no side effects)
+- **`route_command`** — palette lookup, key validation, type validation, and dispatch to hypercommands (pure function, no locking)
 
 Think of it as the traffic controller between the [RESP protocol layer](resp-protocol) and the [hypercommand layer](architecture).
 
@@ -33,93 +30,129 @@ graph TD
     E -->|"EXEC"| G["Execute transaction atomically"]
     E -->|"DISCARD"| H["Clear queue, exit transaction mode"]
     E -->|"BGSAVE"| I["Trigger background snapshot"]
-    E -->|"Regular command"| J["Look up in palettes"]
-    J --> K["Acquire shard locks"]
-    K --> L["Execute via hypercommand"]
-    L --> M["Release shard locks"]
+    E -->|"Regular command"| J["resolve_locks → LockPlan"]
+    J --> K["acquire_locks! → shard IDs"]
+    K --> L["route_command → ExecuteResult"]
+    L --> M["release_locks!"]
     M --> N["Return ExecuteResult"]
+```
+
+---
+
+## The Three Functions
+
+### `route_command` — Pure Routing
+
+This is the single source of truth for "given a command, what do I do with it?" It checks palettes in order:
+
+1. **NOKEY_PALETTE** — keyless commands (`PING`, `KLIST`, `DBSIZE`, `FLUSHDB`, etc.)
+2. **META_PALETTE** — type-agnostic key commands (`EXISTS`, `DEL`, `TYPE`, `TTL`, `PERSIST`, `EXPIRE`, `RENAME`)
+3. **TYPE_PALETTES** — type-specific commands, iterated from a registry
+
+```julia
+# Type palettes — each entry is (datatype_symbol, palette_dict)
+# To add a new data type, just append to this list.
+const TYPE_PALETTES = [
+    (:string, S_PALETTE),
+    (:list,   LL_PALETTE),
+    (:set,    SET_PALETTE),
+    # (:hash, H_PALETTE),  # ← future
+]
+```
+
+For type palette commands, `route_command` validates that the existing key's datatype matches the palette's expected type before dispatching. This produces the `WRONGTYPE` error when, for example, a string command is used on a list key.
+
+Both normal execution and transaction execution call `route_command` — there is no duplicated routing logic.
+
+### `resolve_locks` — Lock Planning
+
+A pure function that looks at a command's name, key, and arguments and returns a `LockPlan`:
+
+```julia
+struct LockPlan
+    mode::Symbol         # :none, :read, :write
+    scope::Symbol        # :none, :single, :multi, :all
+    key1::Union{String, Nothing}    # first key (single + multi)
+    key2::Union{String, Nothing}    # second key (multi only)
+end
+```
+
+The lock strategy is determined by the command type:
+
+| Command Type | mode | scope | Example |
+|---|---|---|---|
+| `PING`, `QUIT`, `DBSIZE` | `:none` | `:none` | No lock needed |
+| `S_GET`, `L_LEN`, `EXISTS`, `TYPE`, `TTL`, `SET_GET`, `SET_LEN` | `:read` | `:single` | Read lock on key's shard |
+| `S_SET`, `S_INCR`, `DEL`, `PERSIST`, `EXPIRE`, `SET_ADD`, `SET_DEL`, `SET_POP` | `:write` | `:single` | Write lock on key's shard |
+| `S_LCS`, `S_COMPLEN` | `:read` | `:multi` | Read locks on both keys' shards |
+| `L_MOVE`, `RENAME` | `:write` | `:multi` | Write locks on both keys' shards |
+| `KLIST` | `:read` | `:all` | Read locks on all shards |
+| `FLUSHDB` | `:write` | `:all` | Write locks on all shards |
+
+Two helper functions translate the plan into actual lock operations:
+
+- **`acquire_locks!(db_lock, plan)`** — acquires the right locks and returns shard IDs
+- **`release_locks!(db_lock, plan, shard_ids)`** — releases locks using the plan's mode (no re-derivation needed)
+
+### `execute!` — Orchestrator
+
+The main entry point is a thin orchestrator that handles:
+
+1. Transaction lifecycle (MULTI, EXEC, DISCARD) — no locks needed
+2. BGSAVE — triggers async snapshot
+3. Transaction queuing — validates command exists, queues it
+4. Normal execution — calls `resolve_locks` → `acquire_locks!` → `route_command` → `release_locks!`
+
+```julia
+function execute!(ctx, db_lock, cmd, session; tracker=nothing)
+    # 1-3: Transaction lifecycle, BGSAVE, queuing (unchanged)
+    # ...
+
+    # 4: Normal execution
+    plan = resolve_locks(cmd)
+    shard_ids = acquire_locks!(db_lock, plan)
+    try
+        return route_command(ctx, cmd; tracker=tracker)
+    finally
+        release_locks!(db_lock, plan, shard_ids)
+    end
+end
 ```
 
 ---
 
 ## Palette Lookup
 
-The dispatcher checks all four palettes (`NOKEY_PALETTE`, `S_PALETTE`, `LL_PALETTE`, `META_PALETTE`) to find the handler for an incoming command. See [Command Palettes](palettes) for the full reference.
+The dispatcher checks palettes in this order:
 
----
+1. `NOKEY_PALETTE` — keyless server commands
+2. `META_PALETTE` — type-agnostic key commands (format: `(function, num_extra_args)`)
+3. `TYPE_PALETTES` — type-specific commands via the registry loop
 
-## Lock Acquisition Strategy
-
-The dispatcher determines the lock type based on the command:
-
-```julia
-const READ_OPS = Set(["S_GET", "S_LEN", "S_GETRANGE", "L_GET",
-                       "L_LEN", "L_RANGE", "KLIST", "EXISTS",
-                       "TYPE", "TTL", "DBSIZE"])
-
-const MULTI_KEY_OPS = Set(["S_LCS", "S_COMPLEN", "L_MOVE", "RENAME"])
-```
-
-| Command Type | Lock Strategy |
-|---|---|
-| Read operations | Read lock on key's shard |
-| Write operations | Write lock on key's shard |
-| Multi-key operations | Write locks on both keys' shards (sorted) |
-| `KLIST` | Read locks on all shards |
-| `FLUSHDB` | Write locks on all shards |
-| `PING`, `DUMP` | No locks needed |
-
-Locks are always released in the `finally` block, ensuring cleanup even on exceptions.
+See [Command Palettes](palettes) for the full reference.
 
 ---
 
 ## Type Validation
 
-Before executing a string command on an existing key, the dispatcher checks the key's type:
+Type validation happens inside `route_command` when iterating over `TYPE_PALETTES`. For each type palette, if the command is found and the key already exists, the dispatcher checks that the key's datatype matches:
 
 ```julia
-if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != :string
-    return ExecuteResult(false, nothing,
-        "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a string")
+for (expected_type, palette) in TYPE_PALETTES
+    if cmd_name in keys(palette)
+        if haskey(ctx, cmd_key) && ctx[cmd_key].datatype != expected_type
+            return ExecuteResult(ERROR, nothing,
+                "WRONGTYPE: Key '$(cmd_key)' holds a $(ctx[cmd_key].datatype), not a $(expected_type)")
+        end
+        # ... dispatch to hypercommand
+    end
 end
 ```
 
-The same check applies for list commands (`:list`). This prevents operations like `S_INCR` on a list key — the error is returned immediately without calling the hypercommand.
+This means adding a new data type automatically gets type validation — no extra code needed.
 
 {: .note }
-> Redis returns `WRONGTYPE Operation against a key holding the wrong kind of value` — Radish follows the same pattern, including the key name and its actual type in the message.
-
----
-
-## The `execute!` Function
-
-The main entry point is `execute!`, which handles the full lifecycle:
-
-```julia
-function execute!(ctx::RadishContext, db_lock::ShardedLock,
-                  cmd::Command, session::ClientSession;
-                  tracker::Union{DirtyTracker, Nothing}=nothing)
-    # 1. Transaction handling (MULTI/EXEC/DISCARD/QUEUING)
-    # 2. Special commands (BGSAVE)
-    # 3. Unknown command detection
-    # 4. Lock acquisition (read/write, single/multi-key)
-    # 5. Palette dispatch
-    # 6. Lock release (in finally block)
-end
-```
-
-### The `execute_unlocked!` Variant
-
-During transaction execution, all locks are already held. The dispatcher provides `execute_unlocked!` — a version that skips lock acquisition:
-
-```julia
-function execute_unlocked!(ctx::RadishContext, cmd::Command;
-                           tracker::Union{DirtyTracker, Nothing}=nothing)
-    # Same dispatch logic as execute!, but no locking
-end
-```
-
-This is called in a loop by `execute_transaction!`, which handles the lock acquisition once for all commands in the transaction.
+> The `WRONGTYPE` error pattern follows the convention of returning the actual key type in the message, making debugging easier for client applications.
 
 ---
 
@@ -131,6 +164,7 @@ The dispatcher uses a layered error strategy:
 |---|---|
 | Unknown command | `ExecuteResult(ERROR, nothing, "Unknown command: ...")` |
 | Missing key argument | `ExecuteResult(ERROR, nothing, "Command X requires a key")` |
+| Missing extra argument | `ExecuteResult(ERROR, nothing, "Command X requires an argument")` |
 | Type mismatch | `ExecuteResult(ERROR, nothing, "WRONGTYPE: ...")` |
 | Command logic error | Propagated from `CommandError` via hypercommand |
 | Unexpected exception | Caught in `try/catch`, returned as `ExecuteResult(ERROR, ...)` |

@@ -1,10 +1,25 @@
 # Core type definitions for Radish
 using Dates
+using Dates: Second
 
-export RadishContext, ExecutionStatus, ExecuteResult, Command, ClientSession, AOFState
+export RadishStore, RadishElement, ExecutionStatus, ExecuteResult, Command, ClientSession, AOFState,
+       store_haskey, store_keytype, store_delete!, store_get, store_get_typed,
+       store_keys, store_size, store_set!, store_flush!
 
-# RadishContext type alias
-const RadishContext = Dict{String, RadishElement}
+# Parametric RadishElement — fully typed, zero boxing when stored in typed dicts
+mutable struct RadishElement{T}
+    value::T
+    ttl::Union{Int, Nothing}
+    tinit::DateTime
+    datatype::Symbol          # kept for safety/debugging
+    expires_at::Union{DateTime, Nothing}   # Precomputed expiry timestamp (OPTIM 1.5)
+end
+
+# 4-arg convenience constructor (backward compatible — computes expires_at)
+function RadishElement(value::T, ttl::Union{Int, Nothing}, tinit::DateTime, datatype::Symbol) where T
+    expires_at = ttl === nothing ? nothing : tinit + Second(ttl)
+    return RadishElement{T}(value, ttl, tinit, datatype, expires_at)
+end
 
 # Execution status enum
 @enum ExecutionStatus begin
@@ -20,32 +35,45 @@ struct Command
     args::Vector{String}            # Remaining Arguments
 end
 
+# Result value type — tightened from Any to eliminate boxing on common paths (OPTIM 0.12)
+# Julia optimizes small unions as tagged unions. The 3 most common types (Nothing, Int, String)
+# are the hot path. Bool, Vector, Tuple are rare and already heap-allocated.
+const ResultValue = Union{Nothing, Bool, Int, String, Vector, Tuple}
+
 # Struct to capture result of the command
 struct ExecuteResult
     status::ExecutionStatus         # Execution status
-    value::Any                      # Result return (nothing or value)
+    value::ResultValue              # Result return — tight union, no boxing for common types
     error::Union{Nothing, String}   # Error message (only for ERROR status)
 end
+
+# Tight 3-type union for command return values — Julia compiles as tagged union, zero boxing
+const CommandValue = Union{Nothing, Int, String}
 
 # Struct for command-level results (returned by all command functions)
 struct CommandResult
     success::Bool
-    value::Any                              # For operations: true/false/string/tuple/etc
+    value::CommandValue                     # Union{Nothing, Int, String} — tight 3-type union
     error::Union{Nothing, String}           # Error message if success=false
     element::Union{RadishElement, Nothing}  # For creators only
 end
 
-# Convenience constructors
+# For type commands returning complex values (Vector, Tuple) that don't fit CommandValue.
+# Hypercommands detect this and wrap the value directly into ExecuteResult.
+# Parametric to avoid boxing (OPTIM 0.13)
+struct CommandDirect{T}
+    value::T
+end
+
+# Shared empty args vector — reused for commands with no extra args (OPTIM 0.15)
+# SHARED — do not mutate
+const EMPTY_STRING_VEC = String[]
 CommandSuccess(value) = CommandResult(true, value, nothing, nothing)
 CommandError(msg::String) = CommandResult(false, nothing, msg, nothing)
 CommandCreate(elem::RadishElement) = CommandResult(true, nothing, nothing, elem)
 
 """
 Struct to enable transaction mode.
-
-In_transaction mode works by creating a queue of commands and executing all of them locking all the keys at once.
-This is useful to combine more than a single command and be sure no other client can interfere with the keys you are 
-interested, resulting in atomicity.
 """
 mutable struct ClientSession
     in_transaction::Bool
@@ -65,3 +93,6 @@ mutable struct AOFState
 
     AOFState(path::String) = new(path, nothing, ReentrantLock())
 end
+
+# Export shared sentinel
+export EMPTY_STRING_VEC

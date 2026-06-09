@@ -14,43 +14,48 @@ See the full documentation here: [Radish Documentation](https://fabioscantamburl
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| String Operations | ✅ | GET, SET, INCR, APPEND, LCS, padding, and more |
+| String Operations | ✅ | GET, SET, UPSERT, INCR, APPEND, LCS, padding, and more |
 | Linked Lists | ✅ | Custom doubly-linked list with O(1) push/pop |
-| RESP Protocol | ✅ | Redis Serialization Protocol for wire communication |
+| Sets | ✅ | Unordered collections with add, delete, random pop |
+| RESP Protocol | ✅ | RESP wire protocol for client-server communication |
 | Persistence | ✅ | Sharded RDB snapshots + AOF with crash recovery |
 | Transactions | ✅ | MULTI/EXEC/DISCARD with atomic execution |
 | Configuration | ✅ | YAML-based config for all tunable parameters |
-| Sharded Locking | ✅ | Configurable ReadWriteLocks for concurrent access |
+| Sharded Locking | ✅ | Configurable lock: standard (ReadWriteLock) or fair (write-preferring, starvation-free) |
 | TTL & Expiry | ✅ | Background cleaner with probabilistic sampling |
 | Docker Support | ✅ | Full Docker Compose setup with health checks |
 | Key Management | ✅ | EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE, RENAME, FLUSHDB |
+| Pipelining | ✅ | Server-side batch execution with combined locking |
+| Python Client | ✅ | RadishPy — full client library with pipelining support |
 
 ---
 
 ## Architecture Overview
 
-At its core, Radish stores everything in a single dictionary:
+Radish uses a **typed store** — one fully-typed dictionary per data type, unified behind a `RadishStore` with a global key index:
 
 ```julia
-RadishContext = Dict{String, RadishElement}
+mutable struct RadishStore
+    strings::Dict{String, RadishElement{String}}
+    lists::Dict{String, RadishElement{DLinkedStartEnd{String}}}
+    sets::Dict{String, RadishElement{Set{String}}}
+    keytype::Dict{String, Symbol}   # global key → type index
+end
 ```
 
-Every value is wrapped in a `RadishElement` carrying metadata (value, TTL, creation time, data type). Commands flow through a **delegation pattern** with two layers: **Hypercommands** (generic operations like `get`, `add`, `remove`) and **Type commands** (concrete implementations per data type). A dispatcher resolves each client request and routes it to the correct type command — making new data types straightforward to add.
+Every value is wrapped in a parametric `RadishElement{T}` carrying metadata (value, TTL, creation time, data type). Julia compiles specialized code for each concrete type — no boxing, no dynamic dispatch on the hot path. Commands flow through a **delegation pattern** with two layers: **Hypercommands** (generic operations like `get`, `add`, `remove`) and **Type commands** (concrete implementations per data type). A dispatcher resolves each client request and routes it to the correct type command — making new data types straightforward to add.
 
 ---
 
 ## Dependencies
 
-Only 4 external packages are used at runtime. Everything else — data structures, RESP protocol, dispatcher, persistence — is built from scratch.
+Only 3 external packages are used at runtime. Everything else — data structures, RESP protocol, dispatcher, persistence, fair lock — is built from scratch.
 
 | Package | Purpose |
 |---------|---------|
 | **JSON3** | Serialization of snapshot data to sharded `.rdb` files |
-| **StatsBase** | Random key sampling for background TTL expiration |
-| **ConcurrentUtilities** | `ReadWriteLock` for the sharded locking system |
+| **ConcurrentUtilities** | `ReadWriteLock` for the standard sharded lock (optional — the fair lock uses no external deps) |
 | **YAML** | Parses the `radish.yml` configuration file at startup |
-
----
 
 ## Configuration
 
@@ -66,21 +71,23 @@ persistence:
   snapshots_subdir: "snapshots"
   aof_subdir: "aof"
   aof_filename: "radish.aof"
-  num_snapshot_shards: 256
+  aof_sync_ms: 1000           # 0 = flush every command, N>0 = flush every N ms
 
 background_tasks:
   sync_interval_sec: 5
   cleaner_interval_sec: 0.1
 
 concurrency:
-  num_lock_shards: 256
+  num_shards: 256
+  lock_type: "fair"         # "fair" (write-preferring, starvation-free) or "standard" (ReadWriteLock)
 
 ttl_cleanup:
   sampling_threshold: 100000
   sample_percentage: 0.10
 
-data_limits:
-  list_display_limit: 50
+client:
+  pipeline_batch: 1000       # Commands per pipeline batch (0 = no pipelining)
+  pipeline_flush_ms: 5       # Flush after this many ms even if batch not full
 ```
 
 Edit `radish.yml` to adapt Radish to your use-case. CLI arguments for host/port override the config file values. You can also pass a custom config path as the third argument:
@@ -106,22 +113,36 @@ Radish runs fully in Docker. All commands go through `make`:
 **Build & Run**
 | Command | Description |
 |---------|-------------|
-| `make build` | Build the Docker image |
 | `make rebuild` | Force rebuild from scratch (no cache) |
 | `make server` | Start the server in the background |
 | `make server-logs` | Tail the server logs |
 | `make server-stop` | Stop the server |
+| `make server-native` | Start server natively (8 threads, no Docker) |
 
 **Client**
 | Command | Description |
 |---------|-------------|
 | `make client` | Attach an interactive client to the running server |
+| `make client-native` | Start client natively (no Docker) |
+
+**Tests**
+| Command | Description |
+|---------|-------------|
+| `make test` | Run unit tests (native) |
+| `make docker-test` | Run unit tests (Docker) |
+| `make smoke-test` | Smoke test (native client + Docker server) |
+
+**Benchmarks**
+| Command | Description |
+|---------|-------------|
+| `make bench-all` | All benchmarks Level 0-3 (native) |
+| `make docker-bench-all` | All benchmarks Level 0-3 (Docker) |
+| `make bench-diff BEFORE=dir1 AFTER=dir2` | Compare two result folders |
 
 **Docs**
 | Command | Description |
 |---------|-------------|
 | `make docs` | Start the Jekyll docs server at `http://localhost:4000` |
-| `make docs-build` | Build the docs Docker image |
 | `make docs-bg` | Start the docs server in the background |
 | `make docs-stop` | Stop the docs server |
 
@@ -138,11 +159,11 @@ Radish runs fully in Docker. All commands go through `make`:
 
 ## Limitations
 
-- Radish is slow, very slow compared to Redis. Not that my idea was to compete with Redis nor to catch it. I am completely aware that Julia may not be the best language to do in-memory databases but, more realistically, my optimisation is not nearly the best possible.
+- Radish is slower than production in-memory databases, but reaches ~50k ops/s with pipelined clients (single-client, batch=100) — reasonable for a didactical project. The gap widens under high concurrency and complex operations.
 
 - Radish has limitations in terms of scalability. It's not designed to be scaled out of a single machine. 
 
-- Radish does not support bulk insert commands, for instance it is not possible to insert multiple *strings* with a single command, nor to create a *list* of n elements with a single command. This may be resolved in the future.
+- Radish does not support bulk insert commands, for instance it is not possible to insert multiple *strings* with a single command (no MSET), nor to create a *list* of n elements with a single command. This may be resolved in the future.
 
 - Many more limitations exist — if you spot one, please open an issue. It's always fun to receive an external point of view.
 
@@ -154,13 +175,13 @@ Full documentation is available at the project's GitHub Pages site, covering eac
 
 ---
 
-## TODO
+## Python Client
 
-🔴 **High priority** — unit tests, integration/Docker tests
+RadishPy is a full-featured Python client library for Radish with support for all commands, pipelining, and transactions.
 
-🟡 **Medium priority** — dispatcher refactor (`resolve_locks` / `route_command`), `INFO` command
+```
+radishpy = { git = "https://github.com/fabioscantamburlo/Radishpy.git" }
+```
 
-🟢 **Low priority** — hash maps, sets, sorted sets, Python client, observability, performance
-
-See [`TODO.md`](TODO.md) for the full detailed tracker.
+See the [Client Implementation Guide](https://fabioscantamburlo.github.io/Radish/client_implementation_guide) for the wire protocol specification if you want to build your own client in another language.
 

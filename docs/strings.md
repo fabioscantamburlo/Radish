@@ -13,19 +13,25 @@ Strings are the simplest data type in Radish — they store a single value as a 
 ## Basic Operations
 
 ```
-RADISH-CLI> S_SET greeting "hello" 60    # Set with 60s TTL
+RADISH-CLI> S_SET greeting "hello" 60    # Set with 60s TTL (create-only)
 OK
 RADISH-CLI> S_GET greeting
 ✅ hello
 RADISH-CLI> S_LEN greeting
 ✅ 5
+RADISH-CLI> S_UPSERT greeting "hi" 120  # Overwrite unconditionally
+OK
+RADISH-CLI> S_GET greeting
+✅ hi
 ```
+
+`S_SET` is create-only — it errors if the key already exists. `S_UPSERT` always succeeds, overwriting the existing value and TTL if the key exists.
 
 ---
 
 ## Numeric Operations
 
-String values that represent integers can be incremented atomically — a pattern Redis uses heavily for counters:
+String values that represent integers can be incremented atomically — a common pattern for counters in in-memory databases:
 
 ```
 RADISH-CLI> S_SET counter 100
@@ -43,7 +49,7 @@ RADISH-CLI> S_GET counter
 The `GINCR` variants (get-then-increment) are useful when you need the value *before* the increment — a common pattern in ID generation.
 
 {: .note }
-> If you try to `S_INCR` a string that isn't a valid integer, Radish returns an error — matching Redis's behavior.
+> If you try to `S_INCR` a string that isn't a valid integer, Radish returns an error.
 
 ---
 
@@ -79,27 +85,29 @@ RADISH-CLI> S_LCS a b
 ✅ [BCAB, 4]
 ```
 
-This is implemented using dynamic programming and returns both the subsequence and its length. Redis added LCS support in version 7.0 — Radish implements the same algorithm.
+This is implemented using dynamic programming and returns both the subsequence and its length.
 
 ---
 
 ## Implementation Detail
 
-All string type commands operate on the raw `String` value extracted from the `RadishElement`. They follow a consistent pattern:
+All string values are stored as `String` — even when they represent integers. Values are bytes, and integer interpretation happens dynamically when needed (e.g., `S_INCR` parses the string, increments, and stores the result back as a string).
 
 ```julia
-# Read-only: return a derived value
-function sget(value::String, args...)::String
-    return value
+# Read-only: return the element's value (always a String)
+function sget(elem::RadishElement, args...)
+    return CommandSuccess(elem.value)
 end
 
-# Mutating: modify the element in place and return a result
-function sincr!(elem::RadishElement, args...)
-    n = tryparse(Int, elem.value)
-    if n === nothing
-        throw(ErrorException("Value is not an integer"))
+# Mutating: parse as integer, increment, store back as string
+function sincr!(elem::RadishElement)
+    elem_n = tryparse(Int, elem.value)
+    if isa(elem_n, Nothing)
+        return CommandError("Value '$(elem.value)' is not an integer")
     end
-    elem.value = string(n + 1)
-    return true
+    elem.value = string(elem_n + 1)
+    return CommandSuccess(true)
 end
 ```
+
+With parametric `RadishElement{String}`, Julia compiles fully specialized code for these functions — no boxing, no dynamic dispatch on value access.

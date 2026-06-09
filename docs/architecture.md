@@ -14,27 +14,37 @@ This is the single most important design decision in Radish: it makes the system
 
 ## Core Data Model
 
-Everything in Radish lives in a `RadishContext`, which is simply a dictionary:
+Radish uses a **typed store** — one fully-typed dictionary per data type, unified behind a `RadishStore` struct with a global key-to-type index:
 
 ```julia
-RadishContext = Dict{String, RadishElement}
+mutable struct RadishStore
+    strings::Dict{String, RadishElement{String}}
+    lists::Dict{String, RadishElement{DLinkedStartEnd{String}}}
+    sets::Dict{String, RadishElement{Set{String}}}
+    keytype::Dict{String, Symbol}   # "mykey" => :string
+end
 ```
 
-Each value is wrapped in a `RadishElement`:
+Each value is wrapped in a parametric `RadishElement{T}`:
 
 ```julia
-mutable struct RadishElement
-    value::Any              # The actual data (String, DLinkedStartEnd, etc.)
-    ttl::Union{Int128, Nothing}  # Time To Live in seconds, or nothing
+mutable struct RadishElement{T}
+    value::T                # The actual data — fully typed, zero boxing
+    ttl::Union{Int, Nothing}  # Time To Live in seconds, or nothing
     tinit::DateTime         # Timestamp of creation
     datatype::Symbol        # Type identifier (:string, :list, etc.)
 end
 ```
 
-The key insight is the **`datatype` field**. Instead of using Julia's type system to distinguish between values, Radish uses a symbol tag. This is because Radish data types are semantic abstractions rather than native Julia types — similar to Redis, where a string can be interpreted as an integer, a serialized list, or any other encoded value depending on the operation. 
+The key design decisions:
+
+- **Parametric typing** — `RadishElement{String}` and `RadishElement{DLinkedStartEnd{String}}` are distinct types. Julia compiles specialized code for each, eliminating dynamic dispatch and boxing on the hot path.
+- **Typed dictionaries** — each data type gets its own `Dict` with a concrete element type. Type-specific commands (`S_GET`, `L_APPEND`, `SET_ADD`) access the right dict directly with full type information.
+- **Global key index** — the `keytype` dict maps every key to its type symbol. This enforces one-key-one-type behavior and enables O(1) type lookups for meta commands.
+- **Always-String storage** — string values are always stored as `String`, even when they represent integers. Integer parsing happens dynamically when needed (e.g., `S_INCR`).
 
 {: .note }
-> Redis uses a similar approach internally — each Redis object carries a type tag and an encoding tag that determine how the value is stored and manipulated.
+> The `keytype` index serves as a type tag — each key is associated with its data type, determining which typed dictionary stores it and which commands can operate on it.
 
 ---
 
@@ -46,13 +56,14 @@ The current implementation consists of the following commands:
 
 | Hypercommand | Purpose | Example Use |
 |---|---|---|
-| `rget_or_expire!` | Read a value | `S_GET`, `L_LEN` |
+| `rget_or_expire!` | Read a value | `S_GET`, `L_LEN`, `SET_GET` |
 | `rget_on_modify_or_expire!` | Read-and-modify in one operation | `S_GINCR` |
-| `rget_on_modify_or_expire_autodelete!` | Read-modify with auto-cleanup of empty structures | `L_POP`, `L_DEQUEUE` |
-| `radd!` | Add a new key | `S_SET`, `L_ADD` |
-| `radd_or_modify!` | Create or modify in-place | `L_PREPEND`, `L_APPEND` |
+| `rget_on_modify_or_expire_autodelete!` | Read-modify with auto-cleanup of empty structures | `L_POP`, `L_DEQUEUE`, `SET_POP`, `SET_GETDEL` |
+| `radd!` | Add a new key (create-only) | `S_SET`, `L_ADD` |
+| `radd_or_modify!` | Create or modify in-place | `L_PREPEND`, `L_APPEND`, `SET_ADD` |
+| `radd_or_replace!` | Create or overwrite entirely | `S_UPSERT` |
 | `rmodify!` | Modify an existing key | `S_INCR`, `S_APPEND` |
-| `rmodify_autodelete!` | Modify with auto-cleanup of empty structures | `L_TRIMR`, `L_TRIML` |
+| `rmodify_autodelete!` | Modify with auto-cleanup of empty structures | `L_TRIMR`, `L_TRIML`, `SET_DEL` |
 | `rdelete!` | Delete a key | Internal use |
 | `relement_to_element` | Compare two keys | `S_LCS`, `S_COMPLEN` |
 | `relement_to_element_consume_key2!` | Combine two keys, consuming the second | `L_MOVE` |
@@ -65,9 +76,11 @@ The current implementation consists of the following commands:
 
 - **`rget_on_modify_or_expire_autodelete!`** — Extends `rget_on_modify_or_expire!` with automatic cleanup. After modifying the element, it checks if the structure is empty (e.g., a list with no elements) and automatically deletes the key if so. Used for operations like `L_POP` and `L_DEQUEUE` that should remove empty lists.
 
-- **`radd!`** — Adds a new key to the database. This enforces strict "create only" semantics.
+- **`radd!`** — Adds a new key to the database. This enforces strict "create only" semantics. If the key already exists, returns an error.
 
-- **`radd_or_modify!`** — More flexible than `radd!` — it creates the key if it doesn't exist, or modifies it if it does. Useful for append-style operations where you want to initialize or extend a data structure (e.g., append a value to a list; if the list doesn't exist, create it with that value).
+- **`radd_or_modify!`** — More flexible than `radd!` — it creates the key if it doesn't exist, or modifies it if it does. Useful for append-style operations where you want to initialize or extend a data structure (e.g., append a value to a list; if the list doesn't exist, create it with that value). Also used for `SET_ADD`.
+
+- **`radd_or_replace!`** — The most permissive creator — it creates the key if it doesn't exist, or replaces it entirely if it does. Used by `S_UPSERT` for unconditional set operations. Equivalent to an atomic DEL + create.
 
 - **`rmodify!`** — Modifies an existing key. If the key doesn't exist, the operation fails. This enforces "update only" semantics, preventing accidental key creation.
 
@@ -84,8 +97,10 @@ The current implementation consists of the following commands:
 
 ### Hypercommand Signature
 
+Hypercommands operate on **typed sub-dictionaries** extracted from the `RadishStore` by the dispatcher:
+
 ```julia
-hypercommand(context::RadishContext, key::String, command::Function, args...)
+hypercommand(typed_dict::Dict{String, RadishElement{T}}, key::String, command::Function, args...)
 ```
 
 The `command` parameter is the type-specific function — this is the delegation. The hypercommand handles:
@@ -108,34 +123,41 @@ Following an example of how an invocation of a command works in detail.
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Dispatcher
+    participant Dispatcher as execute!
+    participant Router as route_command
     participant Hypercommand as rget_or_expire!
     participant Context as RadishContext
     participant TypeCmd as sget
 
     Client->>Dispatcher: S_GET "mykey"
-    Dispatcher->>Dispatcher: Lookup S_PALETTE["S_GET"]
-    Dispatcher->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
+    Dispatcher->>Dispatcher: resolve_locks → LockPlan(:read, :single)
+    Dispatcher->>Dispatcher: acquire_locks! → read lock on shard
+    Dispatcher->>Router: route_command(store, cmd)
+    Router->>Router: Lookup S_PALETTE["S_GET"]
+    Router->>Router: Extract store.strings (typed dict)
+    Router->>Hypercommand: rget_or_expire!(store.strings, "mykey", sget)
 
     activate Hypercommand
-    Hypercommand->>Context: haskey(ctx, "mykey")?
+    Hypercommand->>Context: haskey(store.strings, "mykey")?
     alt Key Missing
-        Hypercommand-->>Dispatcher: nothing → KEY_NOT_FOUND
+        Hypercommand-->>Router: nothing → KEY_NOT_FOUND
     else Key Exists
         Hypercommand->>Context: Check TTL expired?
         alt Expired
             Hypercommand->>Context: delete!(ctx, "mykey")
-            Hypercommand-->>Dispatcher: nothing → KEY_NOT_FOUND
+            Hypercommand-->>Router: nothing → KEY_NOT_FOUND
         else Valid
-            Hypercommand->>TypeCmd: sget(element.value)
+            Hypercommand->>TypeCmd: sget(element)
             activate TypeCmd
-            TypeCmd-->>Hypercommand: "hello"
+            TypeCmd-->>Hypercommand: CommandSuccess("hello")
             deactivate TypeCmd
-            Hypercommand-->>Dispatcher: "hello" → SUCCESS
+            Hypercommand-->>Router: ExecuteResult(SUCCESS, "hello")
         end
     end
     deactivate Hypercommand
 
+    Router-->>Dispatcher: ExecuteResult
+    Dispatcher->>Dispatcher: release_locks!
     Dispatcher-->>Client: Response
 ```
 

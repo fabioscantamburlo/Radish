@@ -2,27 +2,37 @@ using ConcurrentUtilities: ReadWriteLock, readlock, readunlock
 
 export ShardedLock, shard_id, acquire_read!, acquire_write!, release_read!, release_write!
 
-struct ShardedLock
+struct ShardedLock <: AbstractShardedLock
     shards::Vector{ReadWriteLock}
     num_shards::Int
 end
 
 ShardedLock(n::Int=256) = ShardedLock([ReadWriteLock() for _ in 1:n], n)
 
-shard_id(lock::ShardedLock, key::String) = (hash(key) % lock.num_shards) + 1
+shard_id(lock::ShardedLock, key::String)::Int = (hash(key) % lock.num_shards) + 1
 
-# Single key read
-function acquire_read!(lock::ShardedLock, key::String)
+# Single key read — returns shard ID directly (no Vector allocation)
+function acquire_read!(lock::ShardedLock, key::String)::Int
     id = shard_id(lock, key)
     readlock(lock.shards[id])
-    return [id]
+    return id
 end
 
-# Single key write
-function acquire_write!(lock::ShardedLock, key::String)
+# Shard-ID read (used by execute_batch!, background tasks)
+function acquire_read!(lock::ShardedLock, id::Int)
+    readlock(lock.shards[id])
+end
+
+# Single key write — returns shard ID directly (no Vector allocation)
+function acquire_write!(lock::ShardedLock, key::String)::Int
     id = shard_id(lock, key)
     Base.lock(lock.shards[id])
-    return [id]
+    return id
+end
+
+# Shard-ID write (used by execute_batch!, background tasks)
+function acquire_write!(lock::ShardedLock, id::Int)
+    Base.lock(lock.shards[id])
 end
 
 # Multi-key read (ordered)
@@ -43,31 +53,55 @@ function acquire_write!(lock::ShardedLock, key_list::Vector{String})
     return shard_ids
 end
 
-# Release read locks (reverse order)
+# Release single shard read lock
+function release_read!(lock::ShardedLock, shard_id::Int)
+    readunlock(lock.shards[shard_id])
+end
+
+# Release single shard write lock
+function release_write!(lock::ShardedLock, shard_id::Int)
+    Base.unlock(lock.shards[shard_id])
+end
+
+# Release read locks (reverse order) — multi-shard
 function release_read!(lock::ShardedLock, shard_ids::Vector)
     for id in reverse(shard_ids)
         readunlock(lock.shards[id])
     end
 end
 
-# Release write locks (reverse order)
+# Release read locks (reverse order) — range (OPTIM 2.13)
+function release_read!(lock::ShardedLock, shard_ids::UnitRange{Int})
+    for id in reverse(shard_ids)
+        readunlock(lock.shards[id])
+    end
+end
+
+# Release write locks (reverse order) — multi-shard
 function release_write!(lock::ShardedLock, shard_ids::Vector)
     for id in reverse(shard_ids)
         Base.unlock(lock.shards[id])
     end
 end
 
-# Lock all shards for global operations (KLIST)
+# Release write locks (reverse order) — range (OPTIM 2.13)
+function release_write!(lock::ShardedLock, shard_ids::UnitRange{Int})
+    for id in reverse(shard_ids)
+        Base.unlock(lock.shards[id])
+    end
+end
+
+# Lock all shards for global operations (KLIST) — returns range, zero allocation (OPTIM 2.13)
 function acquire_all_read!(lock::ShardedLock)
     for i in 1:lock.num_shards
         readlock(lock.shards[i])
     end
-    return collect(1:lock.num_shards)
+    return 1:lock.num_shards
 end
 
 function acquire_all_write!(lock::ShardedLock)
     for i in 1:lock.num_shards
         Base.lock(lock.shards[i])
     end
-    return collect(1:lock.num_shards)
+    return 1:lock.num_shards
 end

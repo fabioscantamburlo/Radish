@@ -1,5 +1,5 @@
 # DirtyTracker for Radish Persistence
-# This is loaded early before hypercommands since they need to mark dirty
+# Tracks key + type so the syncer knows which typed dict to read from.
 
 using Logging
 
@@ -7,52 +7,41 @@ export DirtyTracker, mark_dirty!, mark_deleted!, has_changes, clear!, pop_change
 
 """
 Tracks keys that have been modified or deleted since last sync.
+Stores key => datatype so the syncer knows which typed dictionary to access.
 Thread-safe via ReentrantLock.
 """
 mutable struct DirtyTracker
-    modified::Set{String}   # Keys created or modified
-    deleted::Set{String}    # Keys deleted
-    lock::ReentrantLock     # Thread safety
-    
-    DirtyTracker() = new(Set{String}(), Set{String}(), ReentrantLock())
+    modified::Dict{String, Symbol}   # key => datatype at time of modification
+    deleted::Dict{String, Symbol}    # key => datatype at time of deletion
+    lock::ReentrantLock
+
+    DirtyTracker() = new(Dict{String, Symbol}(), Dict{String, Symbol}(), ReentrantLock())
 end
 
-"""
-Mark a key as modified (created or updated).
-Call this from all hypercommands that add or modify keys.
-"""
-function mark_dirty!(tracker::DirtyTracker, key::String)
+"""Mark a key as modified (created or updated)."""
+function mark_dirty!(tracker::DirtyTracker, key::String, datatype::Symbol)
     lock(tracker.lock) do
-        # If it was marked deleted, remove from deleted (it's back)
         delete!(tracker.deleted, key)
-        push!(tracker.modified, key)
+        tracker.modified[key] = datatype
     end
 end
 
-"""
-Mark a key as deleted.
-Call this from all hypercommands that delete keys (including TTL expiration).
-"""
-function mark_deleted!(tracker::DirtyTracker, key::String)
+"""Mark a key as deleted."""
+function mark_deleted!(tracker::DirtyTracker, key::String, datatype::Symbol)
     lock(tracker.lock) do
-        # Remove from modified (no point saving it)
         delete!(tracker.modified, key)
-        push!(tracker.deleted, key)
+        tracker.deleted[key] = datatype
     end
 end
 
-"""
-Check if there are any pending changes to sync.
-"""
+"""Check if there are any pending changes to sync."""
 function has_changes(tracker::DirtyTracker)::Bool
     lock(tracker.lock) do
         return !isempty(tracker.modified) || !isempty(tracker.deleted)
     end
 end
 
-"""
-Clear the tracker after a successful sync.
-"""
+"""Clear the tracker after a successful sync."""
 function clear!(tracker::DirtyTracker)
     lock(tracker.lock) do
         empty!(tracker.modified)
@@ -62,9 +51,9 @@ end
 
 """
 Get and clear dirty keys atomically.
-Returns (modified_keys, deleted_keys) and clears the tracker.
+Returns (modified::Dict{String,Symbol}, deleted::Dict{String,Symbol}).
 """
-function pop_changes!(tracker::DirtyTracker)::Tuple{Set{String}, Set{String}}
+function pop_changes!(tracker::DirtyTracker)::Tuple{Dict{String, Symbol}, Dict{String, Symbol}}
     lock(tracker.lock) do
         modified = copy(tracker.modified)
         deleted = copy(tracker.deleted)

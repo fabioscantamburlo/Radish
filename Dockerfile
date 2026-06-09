@@ -1,28 +1,22 @@
 FROM julia:1.11
 
-# Install netcat for Docker healthcheck
-RUN apt-get update && apt-get install -y --no-install-recommends netcat-openbsd && rm -rf /var/lib/apt/lists/*
+# Install netcat (healthcheck) + python3 (bench_net.py, smoke_test.py)
+RUN apt-get update \
+    && apt-get install -y --no-install-recommends netcat-openbsd python3 \
+    && rm -rf /var/lib/apt/lists/*
 
-# Set working directory
 WORKDIR /app
 
-# Copy project definition first (Manifest.toml excluded via .dockerignore)
+# ── Layer 1: Dependencies (cached until Project.toml changes) ────────────────
 COPY Project.toml ./
+RUN julia --project=. -e 'using Pkg; Pkg.instantiate()' \
+    && julia --project=. -e 'using Pkg; Pkg.precompile(; warn_loaded=false)' || true
 
-# Install dependencies (generates fresh Manifest for this Julia version)
-RUN julia --project=. -e 'using Pkg; Pkg.instantiate()'
-
-# Copy source code (.dockerignore excludes .git, persistence/, Manifest.toml, etc.)
+# ── Layer 2: Source code (rebuilt on any code change, but fast — just a copy) ─
 COPY . .
 
-# Precompile dependencies (not the Radish module itself, which uses include() at runtime)
-RUN julia --project=. -e 'using Pkg; Pkg.precompile(; warn_loaded=false)' || true
-
-# Expose server port
 EXPOSE 9000
 
-# Metadata
 LABEL description="Radish In-Memory Database Server"
 
-# Run the server (0.0.0.0 to accept connections from other containers)
-CMD ["julia", "--project=.", "server_runner.jl", "0.0.0.0", "9000"]
+CMD ["julia", "--threads=auto", "--project=.", "server_runner.jl", "0.0.0.0", "9000"]

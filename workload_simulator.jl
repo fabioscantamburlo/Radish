@@ -56,6 +56,28 @@ end
 """Check if a RESP response indicates key-not-found (nil)."""
 is_nil(resp::String) = resp == "\$-1"
 
+"""Encode a RESP command into an IOBuffer (no socket write)."""
+function encode_command!(buf::IOBuffer, parts::Vector{String})
+    print(buf, "*", length(parts), "\r\n")
+    for part in parts
+        print(buf, "\$", length(part), "\r\n", part, "\r\n")
+    end
+end
+
+"""Send multiple RESP commands in a single write, then read all responses."""
+function send_pipeline(sock::TCPSocket, commands::Vector{Vector{String}})
+    buf = IOBuffer()
+    for parts in commands
+        encode_command!(buf, parts)
+    end
+    write(sock, take!(buf))
+    responses = String[]
+    for _ in commands
+        push!(responses, read_resp(sock))
+    end
+    return responses
+end
+
 # ============================================================================
 # Random Data Generators
 # ============================================================================
@@ -312,6 +334,61 @@ const TYPE_REGISTRY = [
 ]
 
 # ============================================================================
+# Progress Display Helpers
+# ============================================================================
+
+"""Format a large number with comma separators (e.g., 1000000 → 1,000,000)."""
+function fmt_num(n::Number)::String
+    s = string(round(Int, n))
+    # Insert commas from right to left
+    parts = String[]
+    while length(s) > 3
+        push!(parts, s[end-2:end])
+        s = s[1:end-3]
+    end
+    push!(parts, s)
+    return join(reverse(parts), ",")
+end
+
+"""Render a progress bar string: [████████░░░░░░░░] 45%"""
+function progress_bar(current::Int, total::Int; width::Int=30)::String
+    total <= 0 && return "[" * "?" ^ width * "]   0%"
+    pct = min(1.0, current / total)
+    filled = round(Int, pct * width)
+    empty = width - filled
+    bar = "█" ^ filled * "░" ^ empty
+    pct_str = lpad("$(round(Int, pct * 100))%", 4)
+    return "[$bar]$pct_str"
+end
+
+"""Format elapsed time as human-readable string."""
+function fmt_time(seconds::Float64)::String
+    if seconds < 60
+        return "$(round(seconds, digits=1))s"
+    elseif seconds < 3600
+        m = floor(Int, seconds / 60)
+        s = round(Int, seconds % 60)
+        return "$(m)m $(s)s"
+    else
+        h = floor(Int, seconds / 3600)
+        m = round(Int, (seconds % 3600) / 60)
+        return "$(h)h $(m)m"
+    end
+end
+
+"""Print a worker progress line that overwrites itself (using carriage return)."""
+function print_worker_progress(worker_id::Int, label::String, current::Int, total::Int, 
+                                elapsed::Float64; extra::String="")
+    rate = current > 0 && elapsed > 0 ? round(Int, current / elapsed) : 0
+    bar = progress_bar(current, total)
+    msg = "  ▸ Worker #$(lpad(worker_id, 2)) [$label] $bar  $(fmt_num(current))/$(fmt_num(total))  $(fmt_num(rate))/s"
+    if !isempty(extra)
+        msg *= "  $extra"
+    end
+    println(msg)
+end
+
+# ============================================================================
 # Phase 1: LOAD — Preload keys into DB
 # ============================================================================
 
@@ -322,9 +399,17 @@ function load_worker(worker_id::Int, type_entry, start_idx::Int, end_idx::Int,
         read_resp(sock)  # drain welcome
 
         total = end_idx - start_idx + 1
+        start_time = time()
+        println("  ▸ Worker #$(lpad(worker_id, 2)) [$(type_entry.name)] started — $total keys to create")
+
+        # Adaptive report interval: ~10 reports per worker
+        report_interval = max(100, total ÷ 10)
+
         for i in start_idx:end_idx
-            if (i - start_idx + 1) % 2_000 == 0
-                println("  Worker #$worker_id [$(type_entry.name)]: $((i - start_idx + 1))/$total keys")
+            done = i - start_idx + 1
+            if done % report_interval == 0
+                elapsed = time() - start_time
+                print_worker_progress(worker_id, type_entry.name, done, total, elapsed)
             end
 
             key = "$(type_entry.prefix)_$i"
@@ -334,9 +419,12 @@ function load_worker(worker_id::Int, type_entry, start_idx::Int, end_idx::Int,
 
         send_command(sock, ["QUIT"])
         close(sock)
-        println("  Worker #$worker_id [$(type_entry.name)]: done ($total keys)")
+
+        elapsed = time() - start_time
+        rate = round(Int, total / elapsed)
+        println("  ✓ Worker #$(lpad(worker_id, 2)) [$(type_entry.name)] done — $(fmt_num(total)) keys in $(fmt_time(elapsed)) ($(fmt_num(rate)) keys/s)")
     catch e
-        println("  Worker #$worker_id [$(type_entry.name)] error: $e")
+        println("  ✗ Worker #$(lpad(worker_id, 2)) [$(type_entry.name)] error: $e")
     end
 end
 
@@ -369,7 +457,13 @@ function run_load_phase(; num_clients::Int, num_keys::Int, host::String, port::I
     elapsed = time() - start_time
     total_keys = num_keys * length(TYPE_REGISTRY)
     rate = round(total_keys / elapsed, digits=0)
-    println("\n  ✅ Load complete: $total_keys keys in $(round(elapsed, digits=2))s ($rate keys/s)")
+    println()
+    println("  ╔══════════════════════════════════════════════════╗")
+    println("  ║  LOAD COMPLETE                                   ║")
+    println("  ╚══════════════════════════════════════════════════╝")
+    println("  Total keys:   $(fmt_num(total_keys))")
+    println("  Elapsed:      $(fmt_time(elapsed))")
+    println("  Throughput:   $(fmt_num(rate)) keys/s")
 end
 
 # ============================================================================
@@ -524,6 +618,17 @@ function should_continue(ops_count::Int, start_time::Float64,
     return ops_count < num_ops
 end
 
+# Read-only operations (do not affect AOF)
+const SIM_READ_OPS = Set([
+    "S_GET", "S_LEN", "S_GETRANGE", "S_LCS", "S_COMPLEN",
+    "L_GET", "L_LEN", "L_RANGE",
+    "EXISTS", "TYPE", "TTL", "DBSIZE", "KLIST", "PING",
+])
+
+# Pipeline batch size — number of simple ops to batch before sending
+# Configurable via --pipeline-batch CLI argument
+PIPELINE_BATCH = 50
+
 function run_worker(client_id::Int, pool::Dict{String, Vector{String}},
                     num_ops::Int, duration::Float64, forever::Bool,
                     host::String, port::Int)
@@ -532,19 +637,21 @@ function run_worker(client_id::Int, pool::Dict{String, Vector{String}},
         sock = connect(host, port)
         read_resp(sock)  # drain welcome
 
-        # Each client gets its own mutable copy of the pool
         local_pool = Dict(k => copy(v) for (k, v) in pool)
         ops_count = 0
-        nil_streak = Dict{String, Int}()  # track consecutive nils per key
-        refresh_interval = 5_000          # re-discover keys every N ops
+        write_count = 0
+        tx_count = 0
+        nil_streak = Dict{String, Int}()
+        refresh_interval = 100_000
         last_refresh = 0
+        report_interval = 200
 
         start_time = time()
+        term_label = forever ? "∞" : (duration > 0 ? "$(round(Int, duration))s" : "$(fmt_num(num_ops)) ops")
+        println("  ▸ Worker #$(lpad(client_id, 2)) started — target: $term_label (pipeline=$(PIPELINE_BATCH))")
 
         while should_continue(ops_count, start_time, num_ops, duration, forever)
-            ops_count += 1
-
-            # Periodic pool refresh via KLIST
+            # Periodic pool refresh
             if ops_count - last_refresh >= refresh_interval
                 local_pool = discover_keys(sock)
                 last_refresh = ops_count
@@ -553,64 +660,259 @@ function run_worker(client_id::Int, pool::Dict{String, Vector{String}},
 
             pool_size = total_pool_size(local_pool)
             if pool_size == 0
-                # No keys left — just do general ops or wait
                 execute_general_op(sock)
+                ops_count += 1
                 continue
             end
 
-            # Category selection: type ops weighted by key count, meta 10%, general 5%, tx 10%
+            # Decide category for this batch cycle
             r = rand()
             if r < 0.10
-                # Transaction
-                tx_ops = execute_transaction(sock, local_pool)
-                ops_count += tx_ops
+                # Transaction — pipeline as MULTI + commands + EXEC
+                available_types = [(t, get(local_pool, t.name, String[])) for t in TYPE_REGISTRY]
+                available_types = filter(x -> !isempty(x[2]), available_types)
+                if !isempty(available_types)
+                    type_entry, type_keys = rand(available_types)
+                    num_tx_ops = rand(3:8)
+                    will_discard = rand() < 0.20
+                    
+                    tx_cmds = Vector{String}[]
+                    push!(tx_cmds, ["MULTI"])
+                    for _ in 1:num_tx_ops
+                        key = rand(type_keys)
+                        op_name, _ = pick_weighted_op(type_entry.tx_ops)
+                        if op_name == "S_GET"
+                            push!(tx_cmds, ["S_GET", key])
+                        elseif op_name == "S_APPEND"
+                            push!(tx_cmds, ["S_APPEND", key, rand_string(rand(5:50))])
+                        elseif op_name == "S_LEN"
+                            push!(tx_cmds, ["S_LEN", key])
+                        elseif op_name == "S_INCR"
+                            push!(tx_cmds, ["S_INCR", key])
+                        elseif op_name == "S_GETRANGE"
+                            s = rand(1:10); e = s + rand(1:50)
+                            push!(tx_cmds, ["S_GETRANGE", key, string(s), string(e)])
+                        elseif op_name == "S_RPAD"
+                            push!(tx_cmds, ["S_RPAD", key, string(rand(10:100)), rand_string(1)])
+                        elseif op_name == "S_LPAD"
+                            push!(tx_cmds, ["S_LPAD", key, string(rand(10:100)), rand_string(1)])
+                        elseif op_name == "L_GET"
+                            push!(tx_cmds, ["L_GET", key])
+                        elseif op_name == "L_PREPEND"
+                            push!(tx_cmds, ["L_PREPEND", key, rand_string(rand(5:50))])
+                        elseif op_name == "L_APPEND"
+                            push!(tx_cmds, ["L_APPEND", key, rand_string(rand(5:50))])
+                        elseif op_name == "L_LEN"
+                            push!(tx_cmds, ["L_LEN", key])
+                        elseif op_name == "L_RANGE"
+                            s = rand(1:5); e = s + rand(1:20)
+                            push!(tx_cmds, ["L_RANGE", key, string(s), string(e)])
+                        elseif op_name == "L_POP"
+                            push!(tx_cmds, ["L_POP", key])
+                        elseif op_name == "L_DEQUEUE"
+                            push!(tx_cmds, ["L_DEQUEUE", key])
+                        else
+                            push!(tx_cmds, [op_name, key])
+                        end
+                    end
+                    push!(tx_cmds, will_discard ? ["DISCARD"] : ["EXEC"])
+                    
+                    send_pipeline(sock, tx_cmds)
+                    ops_count += 1 + num_tx_ops
+                    write_count += num_tx_ops
+                    tx_count += 1
+                end
             elseif r < 0.20
-                # Meta operation
-                execute_meta_op(sock, local_pool)
+                # Meta operation — pipeline a small batch of meta ops
+                all_known_keys = vcat(values(local_pool)...)
+                if !isempty(all_known_keys)
+                    meta_cmds = Vector{String}[]
+                    meta_keys = String[]
+                    for _ in 1:min(10, length(all_known_keys))
+                        key = rand(all_known_keys)
+                        mr = rand()
+                        if mr < 0.30
+                            push!(meta_cmds, ["EXISTS", key])
+                        elseif mr < 0.55
+                            push!(meta_cmds, ["TYPE", key])
+                        elseif mr < 0.80
+                            push!(meta_cmds, ["TTL", key])
+                        elseif mr < 0.90
+                            push!(meta_cmds, ["PERSIST", key])
+                        else
+                            push!(meta_cmds, ["EXPIRE", key, string(rand(60:3600))])
+                        end
+                        push!(meta_keys, key)
+                    end
+                    send_pipeline(sock, meta_cmds)
+                    ops_count += length(meta_cmds)
+                    write_count += length(meta_cmds)
+                end
             elseif r < 0.25
-                # General operation
-                execute_general_op(sock)
-            else
-                # Type-specific operation, weighted by key count
-                type_weights = [(t, length(get(local_pool, t.name, String[]))) for t in TYPE_REGISTRY]
-                total_w = sum(w for (_, w) in type_weights)
-                total_w == 0 && continue
-
-                pick = rand() * total_w
-                cum = 0.0
-                chosen_type = TYPE_REGISTRY[1]
-                for (t, w) in type_weights
-                    cum += w
-                    if pick <= cum
-                        chosen_type = t
-                        break
+                # General ops — pipeline a small batch
+                gen_cmds = Vector{String}[]
+                for _ in 1:5
+                    gr = rand()
+                    if gr < 0.50
+                        push!(gen_cmds, ["PING"])
+                    else
+                        push!(gen_cmds, ["DBSIZE"])
                     end
                 end
+                send_pipeline(sock, gen_cmds)
+                ops_count += length(gen_cmds)
+            else
+                # Type-specific operations — PIPELINE a batch (reads AND writes)
+                batch_cmds = Vector{String}[]
+                batch_keys = String[]
+                batch_is_write = Bool[]
+                batch_size = min(PIPELINE_BATCH, forever ? PIPELINE_BATCH : max(1, num_ops - ops_count))
 
-                key = pick_key(local_pool, chosen_type.name)
-                key === nothing && continue
+                for _ in 1:batch_size
+                    type_weights = [(t, length(get(local_pool, t.name, String[]))) for t in TYPE_REGISTRY]
+                    total_w = sum(w for (_, w) in type_weights)
+                    total_w == 0 && break
 
-                op_name, op_fn = pick_weighted_op(chosen_type.ops)
-                resp = op_fn(sock, key, local_pool)
-
-                # Handle nil response — key may have expired
-                if resp isa String && is_nil(resp)
-                    streak = get(nil_streak, key, 0) + 1
-                    nil_streak[key] = streak
-                    if streak >= 2
-                        # Key is likely expired, remove from pool
-                        remove_from_pool!(local_pool, key)
-                        delete!(nil_streak, key)
+                    pick = rand() * total_w
+                    cum = 0.0
+                    chosen_type = TYPE_REGISTRY[1]
+                    for (t, w) in type_weights
+                        cum += w
+                        if pick <= cum
+                            chosen_type = t
+                            break
+                        end
                     end
-                else
-                    delete!(nil_streak, key)
+
+                    key = pick_key(local_pool, chosen_type.name)
+                    key === nothing && break
+
+                    op_name, _ = pick_weighted_op(chosen_type.ops)
+                    is_write = !(op_name in SIM_READ_OPS)
+
+                    # Build command parts for pipelining
+                    if op_name == "S_GET"
+                        push!(batch_cmds, ["S_GET", key])
+                    elseif op_name == "S_LEN"
+                        push!(batch_cmds, ["S_LEN", key])
+                    elseif op_name == "S_GETRANGE"
+                        s = rand(1:10); e = s + rand(1:50)
+                        push!(batch_cmds, ["S_GETRANGE", key, string(s), string(e)])
+                    elseif op_name == "S_SET"
+                        new_key = "str_new_$(rand(1:1_000_000))"
+                        value = rand() < 0.30 ? string(rand(1:100_000)) : rand_string(rand_content_len())
+                        ttl = maybe_ttl()
+                        if ttl !== nothing
+                            push!(batch_cmds, ["S_SET", new_key, value, ttl])
+                        else
+                            push!(batch_cmds, ["S_SET", new_key, value])
+                        end
+                        # Optimistically add to pool
+                        push!(get!(local_pool, "string", String[]), new_key)
+                        key = new_key
+                    elseif op_name == "S_INCR"
+                        push!(batch_cmds, ["S_INCR", key])
+                    elseif op_name == "S_GINCR"
+                        push!(batch_cmds, ["S_GINCR", key])
+                    elseif op_name == "S_INCRBY"
+                        push!(batch_cmds, ["S_INCRBY", key, string(rand(1:100))])
+                    elseif op_name == "S_GINCRBY"
+                        push!(batch_cmds, ["S_GINCRBY", key, string(rand(1:100))])
+                    elseif op_name == "S_APPEND"
+                        push!(batch_cmds, ["S_APPEND", key, rand_string(rand(5:50))])
+                    elseif op_name == "S_RPAD"
+                        push!(batch_cmds, ["S_RPAD", key, string(rand(10:100)), rand_string(1)])
+                    elseif op_name == "S_LPAD"
+                        push!(batch_cmds, ["S_LPAD", key, string(rand(10:100)), rand_string(1)])
+                    elseif op_name == "S_LCS"
+                        str_keys = get(local_pool, "string", String[])
+                        if !isempty(str_keys)
+                            push!(batch_cmds, ["S_LCS", key, rand(str_keys)])
+                        else
+                            continue
+                        end
+                    elseif op_name == "S_COMPLEN"
+                        str_keys = get(local_pool, "string", String[])
+                        if !isempty(str_keys)
+                            push!(batch_cmds, ["S_COMPLEN", key, rand(str_keys)])
+                        else
+                            continue
+                        end
+                    elseif op_name == "L_GET"
+                        push!(batch_cmds, ["L_GET", key])
+                    elseif op_name == "L_LEN"
+                        push!(batch_cmds, ["L_LEN", key])
+                    elseif op_name == "L_RANGE"
+                        s = rand(1:5); e = s + rand(1:20)
+                        push!(batch_cmds, ["L_RANGE", key, string(s), string(e)])
+                    elseif op_name == "L_ADD"
+                        new_key = "list_new_$(rand(1:1_000_000))"
+                        value = rand_string(rand(5:500))
+                        push!(batch_cmds, ["L_ADD", new_key, value])
+                        push!(get!(local_pool, "list", String[]), new_key)
+                        key = new_key
+                    elseif op_name == "L_PREPEND"
+                        push!(batch_cmds, ["L_PREPEND", key, rand_string(rand(5:50))])
+                    elseif op_name == "L_APPEND"
+                        push!(batch_cmds, ["L_APPEND", key, rand_string(rand(5:50))])
+                    elseif op_name == "L_POP"
+                        push!(batch_cmds, ["L_POP", key])
+                    elseif op_name == "L_DEQUEUE"
+                        push!(batch_cmds, ["L_DEQUEUE", key])
+                    elseif op_name == "L_TRIMR"
+                        push!(batch_cmds, ["L_TRIMR", key, string(rand(1:20))])
+                    elseif op_name == "L_TRIML"
+                        push!(batch_cmds, ["L_TRIML", key, string(rand(1:20))])
+                    elseif op_name == "L_MOVE"
+                        list_keys = get(local_pool, "list", String[])
+                        if length(list_keys) >= 2
+                            key2 = rand(list_keys)
+                            while key2 == key; key2 = rand(list_keys); end
+                            push!(batch_cmds, ["L_MOVE", key, key2])
+                        else
+                            continue
+                        end
+                    else
+                        push!(batch_cmds, [op_name, key])
+                    end
+                    push!(batch_keys, key)
+                    push!(batch_is_write, is_write)
+                end
+
+                # Send the pipelined batch
+                if !isempty(batch_cmds)
+                    responses = send_pipeline(sock, batch_cmds)
+                    ops_count += length(responses)
+                    write_count += count(batch_is_write)
+
+                    # Process nil responses for pool management
+                    for (i, resp) in enumerate(responses)
+                        key = batch_keys[i]
+                        if is_nil(resp)
+                            streak = get(nil_streak, key, 0) + 1
+                            nil_streak[key] = streak
+                            if streak >= 2
+                                remove_from_pool!(local_pool, key)
+                                delete!(nil_streak, key)
+                            end
+                        else
+                            delete!(nil_streak, key)
+                        end
+                    end
                 end
             end
 
-            if ops_count % 5_000 == 0
+            if ops_count % report_interval == 0 || (ops_count > 0 && ops_count % report_interval < PIPELINE_BATCH + 5)
                 elapsed = time() - start_time
-                rate = round(ops_count / elapsed, digits=0)
-                println("  Client #$client_id: $ops_count ops ($rate ops/s)")
+                rate = ops_count > 0 && elapsed > 0 ? round(Int, ops_count / elapsed) : 0
+                read_count = ops_count - write_count
+                w_pct = ops_count > 0 ? round(Int, 100 * write_count / ops_count) : 0
+                if !forever && duration <= 0
+                    bar = progress_bar(ops_count, num_ops)
+                    println("  ▸ W#$(lpad(client_id, 2)) $bar $(fmt_num(ops_count)) ops  $(fmt_num(rate))/s  W:$(fmt_num(write_count)) R:$(fmt_num(read_count)) TX:$(tx_count) ($(w_pct)% writes)")
+                else
+                    println("  ▸ W#$(lpad(client_id, 2)) $(fmt_num(ops_count)) ops  $(fmt_num(rate))/s  W:$(fmt_num(write_count)) R:$(fmt_num(read_count)) TX:$(tx_count) ($(w_pct)% writes)  $(fmt_time(elapsed))")
+                end
             end
         end
 
@@ -618,14 +920,16 @@ function run_worker(client_id::Int, pool::Dict{String, Vector{String}},
         close(sock)
 
         elapsed = time() - start_time
-        rate = round(ops_count / elapsed, digits=0)
-        println("  Client #$client_id: finished ($ops_count ops in $(round(elapsed, digits=2))s, $rate ops/s)")
+        rate = round(Int, ops_count / elapsed)
+        read_count = ops_count - write_count
+        w_pct = ops_count > 0 ? round(Int, 100 * write_count / ops_count) : 0
+        println("  ✓ W#$(lpad(client_id, 2)) done — $(fmt_num(ops_count)) ops in $(fmt_time(elapsed)) ($(fmt_num(rate))/s)  W:$(fmt_num(write_count)) R:$(fmt_num(read_count)) TX:$(tx_count) ($(w_pct)% writes)")
         return ops_count
     catch e
         if isa(e, InterruptException)
-            println("  Client #$client_id: interrupted")
+            println("  ⛔ Worker #$(lpad(client_id, 2)) interrupted")
         else
-            println("  Client #$client_id error: $e")
+            println("  ✗ Worker #$(lpad(client_id, 2)) error: $e")
         end
         return 0
     end
@@ -643,7 +947,7 @@ function run_run_phase(; num_clients::Int, num_ops::Int, duration::Float64,
     elseif duration > 0
         "$(round(Int, duration))s per client"
     else
-        "$num_ops ops per client"
+        "$(fmt_num(num_ops)) ops per client"
     end
     println("  Termination:    $term_desc")
     println("  Workers:        $num_clients")
@@ -658,13 +962,15 @@ function run_run_phase(; num_clients::Int, num_ops::Int, duration::Float64,
 
     pool_size = total_pool_size(initial_pool)
     for (dtype, keys) in initial_pool
-        println("    $dtype: $(length(keys)) keys")
+        println("    $(rpad(dtype, 8)) $(fmt_num(length(keys))) keys")
     end
-    println("    Total: $pool_size keys\n")
+    println("    $(rpad("Total", 8)) $(fmt_num(pool_size)) keys")
+    println()
 
     if pool_size == 0
         println("  ⚠ No keys found in DB. Run with 'load' or 'loadrun' mode first.")
-        println("    Starting anyway — will only execute general ops until keys appear.\n")
+        println("    Starting anyway — will only execute general ops until keys appear.")
+        println()
     end
 
     start_time = time()
@@ -685,8 +991,15 @@ function run_run_phase(; num_clients::Int, num_ops::Int, duration::Float64,
     end
 
     elapsed = time() - start_time
-    rate = total_ops > 0 ? round(total_ops / elapsed, digits=0) : 0
-    println("\n  ✅ Run complete: $total_ops total ops in $(round(elapsed, digits=2))s ($rate ops/s)")
+    rate = total_ops > 0 ? round(Int, total_ops / elapsed) : 0
+    println()
+    println("  ╔══════════════════════════════════════════════════╗")
+    println("  ║  RUN COMPLETE                                    ║")
+    println("  ╚══════════════════════════════════════════════════╝")
+    println("  Total ops:    $(fmt_num(total_ops))")
+    println("  Elapsed:      $(fmt_time(elapsed))")
+    println("  Throughput:   $(fmt_num(rate)) ops/s")
+    println("  Workers:      $num_clients")
 end
 
 # ============================================================================
@@ -708,6 +1021,7 @@ function show_usage()
       --num-ops N         Operations per client in run phase (default: 10000)
       --duration T        Run for T seconds instead of num-ops
       --forever           Run indefinitely (Ctrl+C to stop)
+      --pipeline-batch N  Commands per pipeline batch in run phase (default: 50)
       --host HOST         Server host (default: 127.0.0.1)
       --port PORT         Server port (default: 9000)
       -h, --help          Show this help
@@ -743,6 +1057,7 @@ function parse_args(args)
         "num_ops"     => 10000,
         "duration"    => 0.0,
         "forever"     => false,
+        "pipeline"    => 1000,
         "host"        => "127.0.0.1",
         "port"        => 9000,
     )
@@ -760,6 +1075,8 @@ function parse_args(args)
             config["duration"] = parse(Float64, args[i + 1]); i += 2
         elseif arg == "--forever"
             config["forever"] = true; i += 1
+        elseif arg == "--pipeline-batch" && i + 1 <= length(args)
+            config["pipeline"] = parse(Int, args[i + 1]); i += 2
         elseif arg == "--host" && i + 1 <= length(args)
             config["host"] = args[i + 1]; i += 2
         elseif arg == "--port" && i + 1 <= length(args)
@@ -789,7 +1106,7 @@ function main()
     println("  Server:         $(config["host"]):$(config["port"])")
     println("  Clients:        $(config["num_clients"])")
     if mode in ("load", "loadrun")
-        println("  Keys per type:  $(config["num_keys"])")
+        println("  Keys per type:  $(fmt_num(config["num_keys"]))")
     end
     if mode in ("run", "loadrun")
         if config["forever"]
@@ -797,9 +1114,12 @@ function main()
         elseif config["duration"] > 0
             println("  Run:            $(round(Int, config["duration"]))s")
         else
-            println("  Run:            $(config["num_ops"]) ops/client")
+            println("  Run:            $(fmt_num(config["num_ops"])) ops/client")
         end
     end
+
+    # Set pipeline batch from config
+    global PIPELINE_BATCH = config["pipeline"]
 
     # Wait briefly for server readiness
     println("\n  Connecting to server...")

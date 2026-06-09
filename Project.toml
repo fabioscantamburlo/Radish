@@ -1,5 +1,5 @@
 name = "Radish"
-uuid = "12345678-1234-1234-1234-123456789abc"
+uuid = "322685d2-ef12-48bf-a37e-908df51f00e6"
 version = "0.1.0"
 authors = ["Fabio Scantamburlo"]
 
@@ -7,13 +7,16 @@ authors = ["Fabio Scantamburlo"]
 ConcurrentUtilities = "f0e56b4a-5159-44fe-b623-3e5288b988bb"
 Dates = "ade2ca70-3891-5945-98fb-dc099432e06a"
 JSON3 = "0f8b85d8-7281-11e9-16c2-39a750bddbf1"
-JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
 Logging = "56ddb016-857b-54e1-b83d-db4d58db5568"
 Sockets = "6462fe0b-24de-5631-8697-dd941f90decc"
-StatsBase = "2913bbd2-ae8a-5f71-8c99-4fb6c76f3a91"
 YAML = "ddb6d928-2868-570f-bddf-ab3f9cf99eb6"
 
 [compat]
 JSON3 = "1"
-JuliaFormatter = "2.1.6"
 YAML = "0.4.16"
+
+[extras]
+JuliaFormatter = "98e50ef6-434e-11e9-1051-2b60c6c9e899"
+
+[targets]
+dev = ["JuliaFormatter"]

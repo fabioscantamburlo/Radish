@@ -58,6 +58,7 @@ end
 CommandSuccess(value)           # Success with a return value
 CommandError(msg::String)       # Failure with error message
 CommandCreate(elem::RadishElement)  # Success, created new element
+CommandDirect(value)            # Bypass — value passed directly to ExecuteResult
 ```
 
 **Examples:**
@@ -73,6 +74,10 @@ CommandCreate(RadishElement("world", nothing, now(), :string))
 
 # Error: value is not an integer
 CommandError("Value 'abc' is not an integer")
+
+# Direct value — bypasses CommandResult extraction, value goes straight to ExecuteResult
+CommandDirect(["a", "b", "c"])   # Used by L_GET, L_RANGE, SET_GET, S_LCS
+CommandDirect("popped_value")    # Used by L_POP, L_DEQUEUE, SET_GETDEL
 ```
 
 **Flow:** Type command → `CommandResult` → Hypercommand
@@ -150,25 +155,29 @@ Here's how these structs interact during a command execution: (I know this chart
 sequenceDiagram
     participant Client
     participant RESP as RESP Layer
-    participant Dispatcher
+    participant Dispatcher as execute!
+    participant Router as route_command
     participant Palette as Palette (S_PALETTE)
     participant Hypercommand as Hypercommand (rget_or_expire!)
     participant TypeCommand as Type Command (sget)
-    participant Context as RadishContext
+    participant Context as RadishStore
 
     Client->>RESP: Raw bytes — "S_GET mykey\r\n"
     Note over RESP: Parses RESP protocol<br/>Builds Command struct
 
     RESP->>Dispatcher: Command("S_GET", "mykey", [])
-    Note over Dispatcher: name = "S_GET"<br/>key  = "mykey"<br/>args = []
+    Note over Dispatcher: resolve_locks → LockPlan<br/>acquire_locks! → read lock
 
-    Dispatcher->>Palette: Lookup S_PALETTE["S_GET"]
-    Palette-->>Dispatcher: (sget, rget_or_expire!)
-    Note over Dispatcher: Acquires read lock<br/>on mykey's shard
+    Dispatcher->>Router: route_command(store, cmd)
+    Note over Router: name = "S_GET"<br/>key  = "mykey"<br/>args = []
 
-    Dispatcher->>Hypercommand: rget_or_expire!(ctx, "mykey", sget)
+    Router->>Palette: Lookup S_PALETTE["S_GET"]
+    Palette-->>Router: (sget, rget_or_expire!)
+    Note over Router: Extract store.strings<br/>(typed sub-dict)
 
-    Hypercommand->>Context: haskey(ctx, "mykey") ?
+    Router->>Hypercommand: rget_or_expire!(store.strings, "mykey", sget)
+
+    Hypercommand->>Context: haskey(store.strings, "mykey") ?
     Note over Hypercommand,Context: Also checks TTL:<br/>is tinit + ttl > now() ?
 
     alt Key exists and TTL valid
@@ -177,13 +186,14 @@ sequenceDiagram
 
         TypeCommand-->>Hypercommand: CommandResult(success=true, value="hello", error=nothing, element=nothing)
 
-        Hypercommand-->>Dispatcher: ExecuteResult(SUCCESS, "hello", nothing)
+        Hypercommand-->>Router: ExecuteResult(SUCCESS, "hello", nothing)
     else Key missing or expired
         Note over Hypercommand: Deletes key if expired
-        Hypercommand-->>Dispatcher: ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
+        Hypercommand-->>Router: ExecuteResult(KEY_NOT_FOUND, nothing, nothing)
     end
 
-    Note over Dispatcher: Releases read lock<br/>on mykey's shard
+    Router-->>Dispatcher: ExecuteResult
+    Note over Dispatcher: release_locks!
 
     Dispatcher->>RESP: ExecuteResult(SUCCESS, "hello", nothing)
     Note over RESP: status = SUCCESS<br/>→ encode as Bulk String
@@ -277,12 +287,11 @@ end
 ```julia
 # Type command (rstrings.jl)
 function sincr!(elem::RadishElement)
-    elem_n = tryparse(Int, string(elem.value))
+    elem_n = tryparse(Int, elem.value)
     if elem_n === nothing
         return CommandError("Value '$(elem.value)' is not an integer")
     end
-    elem_n += 1
-    elem.value = string(elem_n)
+    elem.value = string(elem_n + 1)
     return CommandSuccess(true)
 end
 
@@ -303,20 +312,27 @@ end
 
 ```julia
 # Type command (rstrings.jl)
-function sadd(value::String, ttl::String)
-    ttl_p = tryparse(Int, ttl)
-    if ttl_p === nothing
-        return CommandError("TTL must be a valid integer")
-    end
-    elem = RadishElement(value, ttl_p, now(), :string)
+function sadd(args::Vector{String})
+    value = args[1]
+    elem = RadishElement(String(value), nothing, now(), :string)
     return CommandCreate(elem)
 end
 
-# Hypercommand (radishelem.jl)
-function radd!(context, key, command, args...)
+# Hypercommand: radd! (radishelem.jl) — create-only
+function radd!(context::Dict, key, command, args...)
     if haskey(context, key)
         return ExecuteResult(ERROR, nothing, "Key '$key' already exists")
     end
+    cmd_result = command(args...)
+    if !cmd_result.success
+        return ExecuteResult(ERROR, nothing, cmd_result.error)
+    end
+    context[key] = cmd_result.element
+    return ExecuteResult(SUCCESS, true, nothing)
+end
+
+# Hypercommand: radd_or_replace! (radishelem.jl) — create or overwrite (S_UPSERT)
+function radd_or_replace!(context::Dict, key, command, args...)
     cmd_result = command(args...)
     if !cmd_result.success
         return ExecuteResult(ERROR, nothing, cmd_result.error)

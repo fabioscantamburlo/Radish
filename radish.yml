@@ -19,7 +19,6 @@ persistence:
   snapshots_subdir: "snapshots"  # Subdirectory for RDB shard files
   aof_subdir: "aof"              # Subdirectory for append-only files
   aof_filename: "radish.aof"     # Name of the AOF file
-  num_snapshot_shards: 256        # Number of snapshot shard files (must match concurrency.num_lock_shards)
 
 # -----------------------------------------------------------------------------
 # Background Tasks
@@ -29,10 +28,13 @@ background_tasks:
   cleaner_interval_sec: 0.1  # Seconds between TTL expiration cleanup runs
 
 # -----------------------------------------------------------------------------
-# Concurrency
+# Concurrency & Sharding
 # -----------------------------------------------------------------------------
+# Single value controlling both ShardedLock partitions and snapshot shard files.
+# Both systems use the same hash function, so they must use the same count.
 concurrency:
-  num_lock_shards: 256      # Number of ShardedLock partitions (must match persistence.num_snapshot_shards)
+  num_shards: 256           # Number of lock/snapshot shard partitions
+  lock_type: "fair"         # Lock implementation: "standard" (ReadWriteLock) or "fair" (SimpleFairShardedLock)
 
 # -----------------------------------------------------------------------------
 # TTL Cleanup
@@ -42,7 +44,9 @@ ttl_cleanup:
   sample_percentage: 0.10     # Fraction of keys to sample when above threshold
 
 # -----------------------------------------------------------------------------
-# Data Limits
+# Client Defaults
 # -----------------------------------------------------------------------------
-data_limits:
-  list_display_limit: 50     # Max elements returned by L_GET (0 = unlimited)
+# Recommended defaults for clients connecting to this server.
+client:
+  pipeline_batch: 1000         # Commands per pipeline batch (0 = no pipelining)
+  pipeline_flush_ms: 5        # Flush after this many ms even if batch not full (0 = no time limit)

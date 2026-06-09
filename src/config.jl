@@ -16,21 +16,30 @@ struct RadishConfig
     snapshots_subdir::String
     aof_subdir::String
     aof_filename::String
-    num_snapshot_shards::Int
 
     # Background tasks
     sync_interval_sec::Float64
     cleaner_interval_sec::Float64
 
-    # Concurrency
-    num_lock_shards::Int
+    # Concurrency & Sharding
+    # Single value used by both ShardedLock and snapshot partitioning.
+    # Previously split into num_lock_shards and num_snapshot_shards,
+    # but they must always be equal (same hash function), so unified.
+    num_shards::Int
 
     # TTL cleanup
     sampling_threshold::Int
     sample_percentage::Float64
 
-    # Data limits
-    list_display_limit::Int
+    # Client defaults
+    pipeline_batch::Int
+    pipeline_flush_ms::Int
+
+    # AOF sync interval in milliseconds: 0 = flush every command, N>0 = flush every N ms
+    aof_sync_ms::Int
+
+    # Lock implementation: "standard" (ConcurrentUtilities.ReadWriteLock) or "fair" (SimpleFairShardedLock)
+    lock_type::String
 end
 
 """Derived paths from the config."""
@@ -42,6 +51,9 @@ aof_path(cfg::RadishConfig) = joinpath(aof_dir(cfg), cfg.aof_filename)
     load_config(path::String=DEFAULT_CONFIG_PATH) -> RadishConfig
 
 Load configuration from a YAML file. Falls back to defaults if the file is missing.
+Supports the legacy `num_lock_shards` / `num_snapshot_shards` keys for backward
+compatibility — if `num_shards` is not set, falls back to `num_lock_shards`, then
+`num_snapshot_shards`, then the default (256).
 """
 function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
     if isfile(path)
@@ -56,7 +68,12 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
     bg = get(raw, "background_tasks", Dict())
     conc = get(raw, "concurrency", Dict())
     ttl = get(raw, "ttl_cleanup", Dict())
-    dl = get(raw, "data_limits", Dict())
+    cl = get(raw, "client", Dict())
+
+    # Resolve num_shards with backward compatibility
+    num_shards = get(conc, "num_shards",
+                     get(conc, "num_lock_shards",
+                         get(pers, "num_snapshot_shards", 256)))
 
     return RadishConfig(
         # Network
@@ -67,17 +84,21 @@ function load_config(path::String=DEFAULT_CONFIG_PATH)::RadishConfig
         get(pers, "snapshots_subdir", "snapshots"),
         get(pers, "aof_subdir", "aof"),
         get(pers, "aof_filename", "radish.aof"),
-        get(pers, "num_snapshot_shards", 256),
         # Background tasks
         Float64(get(bg, "sync_interval_sec", 5)),
         Float64(get(bg, "cleaner_interval_sec", 0.1)),
-        # Concurrency
-        get(conc, "num_lock_shards", 256),
+        # Concurrency & Sharding
+        num_shards,
         # TTL cleanup
         get(ttl, "sampling_threshold", 100_000),
         Float64(get(ttl, "sample_percentage", 0.10)),
-        # Data limits
-        get(dl, "list_display_limit", 50),
+        # Client defaults
+        get(cl, "pipeline_batch", 1000),
+        get(cl, "pipeline_flush_ms", 5),
+        # AOF sync interval (ms): 0 = every command, N>0 = every N ms
+        get(pers, "aof_sync_ms", 1000),
+        # Lock type: "standard" or "fair"
+        get(conc, "lock_type", "fair"),
     )
 end
 
@@ -87,6 +108,18 @@ const CONFIG = Ref{RadishConfig}()
 function init_config!(path::String=DEFAULT_CONFIG_PATH)
     CONFIG[] = load_config(path)
     cfg = CONFIG[]
-    @info "Radish config loaded" host=cfg.host port=cfg.port shards=cfg.num_lock_shards sync_interval=cfg.sync_interval_sec
+    @info "Radish config loaded" host=cfg.host port=cfg.port shards=cfg.num_shards lock_type=cfg.lock_type sync_interval=cfg.sync_interval_sec
     return cfg
+end
+
+"""Create the configured lock implementation."""
+function create_lock(cfg::RadishConfig)::AbstractShardedLock
+    if cfg.lock_type == "standard"
+        return ShardedLock(cfg.num_shards)
+    elseif cfg.lock_type == "fair"
+        return SimpleFairShardedLock(cfg.num_shards)
+    else
+        @warn "Unknown lock_type '$(cfg.lock_type)', falling back to fair"
+        return SimpleFairShardedLock(cfg.num_shards)
+    end
 end

@@ -6,7 +6,7 @@ nav_order: 9
 
 # Transactions
 
-Radish supports Redis-style transactions using `MULTI`, `EXEC`, and `DISCARD`. Transactions provide **atomicity** — a group of commands executes as a single indivisible unit, with no other client's commands interleaved.
+Radish supports transactions using `MULTI`, `EXEC`, and `DISCARD`. Transactions provide **atomicity** — a group of commands executes as a single indivisible unit, with no other client's commands interleaved.
 
 ---
 
@@ -108,9 +108,10 @@ When `EXEC` is called, the transaction executes in these steps:
 ```mermaid
 sequenceDiagram
     participant Client
-    participant Dispatcher
+    participant Dispatcher as execute!
+    participant Router as route_command
     participant Lock as ShardedLock
-    participant Context as RadishContext
+    participant Context as RadishStore
 
     Client->>Dispatcher: EXEC
     Dispatcher->>Dispatcher: Extract all keys from queued commands
@@ -118,8 +119,10 @@ sequenceDiagram
     Dispatcher->>Lock: Acquire write locks (sorted order)
     
     loop For each queued command
-        Dispatcher->>Context: Execute without re-locking
-        Context-->>Dispatcher: Result
+        Dispatcher->>Router: route_command(ctx, cmd)
+        Router->>Context: Execute via hypercommand
+        Context-->>Router: Result
+        Router-->>Dispatcher: ExecuteResult
     end
     
     Dispatcher->>Lock: Release all locks (reverse order)
@@ -148,12 +151,12 @@ end
 
 ### No Rollback
 
-Like Redis, Radish transactions have **no rollback**. If one command in the transaction fails (e.g., type mismatch), the other commands still execute. The error is included in the result array.
+Like most in-memory databases, Radish transactions have **no rollback**. If one command in the transaction fails (e.g., type mismatch), the other commands still execute. The error is included in the result array.
 
 This is a deliberate design choice:
 - Commands typically only fail due to **programming errors** (wrong type, wrong arguments), not runtime conditions
 - Rollback would add significant complexity with little practical benefit
-- Redis doesn't support rollback either, and it works well in practice
+- This is the standard approach in production in-memory databases and it works well in practice
 
 ---
 
@@ -170,6 +173,6 @@ This is a deliberate design choice:
 
 ## Limitations
 
-- **No WATCH/UNWATCH** — Redis's optimistic locking is not yet implemented
+- **No WATCH/UNWATCH** — optimistic locking for check-and-set patterns is not available
 - **Write locks for everything** — even read operations within a transaction acquire write locks (simpler but more restrictive)
 - **No partial rollback** — if a command fails, there's no undo

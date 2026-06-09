@@ -27,19 +27,18 @@ Radish deliberately keeps its dependency footprint small — most of the heavy l
 | **Sockets** | stdlib | TCP server and client — `listen()`, `accept()`, `connect()` for all network I/O |
 | **Logging** | stdlib | Structured `@info`, `@warn`, `@debug` logging throughout the server |
 | **JSON3** | external | Serialization of snapshot data to sharded `.rdb` files (one JSON object per key) |
-| **StatsBase** | external | `sample()` function used by the background TTL cleaner to randomly sample keys for expiration checks |
-| **ConcurrentUtilities** | external | Provides `ReadWriteLock` — the foundation of the [sharded locking](concurrency) system |
+| **ConcurrentUtilities** | external | Provides `ReadWriteLock` — used by the standard lock option. The fair lock (default) has no external dependencies. |
 | **YAML** | external | Parses the [`radish.yml`](configuration) configuration file at startup |
 | **JuliaFormatter** | dev only | Code formatting for development — not used at runtime |
 
 {: .note }
-> Only 4 external packages are used at runtime. Everything else — the data structures, the RESP protocol, the dispatcher, persistence — is built from scratch.
+> Only 3 external packages are used at runtime. Everything else — the data structures, the RESP protocol, the dispatcher, persistence — is built from scratch.
 
 
 ---
 ## Why Build an In-Memory Database?
 
-At the beginning of this journey I was fascinated by Redis and its story (mainly driven by the author!); I was eager to revisit some computer science concepts I never deeply studied and I thought that building a Redis inspired database could satisfy my curiosity.
+At the beginning of this journey I was fascinated by the concept of in-memory databases and their elegance; I was eager to revisit some computer science concepts I never deeply studied and I thought that building one from scratch could satisfy my curiosity.
 
 In particular, I wanted to deeply understand:
 
@@ -80,46 +79,57 @@ Eventually, Julia turned out to be an interesting choice for a project like this
 
 | Feature | Status | Description |
 |---------|--------|-------------|
-| [String Operations](data-structures) | ✅ | GET, SET, INCR, APPEND, LCS, padding, and more |
-| [Linked Lists](data-structures) | ✅ | Custom doubly-linked list with O(1) push/pop |
-| [RESP Protocol](resp-protocol) | ✅ | Redis Serialization Protocol for wire communication |
+| [String Operations](strings) | ✅ | GET, SET, UPSERT, INCR, APPEND, LCS, padding, and more |
+| [Linked Lists](linked-lists) | ✅ | Custom doubly-linked list with O(1) push/pop |
+| [Sets](sets) | ✅ | Unordered collections with add, delete, random pop |
+| [RESP Protocol](resp-protocol) | ✅ | RESP wire protocol for client-server communication |
 | [Persistence](persistence) | ✅ | Sharded RDB snapshots + AOF with crash recovery |
 | [Transactions](transactions) | ✅ | MULTI/EXEC/DISCARD with atomic execution |
 | [Configuration](configuration) | ✅ | YAML-based config for all tunable parameters |
-| [Sharded Locking](concurrency) | ✅ | Configurable ReadWriteLocks for concurrent access |
+| [Sharded Locking](concurrency) | ✅ | Configurable lock: standard or fair (write-preferring, starvation-free) |
 | [TTL & Expiry](concurrency) | ✅ | Background cleaner with probabilistic sampling |
 | [Docker Support](docker) | ✅ | Full Docker Compose setup with health checks |
 | Key Management | ✅ | EXISTS, DEL, TYPE, TTL, PERSIST, EXPIRE, RENAME, FLUSHDB |
+| Pipelining | ✅ | Server-side batch execution with combined locking |
+| [Python Client](client_implementation_guide) | ✅ | RadishPy — full client library with pipelining |
 
-More data structures are coming at some point, I had the feeling that resolving other issues was more valuable than adding overstudied data-types. Still I think that implementing those from scratch is quite fun.
+More data structures are coming at some point (hashes, sorted sets). The existing three types already cover the most common use cases — and implementing each one from scratch is quite fun.
 
 
 ---
 
 ## A quick look at the Architecture
 
-At its core, Radish stores everything in a single dictionary:
+At its core, Radish uses a **typed store** — one fully-typed dictionary per data type, unified behind a `RadishStore` with a global key index:
 
 ```julia
-RadishContext = Dict{String, RadishElement}
+mutable struct RadishStore
+    strings::Dict{String, RadishElement{String}}
+    lists::Dict{String, RadishElement{DLinkedStartEnd{String}}}
+    sets::Dict{String, RadishElement{Set{String}}}
+    keytype::Dict{String, Symbol}   # global key → type index
+end
 ```
 
-Every value is wrapped in a `RadishElement` that carries metadata:
+Every value is wrapped in a parametric `RadishElement{T}` that carries metadata:
 
 ```mermaid
 classDiagram
-    class RadishContext {
-        Dict~String, RadishElement~
+    class RadishStore {
+        +strings: Dict~String, RadishElement~String~~
+        +lists: Dict~String, RadishElement~DLinkedStartEnd~~
+        +sets: Dict~String, RadishElement~Set~String~~~
+        +keytype: Dict~String, Symbol~
     }
 
-    class RadishElement {
-        +Any value -> Real value 
-        +Union~Int128, Nothing~ ttl
+    class RadishElement~T~ {
+        +T value
+        +Union~Int, Nothing~ ttl
         +DateTime tinit
         +Symbol datatype
     }
 
-    RadishContext *-- RadishElement : contains
+    RadishStore *-- RadishElement : contains (typed dicts)
 ```
 
 Commands flow through a **delegation pattern** with two layers:

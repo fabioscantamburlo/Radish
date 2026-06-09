@@ -1,5 +1,5 @@
 title: "Radish"
-description: "A didactical in-memory database inspired by Redis, built entirely in Julia"
+description: "A didactical in-memory database built entirely in Julia"
 baseurl: "/Radish"
 url: ""
 

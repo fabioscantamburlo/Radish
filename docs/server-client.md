@@ -22,7 +22,7 @@ When you run `julia server_runner.jl`, the server initializes in this order:
 graph TD
     subgraph Init
         direction LR
-        Z["Load radish.yml"] --> A["Create directories"] --> B["RadishContext"] --> C["ShardedLock"] --> D["DirtyTracker"]
+        Z["Load radish.yml"] --> A["Create directories"] --> B["RadishStore"] --> C["ShardedLock"] --> D["DirtyTracker"]
     end
 
     subgraph Recovery
@@ -40,13 +40,13 @@ graph TD
 
 ### Per-Client Handling
 
-Each client gets its own `@async` task:
+Each client gets its own `Threads.@spawn` task (on a separate OS thread):
 
 ```julia
 while true
     client = accept(server)
     client_counter += 1
-    @async handle_client(client, ctx, db_lock, tracker, aof, client_counter)
+    @spawn handle_client(client, store, db_lock, tracker, aof, client_counter)
 end
 ```
 
@@ -55,26 +55,10 @@ The `handle_client` function:
 1. **Sends a welcome message** — `+Welcome to Radish Server\r\n`
 2. **Creates a `ClientSession`** — tracks transaction state per client
 3. **Enters the read loop** — reads RESP commands, dispatches, writes responses
-4. **Handles disconnection** — `EOFError`, broken pipes, `QUIT`/`EXIT` commands
+4. **Detects pipelining** — if multiple commands are buffered, uses batch execution with combined locking
+5. **Handles disconnection** — `EOFError`, broken pipes, `QUIT`/`EXIT` commands
 
-```julia
-function handle_client(sock, ctx, db_lock, tracker, aof, client_id)
-    write(sock, "+Welcome to Radish Server\r\n")
-    session = ClientSession()
-
-    while isopen(sock)
-        cmd = read_resp_command(sock)
-        result = execute!(ctx, db_lock, cmd, session; tracker=tracker)
-
-        # Log to AOF (write commands only)
-        if should_log_to_aof(cmd)
-            aof_append!(aof, cmd)
-        end
-
-        write_resp_response(sock, result)
-    end
-end
-```
+AOF writes happen inside the lock critical section (inside `execute!` and `execute_batch!`), guaranteeing that AOF order matches execution order.
 
 ### Connection Resilience
 
@@ -89,25 +73,28 @@ The server gracefully handles common disconnection scenarios:
 
 ### Graceful Shutdown
 
-On `Ctrl+C` (InterruptException), the server:
+On `Ctrl+C` (InterruptException) or SIGTERM (Docker stop), the server:
 
-1. **Saves a full snapshot** — captures all current state to RDB
-2. **Deletes the AOF** — unnecessary since snapshot is complete
-3. **Closes the TCP server** — stops accepting new connections
-4. **Prints goodbye** — `Radish server stopped. Goodbye!`
+1. **Closes the listening socket** — stops accepting new connections
+2. **Signals background tasks** to stop via an atomic SHUTDOWN flag
+3. **Waits for background tasks** to finish their current cycle
+4. **Acquires all write locks** — blocks until all client handlers release
+5. **Saves a full snapshot** under exclusive lock — no concurrent access
+6. **Deletes the AOF** — snapshot is complete
+7. **Prints goodbye** — `Radish server stopped. Goodbye!`
 
 ---
 
 ## Client Architecture
 
-### Interactive REPL
+### Interactive CLI
 
-The client provides a command-line interface with an interactive read-eval-print loop:
+The client provides a command-line interface with interactive line editing, built using raw terminal mode:
 
 ```
 🌱 Connecting to Radish server at 127.0.0.1:9000...
 ✅ Welcome to Radish Server
-Type 'HELP' for commands or 'QUIT' to disconnect
+Type 'HELP' for commands, Tab to complete, or 'QUIT' to disconnect
 
 RADISH-CLI> S_SET greeting hello
 OK
@@ -116,6 +103,14 @@ RADISH-CLI> S_GET greeting
 RADISH-CLI>
 ```
 
+Features:
+- Tab completion for all command names (type `S_` then Tab to see string commands)
+- Command history with up/down arrows (skips consecutive duplicates)
+- Left/right arrow cursor movement, Home/End keys
+- Backspace and Delete at any cursor position
+- Ctrl+L or `CLEAR` command to clear the screen
+- Ctrl+C for clean disconnect
+
 ### Client-Side vs Server-Side Commands
 
 Not all commands hit the server:
@@ -123,6 +118,7 @@ Not all commands hit the server:
 | Command | Handled By | Behavior |
 |---|---|---|
 | `HELP` | Client | Displays the full command reference locally |
+| `CLEAR` | Client | Clears the terminal screen |
 | `QUIT` / `EXIT` | Both | Sent to server, then client disconnects |
 | Everything else | Server | Encoded as RESP, sent over TCP |
 
@@ -146,22 +142,23 @@ sequenceDiagram
 
 ### Connection Management
 
-The client uses simple but robust connection handling:
+The client uses raw terminal mode (`stty`) for character-at-a-time input, enabling arrow keys, tab completion, and history. Terminal mode is always restored in a `finally` block, even on crashes:
 
 ```julia
 function start_client(host="127.0.0.1", port=9000)
     sock = connect(host, port)
-
-    # Read welcome
     welcome = readline(sock)
+    history = String[]
 
-    # REPL loop
-    while isopen(sock)
-        print("RADISH-CLI> ")
-        line = readline()
-        write_resp_command(sock, line)
-        response = read_resp_response(sock)
-        println(response)
+    enable_raw_mode()
+    try
+        while isopen(sock)
+            line = read_line_interactive("RADISH-CLI> ", history)
+            # ... handle local commands, send to server, display response
+        end
+    finally
+        disable_raw_mode()
+        close(sock)
     end
 end
 ```
@@ -185,7 +182,7 @@ julia client_runner.jl
 julia client_runner.jl
 ```
 
-All clients share the same `RadishContext`. The [sharded locking](concurrency) system ensures safe concurrent access. Each client has an independent `ClientSession`, so one client's transaction doesn't affect another.
+All clients share the same `RadishStore`. The [sharded locking](concurrency) system ensures safe concurrent access. Each client has an independent `ClientSession`, so one client's transaction doesn't affect another.
 
 ---
 
