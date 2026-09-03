@@ -5,6 +5,8 @@ RESULTS_DIR  = benchmarks/results
 RUNNER       = $(DC) --profile runner run --rm --build radish-runner
 JULIA_NATIVE = julia --project=.
 THREADS      ?= 4
+SHOWCASE_HOST ?= 0.0.0.0
+SHOWCASE_PORT ?= 4173
 
 rebuild:            ## Force rebuild (no cache)
 	$(DC) build --no-cache
@@ -220,6 +222,17 @@ docs-logs:          ## Tail docs logs
 	$(DC) logs -f radish-docs
 
 # =============================================================================
+#  Project Showcase
+# =============================================================================
+
+run:                ## Start project showcase (http://localhost:4173/showcase/)
+	@printf "\n  Radish showcase\n"
+	@printf "  Local:   http://localhost:$(SHOWCASE_PORT)/showcase/\n"
+	@printf "  Network: http://<this-machine-ip>:$(SHOWCASE_PORT)/showcase/\n"
+	@printf "  Stop with Ctrl+C. Override with SHOWCASE_PORT=<port>.\n\n"
+	@python3 -m http.server $(SHOWCASE_PORT) --bind $(SHOWCASE_HOST) --directory .
+
+# =============================================================================
 #  Teardown & Utilities
 # =============================================================================
 
@@ -301,6 +314,10 @@ help:
 	@printf "  \033[36mdocs-bg\033[0m                Start docs server in background\n"
 	@printf "  \033[36mdocs-stop\033[0m              Stop docs server\n"
 	@printf "\n"
+	@printf "  \033[1m── Project Showcase ────────────────────────────────────────────────\033[0m\n"
+	@printf "  \033[36mrun\033[0m                    Start showcase (http://localhost:4173/showcase/)\n"
+	@printf "                         \033[2mOverride port: make run SHOWCASE_PORT=8080\033[0m\n"
+	@printf "\n"
 	@printf "  \033[1m── Teardown & Utilities ────────────────────────────────────────────\033[0m\n"
 	@printf "  \033[36mrebuild\033[0m                Force rebuild (no cache)\n"
 	@printf "  \033[36mdown\033[0m                   Stop and remove all containers\n"
@@ -326,5 +343,5 @@ help:
         bench bench-system bench-hotkey bench-read-scaling bench-all \
         docker-bench-all \
         bench-diff \
-        docs docs-bg docs-stop docs-logs \
+        docs docs-bg docs-stop docs-logs run \
         down clean ps logs storage help
