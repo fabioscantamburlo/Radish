@@ -1,0 +1,359 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <meta name="description" content="Radish is a Redis-inspired in-memory database built from scratch in Julia.">
+  <title>Radish — An in-memory database, built to understand the hard parts</title>
+  <link rel="icon" href="../docs/assets/favicon.ico">
+  <link rel="stylesheet" href="styles.css">
+  <script src="app.js" defer></script>
+</head>
+<body>
+  <a class="skip-link" href="#main">Skip to content</a>
+  <div class="reading-progress" aria-hidden="true"><span></span></div>
+
+  <header class="site-header">
+    <a class="brand" href="#top" aria-label="Radish home">
+      <span class="brand-mark" aria-hidden="true">R/</span>
+      <span>RADISH</span>
+    </a>
+    <button class="menu-toggle" type="button" aria-expanded="false" aria-controls="site-nav">
+      <span></span><span></span><span></span>
+      <span class="sr-only">Open navigation</span>
+    </button>
+    <nav id="site-nav" class="site-nav" aria-label="Primary navigation">
+      <a href="#idea">The idea</a>
+      <a href="#architecture">Architecture</a>
+      <a href="#performance">Performance</a>
+      <a href="#interview">Interview kit</a>
+    </nav>
+    <a class="header-link" href="https://github.com/fabioscantamburlo/Radish" target="_blank" rel="noreferrer">View source <span aria-hidden="true">↗</span></a>
+  </header>
+
+  <main id="main">
+    <section class="hero" id="top" aria-labelledby="hero-title">
+      <div class="hero-grid">
+        <div class="hero-copy">
+          <p class="eyebrow"><span></span> A systems project in Julia</p>
+          <h1 id="hero-title">An in-memory database,<br><em>built to understand</em><br>the hard parts.</h1>
+          <p class="hero-intro">Radish is a Redis-inspired server built from first principles: its own wire protocol, typed storage engine, concurrent command dispatcher, transactional locking, TTL cleanup, and crash recovery.</p>
+          <div class="hero-actions">
+            <a class="button button-primary" href="#architecture">Explore the system <span aria-hidden="true">↓</span></a>
+            <a class="text-link" href="https://fabioscantamburlo.github.io/Radish/" target="_blank" rel="noreferrer">Read the full docs <span aria-hidden="true">↗</span></a>
+          </div>
+        </div>
+
+        <div class="hero-visual" aria-label="Radish project illustration and terminal example">
+          <div class="hero-image-wrap">
+            <img src="../docs/assets/radish_image.jpeg" alt="Radish project illustration" width="1024" height="1024">
+            <div class="image-caption">01 / UNDER THE HOOD</div>
+          </div>
+          <div class="terminal-card" aria-label="Example Radish commands">
+            <div class="terminal-top"><span></span><span></span><span></span><b>radish:9000</b></div>
+            <pre><code><span class="prompt">›</span> S_SET counter 41 60
+<span class="ok">:1</span>
+<span class="prompt">›</span> MULTI
+<span class="ok">+OK</span>
+<span class="prompt">›</span> S_INCR counter
+<span class="muted">+QUEUED</span>
+<span class="prompt">›</span> EXEC
+<span class="ok">*1  :1</span></code></pre>
+          </div>
+        </div>
+      </div>
+
+      <div class="fact-strip" aria-label="Project facts">
+        <div><strong>51</strong><span>server commands</span></div>
+        <div><strong>256</strong><span>lock shards by default</span></div>
+        <div><strong>3</strong><span>runtime packages</span></div>
+        <div><strong>43–51k</strong><span>pipelined ops/s*</span></div>
+      </div>
+      <p class="metric-note">* Native TCP, one client, batch sizes 100–500. A project benchmark—not a production claim.</p>
+    </section>
+
+    <section class="section section-idea" id="idea" aria-labelledby="idea-title">
+      <div class="section-heading">
+        <p class="section-index">01 — THE IDEA</p>
+        <h2 id="idea-title">The point was never to out-Redis Redis.</h2>
+      </div>
+      <div class="idea-grid">
+        <p class="lead">The point was to turn invisible infrastructure into decisions you can inspect, benchmark, break, and improve.</p>
+        <div class="body-copy">
+          <p>Radish began as a learning exercise and grew into a compact database system. Instead of wrapping an existing engine, it implements the full path from a TCP byte to a durable mutation.</p>
+          <p>That scope creates the interesting questions: How do you keep the hot path type-stable? How do multi-key operations avoid deadlock? How can snapshots avoid stopping every writer? What does pipelining reveal about the real bottleneck?</p>
+        </div>
+      </div>
+
+      <div class="principles-grid">
+        <article>
+          <span class="principle-number">A</span>
+          <h3>Build the mechanism</h3>
+          <p>RESP parsing, linked lists, dispatch, locking, persistence, and the client are implemented in the project—not abstracted away.</p>
+        </article>
+        <article>
+          <span class="principle-number">B</span>
+          <h3>Measure the boundary</h3>
+          <p>Benchmarks separate raw data structures, full command dispatch, and TCP transport so optimization starts at the actual bottleneck.</p>
+        </article>
+        <article>
+          <span class="principle-number">C</span>
+          <h3>Name the trade-off</h3>
+          <p>The documentation is explicit about limitations: single-node scope, no rollback, network overhead, and scaling behavior under contention.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section architecture-section" id="architecture" aria-labelledby="architecture-title">
+      <div class="section-heading heading-split">
+        <div>
+          <p class="section-index">02 — ARCHITECTURE</p>
+          <h2 id="architecture-title">Follow one command.</h2>
+        </div>
+        <p>Every request travels through an explicit, inspectable path. Select a stage to see the decision it owns.</p>
+      </div>
+
+      <div class="command-flow" data-flow>
+        <div class="flow-rail" role="tablist" aria-label="Command lifecycle">
+          <button class="flow-step is-active" type="button" role="tab" aria-selected="true" data-step="0">
+            <span>01</span><b>RESP reader</b><small>bytes → command</small>
+          </button>
+          <button class="flow-step" type="button" role="tab" aria-selected="false" data-step="1">
+            <span>02</span><b>Dispatcher</b><small>command → lock plan</small>
+          </button>
+          <button class="flow-step" type="button" role="tab" aria-selected="false" data-step="2">
+            <span>03</span><b>Shard locks</b><small>keys → safe access</small>
+          </button>
+          <button class="flow-step" type="button" role="tab" aria-selected="false" data-step="3">
+            <span>04</span><b>Hypercommand</b><small>policy → delegation</small>
+          </button>
+          <button class="flow-step" type="button" role="tab" aria-selected="false" data-step="4">
+            <span>05</span><b>Typed store</b><small>operation → result</small>
+          </button>
+        </div>
+        <div class="flow-detail" role="tabpanel" aria-live="polite">
+          <div class="flow-detail-top">
+            <span class="flow-kicker" data-flow-kicker>RESP READER / 01</span>
+            <code data-flow-code>*3\r\n$5\r\nS_SET…</code>
+          </div>
+          <h3 data-flow-title>Parse the wire without losing the stream.</h3>
+          <p data-flow-copy>A buffered stateful reader decodes RESP frames from TCP, preserves incomplete data across reads, and detects queued commands for the batch path.</p>
+          <ul data-flow-points>
+            <li>Incremental socket reads</li>
+            <li>Protocol errors become structured responses</li>
+            <li>Buffered input unlocks pipelining</li>
+          </ul>
+        </div>
+      </div>
+
+      <div class="decision-lab">
+        <div class="lab-copy">
+          <p class="section-index">DESIGN DECISIONS</p>
+          <h3>Small abstractions, sharp responsibilities.</h3>
+          <p>The architecture uses a few reusable mechanisms instead of putting every concern into each command implementation.</p>
+          <div class="tab-list" role="tablist" aria-label="Architecture decisions">
+            <button class="decision-tab is-active" type="button" role="tab" aria-selected="true" data-decision="typed">Typed storage</button>
+            <button class="decision-tab" type="button" role="tab" aria-selected="false" data-decision="locks">Fair locking</button>
+            <button class="decision-tab" type="button" role="tab" aria-selected="false" data-decision="persistence">Persistence</button>
+          </div>
+        </div>
+        <div class="code-window" data-decision-panel>
+          <div class="code-window-bar"><span>store.jl</span><span>•••</span></div>
+          <pre><code data-decision-code><span class="kw">mutable struct</span> <span class="type">RadishStore</span>
+  strings::<span class="type">Dict</span>{String, RadishElement{String}}
+  lists::<span class="type">Dict</span>{String, RadishElement{DLinkedList}}
+  sets::<span class="type">Dict</span>{String, RadishElement{Set{String}}}
+  keytype::<span class="type">Dict</span>{String, Symbol}
+<span class="kw">end</span></code></pre>
+          <div class="code-explanation">
+            <strong data-decision-title>Concrete types on the hot path</strong>
+            <p data-decision-copy>Each data type has its own dictionary while one global index enforces one-key-one-type semantics. Julia can specialize operations without boxing values behind <code>Any</code>.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section concurrency-section" id="concurrency" aria-labelledby="concurrency-title">
+      <div class="section-heading heading-split">
+        <div>
+          <p class="section-index">03 — CONCURRENCY</p>
+          <h2 id="concurrency-title">Parallel where it can be.<br>Ordered where it must be.</h2>
+        </div>
+        <p>Radish deliberately chose a multithreaded design, making synchronization—not avoiding synchronization—part of the learning surface.</p>
+      </div>
+
+      <div class="shard-demo" aria-label="Sharded locking illustration">
+        <div class="shard-sidebar">
+          <span>KEYSPACE</span>
+          <div class="key-chip is-read"><i></i><code>user:17</code><small>READ</small></div>
+          <div class="key-chip is-write"><i></i><code>cart:8</code><small>WRITE</small></div>
+          <div class="key-chip is-read"><i></i><code>queue:jobs</code><small>READ</small></div>
+          <div class="key-chip is-write"><i></i><code>counter</code><small>WRITE</small></div>
+        </div>
+        <div class="shard-map">
+          <div class="shard-map-head"><span>HASH(KEY) % 256</span><span>4 ACTIVE / 256</span></div>
+          <div class="shards">
+            <div class="shard read"><span>017</span><b>R</b><b>R</b><em>concurrent readers</em></div>
+            <div class="shard write"><span>064</span><b>W</b><em>exclusive writer</em></div>
+            <div class="shard read"><span>109</span><b>R</b><em>independent work</em></div>
+            <div class="shard write"><span>211</span><b>W</b><em>independent work</em></div>
+          </div>
+          <div class="lock-notes">
+            <p><span>Deadlock avoidance</span> Multi-key commands acquire unique shard IDs in sorted order and release them in reverse.</p>
+            <p><span>Writer fairness</span> Once a writer waits, new readers park—preventing a hot read stream from starving mutations.</p>
+          </div>
+        </div>
+      </div>
+    </section>
+
+    <section class="section persistence-section" id="persistence" aria-labelledby="persistence-title">
+      <div class="section-heading">
+        <p class="section-index">04 — DURABILITY</p>
+        <h2 id="persistence-title">Save what changed.<br>Replay what was not saved.</h2>
+      </div>
+
+      <div class="persistence-grid">
+        <div class="persistence-story">
+          <div class="story-step"><span>01</span><div><h3>Record</h3><p>Every successful mutation is appended while its shard lock is held, preserving execution order in the AOF.</p></div></div>
+          <div class="story-step"><span>02</span><div><h3>Swap</h3><p>The dirty tracker swaps its modified/deleted maps in O(1), letting writers continue on fresh maps.</p></div></div>
+          <div class="story-step"><span>03</span><div><h3>Snapshot</h3><p>Only affected shard files are rewritten under read locks, then the covered AOF is truncated.</p></div></div>
+          <div class="story-step"><span>04</span><div><h3>Recover</h3><p>Startup loads sharded snapshots first, then replays the remaining append-only log.</p></div></div>
+        </div>
+        <div class="amplification-card">
+          <p class="card-label">A SIMPLE BUT IMPORTANT SHIFT</p>
+          <div class="comparison">
+            <div class="comparison-old"><span>FULL SNAPSHOT</span><strong>1,000,000</strong><small>keys rewritten</small></div>
+            <div class="comparison-arrow">→</div>
+            <div class="comparison-new"><span>DIRTY SHARDS</span><strong>3 / 256</strong><small>shards rewritten*</small></div>
+          </div>
+          <p>*Illustrative case from the design docs: 50 changed keys distributed across three shards.</p>
+        </div>
+      </div>
+    </section>
+
+    <section class="section performance-section" id="performance" aria-labelledby="performance-title">
+      <div class="section-heading heading-split">
+        <div>
+          <p class="section-index">05 — PERFORMANCE</p>
+          <h2 id="performance-title">The benchmark became a map.</h2>
+        </div>
+        <p>Layered measurements separate CPU work from dispatch overhead and transport cost. The gap is the finding.</p>
+      </div>
+
+      <div class="performance-chart" data-bars>
+        <div class="perf-row">
+          <div class="perf-label"><span>RAW ENGINE</span><small>typed operation</small></div>
+          <div class="perf-track"><div class="perf-fill" style="--bar:100%"><strong>42M ops/s</strong></div></div>
+        </div>
+        <div class="perf-row">
+          <div class="perf-label"><span>FULL DISPATCH</span><small>routing + locks + clock</small></div>
+          <div class="perf-track"><div class="perf-fill" style="--bar:66%"><strong>2.8M ops/s</strong></div></div>
+        </div>
+        <div class="perf-row">
+          <div class="perf-label"><span>TCP / PIPELINED</span><small>RESP + scheduler + Docker</small></div>
+          <div class="perf-track"><div class="perf-fill accent" style="--bar:38%"><strong>~60k ops/s</strong></div></div>
+        </div>
+        <div class="perf-row">
+          <div class="perf-label"><span>TCP / SINGLE</span><small>round-trip bound</small></div>
+          <div class="perf-track"><div class="perf-fill pale" style="--bar:20%"><strong>~4k ops/s</strong></div></div>
+        </div>
+      </div>
+      <p class="chart-note">Bar lengths use a presentation scale so all layers remain visible; labels show measured order of magnitude from the repository’s optimization notes.</p>
+
+      <div class="learning-cards">
+        <article>
+          <span class="delta">8.4×</span>
+          <h3>Faster mutation hot path</h3>
+          <p>Parametric elements and typed dictionaries moved a representative modify + increment path from 556 ns to 66 ns.</p>
+        </article>
+        <article>
+          <span class="delta">6.8×</span>
+          <h3>Faster TTL read path</h3>
+          <p>Precomputing expiry and sharing one timestamp per dispatch removed repeat date arithmetic from the read path.</p>
+        </article>
+        <article>
+          <span class="delta">2–7×</span>
+          <h3>More useful TCP throughput</h3>
+          <p>Batch locking, one shared timestamp, batched AOF work, and a single response write amortize per-command overhead.</p>
+        </article>
+      </div>
+    </section>
+
+    <section class="section honesty-section" id="tradeoffs" aria-labelledby="tradeoffs-title">
+      <div class="section-heading heading-split">
+        <div>
+          <p class="section-index">06 — ENGINEERING JUDGMENT</p>
+          <h2 id="tradeoffs-title">A good project knows its edges.</h2>
+        </div>
+        <p>These are useful interview conversations, not footnotes to hide.</p>
+      </div>
+      <div class="tradeoff-list">
+        <article><span>01</span><div><h3>Single node by design</h3><p>There is no replication, partitioning, or cluster consensus. Radish goes deep on one process instead of pretending to be distributed.</p></div><b>Scope choice</b></article>
+        <article><span>02</span><div><h3>Atomic execution, not rollback</h3><p>Transactions lock every involved shard before executing. If a queued command fails, later commands still run; there is no undo log.</p></div><b>Known semantic gap</b></article>
+        <article><span>03</span><div><h3>Transport is now the ceiling</h3><p>In-process execution scales well, but task-per-client networking degrades with many clients. Profiling points toward an evented or sharded I/O layer.</p></div><b>Next architecture</b></article>
+        <article><span>04</span><div><h3>Didactical, not production-safe</h3><p>The system is designed for learning and experimentation. It favors legibility and explicit mechanisms over production completeness.</p></div><b>Intentional positioning</b></article>
+      </div>
+    </section>
+
+    <section class="section interview-section" id="interview" aria-labelledby="interview-title">
+      <div class="interview-top">
+        <div class="section-heading">
+          <p class="section-index">07 — INTERVIEW KIT</p>
+          <h2 id="interview-title">Tell the story,<br>not the feature list.</h2>
+        </div>
+        <p>Start with motivation, zoom into one difficult decision, show what measurement changed, and finish with the limit you would tackle next.</p>
+      </div>
+
+      <div class="pitch-card">
+        <div class="pitch-card-head">
+          <div><span>YOUR 90-SECOND VERSION</span><small>~170 words</small></div>
+          <button class="copy-button" type="button" data-copy-pitch><span>Copy pitch</span><i aria-hidden="true">⌘C</i></button>
+        </div>
+        <blockquote id="pitch-text">“Radish is a Redis-inspired in-memory database I built in Julia to understand the systems work hidden behind a simple GET or SET. I implemented the protocol, storage types, command routing, concurrency, transactions, expiration, and persistence from scratch. The core design uses a typed dictionary per data type, with generic hypercommands handling shared policy like TTL and key semantics before delegating to small type-specific operations. For concurrency, keys hash across 256 read/write lock shards; multi-key operations acquire shards in a stable order, and a custom write-preferring lock prevents starvation. Persistence combines an append-only log with dirty-shard snapshots, so background sync work scales with what changed rather than the whole database. The most valuable result was discovering that the data engine was not the limiting factor: layered benchmarks reached millions of operations per second in process, while TCP throughput was dominated by parsing, scheduling, and writes. That led me to add pipelined batch execution. It is intentionally a learning database, not a production Redis replacement—and the next problem I would explore is the multi-client I/O architecture.”</blockquote>
+      </div>
+
+      <div class="question-grid">
+        <details open>
+          <summary><span>Why Julia?</span><i></i></summary>
+          <p>It made the type-specialized store and multiple-dispatch command design natural, while its task model gave you real concurrency questions to solve. It was also unfamiliar—which made the project a genuine learning exercise.</p>
+        </details>
+        <details>
+          <summary><span>What was the hardest invariant?</span><i></i></summary>
+          <p>Keeping store state, the global key-type index, dirty tracking, and AOF order consistent under concurrent commands. The clean answer is to place logging and mutation inside the same ordered shard-lock scope.</p>
+        </details>
+        <details>
+          <summary><span>How do you prevent deadlocks?</span><i></i></summary>
+          <p>Map all keys to shard IDs, remove duplicates, acquire them in ascending order, then release in reverse. Transactions use the same idea across their full queued command set.</p>
+        </details>
+        <details>
+          <summary><span>What did benchmarking change?</span><i></i></summary>
+          <p>It showed that optimizing nanoseconds inside the engine would not fix a throughput ceiling in the network path. That evidence justified pipelining and combined batch locking instead.</p>
+        </details>
+        <details>
+          <summary><span>What would you build next?</span><i></i></summary>
+          <p>Profile and redesign multi-client I/O—likely evented socket ownership or sharded connection loops—before adding more commands. The existing measurements say transport is the highest-leverage boundary.</p>
+        </details>
+        <details>
+          <summary><span>How would you productionize it?</span><i></i></summary>
+          <p>Add stronger crash-consistency guarantees, binary-safe AOF encoding, fuzz and fault-injection testing, observability, resource limits, replication, and an explicit compatibility contract.</p>
+        </details>
+      </div>
+    </section>
+
+    <section class="closing">
+      <p class="section-index">READY TO GO DEEPER?</p>
+      <h2>Read the code.<br>Challenge a decision.</h2>
+      <div class="closing-links">
+        <a class="button button-light" href="https://github.com/fabioscantamburlo/Radish" target="_blank" rel="noreferrer">GitHub repository <span aria-hidden="true">↗</span></a>
+        <a class="text-link light" href="https://fabioscantamburlo.github.io/Radish/" target="_blank" rel="noreferrer">Technical documentation <span aria-hidden="true">↗</span></a>
+      </div>
+    </section>
+  </main>
+
+  <footer>
+    <a class="brand footer-brand" href="#top"><span class="brand-mark">R/</span><span>RADISH</span></a>
+    <p>A didactical in-memory database by Fabio Scantamburlo.</p>
+    <a href="#top">Back to top ↑</a>
+  </footer>
+</body>
+</html>
